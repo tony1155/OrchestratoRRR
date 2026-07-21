@@ -46,6 +46,8 @@ def test_starrail_arguments_not_list_gives_error() -> None:
     cfg = StarRailConfig(
         executable="C:\\python.exe",
         working_directory="C:\\srp",
+        arguments=("gui.py",),
+        log_path_template="log\\{date}_src.txt",
     )
     errs = cfg.validate()
     assert ErrorCode.CONFIG_SCHEMA_ERROR not in errs
@@ -82,6 +84,8 @@ def test_default_app_config_is_valid() -> None:
         starrail=StarRailConfig(
             executable="C:\\python.exe",
             working_directory="C:\\srp",
+            arguments=("gui.py", "--run", "src"),
+            log_path_template="log\\{date}_src.txt",
         ),
         maa=MAAConfig(
             executable="C:\\maa.exe",

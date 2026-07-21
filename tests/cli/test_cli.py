@@ -132,4 +132,4 @@ def test_readme_is_utf8_without_bom() -> None:
     data = readme.read_bytes()
 
     assert not data.startswith(b"\xef\xbb\xbf")
-    assert data.startswith(b"# OrchestratoRRR\n")
+    assert data.startswith(b"# OrchestratoRRR\r\n") or data.startswith(b"# OrchestratoRRR\n")

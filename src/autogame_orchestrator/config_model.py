@@ -118,6 +118,18 @@ class StarRailConfig:
     executable: str = ""
     working_directory: str = ""
     arguments: tuple[str, ...] = ()
+    log_path_template: str = ""
+    success_keywords: tuple[str, ...] = (
+        "No task pending",
+        "for task `Restart`",
+    )
+    failure_keywords: tuple[str, ...] = (
+        "ScriptError:",
+        "Request human takeover",
+        "Retry screenshot() failed",
+        "NemuIpcError",
+    )
+    environment_overrides: tuple[tuple[str, str], ...] = (("PYTHONIOENCODING", "utf-8"),)
     task_timeout_seconds: int = 3600
     stop_timeout_seconds: int = 10
 
@@ -125,7 +137,31 @@ class StarRailConfig:
         errors: list[ErrorCode] = []
         errors.extend(_validate_non_empty_str(self.executable, "executable"))
         errors.extend(_validate_non_empty_str(self.working_directory, "working_directory"))
-        errors.extend(_validate_str_list(list(self.arguments), "arguments"))
+        if not self.arguments:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        for _i, arg in enumerate(self.arguments):
+            if not isinstance(arg, str) or not arg.strip():
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        errors.extend(_validate_non_empty_str(self.log_path_template, "log_path_template"))
+        rendered = self.log_path_template.replace("{date}", "2026-07-21")
+        if "{" in rendered or "}" in rendered:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not self.success_keywords:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        for kw in self.success_keywords:
+            if not isinstance(kw, str) or not kw.strip():
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        for kw in self.failure_keywords:
+            if not isinstance(kw, str) or not kw.strip():
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        seen_keys: set[str] = set()
+        for key, _ in self.environment_overrides:
+            if not key.strip():
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            folded = key.casefold()
+            if folded in seen_keys:
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            seen_keys.add(folded)
         errors.extend(_validate_positive_int(self.task_timeout_seconds, "task_timeout_seconds"))
         errors.extend(_validate_positive_int(self.stop_timeout_seconds, "stop_timeout_seconds"))
         return errors
@@ -135,7 +171,12 @@ class StarRailConfig:
 
         errors: list[ErrorCode] = []
         errors.extend(_check_required_path(Path(self.executable), "executable"))
-        errors.extend(_check_required_path(Path(self.working_directory), "working_directory"))
+        if self.working_directory:
+            wd = Path(self.working_directory)
+            if not wd.exists():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+            elif not wd.is_dir():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_DIRECTORY)
         return errors
 
 

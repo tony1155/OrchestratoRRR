@@ -66,6 +66,9 @@ stop_timeout_seconds = 20
 executable = "C:/path/to/python.exe"
 working_directory = "C:/path/to/StarRailCopilot"
 arguments = ["gui.py"]
+log_path_template = 'log/{date}_src.txt'
+success_keywords = ["No task pending"]
+failure_keywords = ["ScriptError:"]
 task_timeout_seconds = 3600
 stop_timeout_seconds = 10
 
@@ -107,6 +110,7 @@ stop_timeout_seconds = 20
 executable = "C:/python.exe"
 working_directory = "C:/srp"
 arguments = "not-a-list"
+log_path_template = 'log/{date}_src.txt'
 task_timeout_seconds = 3600
 stop_timeout_seconds = 10
 

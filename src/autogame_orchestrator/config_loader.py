@@ -37,6 +37,19 @@ def _tolist(value: object) -> list[str] | None:
     return result
 
 
+def _to_string_mapping(value: object) -> tuple[tuple[str, str], ...] | None:
+    if not isinstance(value, dict):
+        return None
+    result: list[tuple[str, str]] = []
+    for key, item in value.items():
+        if not isinstance(key, str):
+            return None
+        if not isinstance(item, str):
+            return None
+        result.append((key, item))
+    return tuple(result)
+
+
 def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | None, list[ErrorCode]]:
     """Load and validate the TOML configuration at *path*.
 
@@ -163,15 +176,36 @@ def _parse_starrail(raw: object) -> tuple[StarRailConfig | None, list[ErrorCode]
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return None, errors
 
-    for fld in ("executable", "working_directory"):
-        val = raw.get(fld)
-        if not isinstance(val, str) or not val.strip():
-            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    executable = str(raw.get("executable", ""))
+    working_dir = str(raw.get("working_directory", ""))
+    log_path_tpl = str(raw.get("log_path_template", ""))
 
-    arguments = raw.get("arguments")
-    arg_list = _tolist(arguments)
+    if not executable.strip():
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    if not working_dir.strip():
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    if not log_path_tpl.strip():
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    arguments_raw = raw.get("arguments")
+    arg_list = _tolist(arguments_raw)
     if arg_list is None:
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    if arg_list is not None and not arg_list:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    success_kw = raw.get("success_keywords")
+    skw_list = _tolist(success_kw)
+    if skw_list is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    failure_kw = raw.get("failure_keywords")
+    fkw_list = _tolist(failure_kw)
+    if fkw_list is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    env_val = raw.get("environment")
+    env = _to_string_mapping(env_val)
 
     task_to = raw.get("task_timeout_seconds", 3600)
     stop_to = raw.get("stop_timeout_seconds", 10)
@@ -183,12 +217,14 @@ def _parse_starrail(raw: object) -> tuple[StarRailConfig | None, list[ErrorCode]
     if errors:
         return None, errors
 
-    args: tuple[str, ...] = tuple(arg_list) if arg_list is not None else ()
-
     return StarRailConfig(
-        executable=str(raw.get("executable", "")),
-        working_directory=str(raw.get("working_directory", "")),
-        arguments=args,
+        executable=executable,
+        working_directory=working_dir,
+        arguments=tuple(arg_list) if arg_list else (),
+        log_path_template=log_path_tpl,
+        success_keywords=tuple(skw_list) if skw_list else (),
+        failure_keywords=tuple(fkw_list) if fkw_list else (),
+        environment_overrides=env if env else (),
         task_timeout_seconds=int(task_to),
         stop_timeout_seconds=int(stop_to),
     ), []

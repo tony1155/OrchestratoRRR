@@ -1,4 +1,4 @@
-# Autogame Orchestrator — example TOML configuration.
+# OrchestratoRRR — example TOML configuration.
 #
 # Copy this file to `orchestrator.local.toml` and adjust paths for your machine.
 # `orchestrator.local.toml` is git-ignored.
@@ -17,11 +17,25 @@ start_timeout_seconds = 120
 stop_timeout_seconds = 20
 
 [starrail]
-executable = "C:\\path\\to\\python.exe"
+executable = "C:\\path\\to\\StarRailCopilot\\toolkit\\python.exe"
 working_directory = "C:\\path\\to\\StarRailCopilot"
 arguments = ["gui.py", "--run", "src", "--port", "22367"]
+log_path_template = 'log/{date}_src.txt'
+success_keywords = [
+    "No task pending",
+    "for task `Restart`",
+]
+failure_keywords = [
+    "ScriptError:",
+    "Request human takeover",
+    "Retry screenshot() failed",
+    "NemuIpcError",
+]
 task_timeout_seconds = 3600
 stop_timeout_seconds = 10
+
+[starrail.environment]
+PYTHONIOENCODING = "utf-8"
 
 [maa]
 executable = "C:\\path\\to\\maa.exe"
