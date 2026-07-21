@@ -88,6 +88,8 @@ class MuMuConfig:
     adb_serial: str = "127.0.0.1:16384"
     start_timeout_seconds: int = 120
     stop_timeout_seconds: int = 20
+    start_arguments: tuple[str, ...] = ()
+    stop_arguments: tuple[str, ...] = ()
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
@@ -96,6 +98,10 @@ class MuMuConfig:
         errors.extend(_validate_non_empty_str(self.adb_serial, "adb_serial"))
         errors.extend(_validate_positive_int(self.start_timeout_seconds, "start_timeout_seconds"))
         errors.extend(_validate_positive_int(self.stop_timeout_seconds, "stop_timeout_seconds"))
+        if self.start_arguments:
+            errors.extend(_validate_str_list(list(self.start_arguments), "start_arguments"))
+        if self.stop_arguments:
+            errors.extend(_validate_str_list(list(self.stop_arguments), "stop_arguments"))
         return errors
 
     def check_paths(self) -> list[ErrorCode]:
