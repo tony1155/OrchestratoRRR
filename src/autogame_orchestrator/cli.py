@@ -1,9 +1,11 @@
-"""CLI entry-point for Autogame Orchestrator.
+"""OrchestratoRRR 主命令行入口。
 
-Commands:
-    version    Print version and exit.
-    validate   Load and validate a TOML config file.
-    plan       Print a static execution plan.
+当前公开命令：
+- version：输出版本；
+- validate：验证 TOML 配置；
+- plan：输出静态执行计划。
+
+validate 和 plan 不启动外部业务程序。
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
 
 app = typer.Typer(
     name="autogame-orch",
-    help="Autogame Orchestrator — phase 0 (project skeleton and contracts).",
+    help="OrchestratoRRR——有界 Windows 本地进程编排器。",
     add_completion=False,
 )
 
@@ -70,8 +72,8 @@ def _make_stage_report(
 
 @app.command()
 def version() -> None:
-    """Print the orchestrator version and exit."""
-    typer.echo(f"autogame-orchestrator {__version__}")
+    """输出版本号并退出。"""
+    typer.echo(f"OrchestratoRRR {__version__}")
 
 
 @app.command()
@@ -83,7 +85,7 @@ def validate(
         False, "--check-paths", help="Also verify that executable paths exist on disk."
     ),
 ) -> None:
-    """Load and validate a TOML configuration file."""
+    """验证 TOML 配置文件结构。"""
     run_id = str(uuid.uuid4())
     config_path = Path(config).resolve()
     started_at = datetime.now(UTC)
@@ -158,7 +160,7 @@ def plan(
         False, "--check-paths", help="Also verify that executable paths exist on disk."
     ),
 ) -> None:
-    """Print a static execution plan — no external programs are launched."""
+    """输出静态执行计划——不启动外部程序。"""
     run_id = str(uuid.uuid4())
     config_path = Path(config).resolve()
     started_at = datetime.now(UTC)

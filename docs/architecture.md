@@ -1,13 +1,13 @@
-# 架构
+# OrchestratoRRR 架构
 
 ## 当前状态
 
-阶段 2D —— MuMu 候选 CLI 安全探针。
+阶段 2D —— MuMu 候选 CLI 安全探针（探针工具完成，真实候选执行待安全窗口）。
 尚未启动任何真实外部程序。
 
 ## 项目身份
 
-Autogame Orchestrator 是一个**独立的、不与旧项目共享目录的**新编排器。
+OrchestratoRRR 是一个**独立的、不与旧项目共享目录的**新编排器。
 旧版 `Invoke-LocalOrchestrator.ps1` 作为回退实现保留，本项目不会修改或消费它。
 
 ## 阶段 1A 新增

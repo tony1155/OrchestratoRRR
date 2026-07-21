@@ -16,7 +16,7 @@ def test_version_output() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert __version__ in result.stdout
-    assert "autogame-orchestrator" in result.stdout
+    assert "OrchestratoRRR" in result.stdout
 
 
 def test_validate_valid_config(valid_config: Path) -> None:
@@ -110,3 +110,14 @@ def test_cli_has_no_run_command() -> None:
 def test_cli_has_no_all_command() -> None:
     result = runner.invoke(app, ["--help"])
     assert " all " not in result.stdout
+
+
+def test_project_distribution_name_is_orchestratorrr() -> None:
+    """pyproject.toml 中项目展示名称为 OrchestratoRRR。"""
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    project = data.get("project", {})
+    assert project.get("name") == "OrchestratoRRR"

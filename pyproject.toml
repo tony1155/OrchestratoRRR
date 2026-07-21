@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "autogame-orchestrator"
+name = "OrchestratoRRR"
 version = "0.1.0"
 description = "A bounded process orchestrator for MuMu, StarRailCopilot, MAA, and AALC."
 readme = "README.md"

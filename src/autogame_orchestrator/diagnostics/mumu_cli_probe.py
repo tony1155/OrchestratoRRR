@@ -170,12 +170,21 @@ def validate_mumu_candidate(path: Path) -> ProbeCommand:
 # ── 输出读取 ────────────────────────────────────────────────────
 
 
-def _read_limited_text(path: Path, byte_limit: int) -> tuple[str, bool]:
-    """有界读取文本文件，自动检测编码。
+def _looks_like_utf16_le(data: bytes) -> bool:
+    """根据奇数字节位置的 NUL 比例判断 UTF-16LE。"""
+    if len(data) < 4:
+        return False
 
-    Returns:
-        (解码后文本, 是否超限)
-    """
+    odd_bytes = data[1::2]
+    if not odd_bytes:
+        return False
+
+    nul_count = sum(byte == 0 for byte in odd_bytes)
+    return nul_count * 3 >= len(odd_bytes)
+
+
+def _read_limited_text(path: Path, byte_limit: int) -> tuple[str, bool]:
+    """有界读取并解码进程输出。"""
     try:
         with path.open("rb") as stream:
             data = stream.read(byte_limit + 1)
@@ -186,26 +195,54 @@ def _read_limited_text(path: Path, byte_limit: int) -> tuple[str, bool]:
     if truncated:
         data = data[:byte_limit]
 
-    # 解码：BOM → UTF-16LE NUL 检测 → 系统编码 → UTF-8 replace
-    text = ""
-    if data.startswith(b"\xff\xfe") or len(data) >= 2 and data[1] == 0:  # UTF-16LE BOM
-        try:
-            text = data.decode("utf-16-le")
-        except UnicodeDecodeError:
-            pass
+    text: str | None = None
 
-    if not text:
+    if data.startswith(b"\xef\xbb\xbf"):
+        text = data.decode("utf-8-sig", errors="strict")
+    else:
         try:
-            text = data.decode(locale.getpreferredencoding(False))
+            text = data.decode("utf-8", errors="strict")
         except UnicodeDecodeError:
+            text = None
+
+    if text is None and (data.startswith(b"\xff\xfe") or _looks_like_utf16_le(data)):
+        try:
+            encoding = "utf-16" if data.startswith(b"\xff\xfe") else "utf-16-le"
+            text = data.decode(encoding, errors="strict")
+        except UnicodeDecodeError:
+            text = None
+
+    if text is None:
+        preferred = locale.getpreferredencoding(False)
+        try:
+            text = data.decode(preferred, errors="strict")
+        except (LookupError, UnicodeDecodeError):
             text = data.decode("utf-8", errors="replace")
 
-    # 最终裁剪到摘录上限
     if len(text) > MAX_EXCERPT_CHARS:
         text = text[:MAX_EXCERPT_CHARS]
         truncated = True
 
     return text.strip(), truncated
+
+
+# ── 路径脱敏 ──────────────────────────────────────────────────────
+
+
+def _redact_user_home(path: Path, *, user_home: Path | None = None) -> str:
+    """将用户主目录下的路径脱敏。"""
+    resolved_path = path.resolve(strict=False)
+    resolved_home = (user_home if user_home is not None else Path.home()).resolve(strict=False)
+
+    try:
+        relative = resolved_path.relative_to(resolved_home)
+    except ValueError:
+        return str(resolved_path)
+
+    if not relative.parts:
+        return "<USER_HOME>"
+
+    return str(Path("<USER_HOME>") / relative)
 
 
 # ── 帮助证据判定 ────────────────────────────────────────────────
@@ -291,9 +328,14 @@ class MumuCliProbe:
                 break
 
         status = self._aggregate(attempts)
+        if attempts and all(attempt.status == MumuCliAttemptStatus.START_FAILED for attempt in attempts):
+            reason = "candidate process could not be started"
+        else:
+            reason = status.value
+
         return MumuCliProbeReport(
             candidate_name=command.display_name,
-            candidate_path=str(command.executable),
+            candidate_path=_redact_user_home(command.executable),
             status=status,
             attempts=tuple(attempts),
             runtime_approved=False,
@@ -302,7 +344,7 @@ class MumuCliProbe:
                 "help_argument_count": len(HELP_ARGUMENTS),
                 "total_timeout_seconds": self._total_timeout,
                 "attempt_timeout_seconds": self._attempt_timeout,
-                "reason": str(status.value),
+                "reason": reason,
             },
         )
 
@@ -537,14 +579,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         except Exception as exc:
             print(f"内部错误 ({cmd.display_name}): {exc}", file=sys.stdout)
             return 3
-
-    # 检查进程残留
-    try:
-        import time as _time
-
-        _time.sleep(0.2)
-    except Exception:
-        pass
 
     return 0
 

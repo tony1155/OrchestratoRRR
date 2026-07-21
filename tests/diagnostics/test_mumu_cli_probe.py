@@ -3,19 +3,24 @@
 from __future__ import annotations
 
 import json
+import locale
 import sys
 import threading
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from autogame_orchestrator.diagnostics.mumu_cli_probe import (
+    MAX_EXCERPT_CHARS,
+    MAX_STDOUT_BYTES,
     MumuCliAttemptStatus,
     MumuCliCandidateStatus,
     MumuCliProbe,
     ProbeCommand,
     _read_limited_text,
+    _redact_user_home,
     report_to_dict,
     validate_mumu_candidate,
 )
@@ -144,7 +149,6 @@ def test_utf16_help_detected() -> None:
     assert report.status == MumuCliCandidateStatus.HELP_DISCOVERED
     a0 = report.attempts[0]
     assert a0.status == MumuCliAttemptStatus.HELP_EVIDENCE
-    # 中文 marker 应被匹配
     markers_lower = [m.casefold() for m in a0.matched_markers]
     assert "用法" in markers_lower or "启动" in markers_lower
 
@@ -167,7 +171,6 @@ def test_probe_stops_after_first_help_evidence() -> None:
     cmd = _make_command("help_stdout")
     probe = MumuCliProbe()
     report = probe.probe(cmd)
-    # 应在第一个参数找到证据后停止
     assert len(report.attempts) == 1
     assert report.attempts[0].status == MumuCliAttemptStatus.HELP_EVIDENCE
 
@@ -178,10 +181,18 @@ def test_probe_stops_after_first_help_evidence() -> None:
 
 
 def test_large_output_is_rejected() -> None:
-    cmd = _make_command("large_output")
-    probe = MumuCliProbe()
-    report = probe.probe(cmd)
+    report = MumuCliProbe().probe(_make_command("large_output"))
+
     assert report.status == MumuCliCandidateStatus.NO_HELP_DISCOVERED
+    assert len(report.attempts) == 3
+
+    for attempt in report.attempts:
+        assert attempt.status == MumuCliAttemptStatus.OUTPUT_INVALID
+        assert attempt.stderr_truncated is True
+        assert len(attempt.stderr_excerpt) <= MAX_EXCERPT_CHARS
+        assert attempt.matched_markers == ()
+
+    assert report.runtime_approved is False
 
 
 def test_read_limited_text_truncates() -> None:
@@ -205,31 +216,43 @@ def test_read_limited_text_missing_file() -> None:
     assert truncated is False
 
 
+def test_read_limited_text_uses_preferred_encoding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    output_path = tmp_path / "preferred-encoding.bin"
+    expected = "Café options"
+    output_path.write_bytes(expected.encode("cp1252"))
+
+    monkeypatch.setattr(locale, "getpreferredencoding", lambda do_setlocale=False: "cp1252")
+
+    text, truncated = _read_limited_text(output_path, MAX_STDOUT_BYTES)
+    assert text == expected
+    assert truncated is False
+
+
 # ════════════════════════════════════════════════════════════════════
 # timeout 和清理
 # ════════════════════════════════════════════════════════════════════
 
 
 def test_timeout_is_bounded_and_process_exits(tmp_path: Path) -> None:
-    """sleep_forever → TIMEOUT，进程退出。"""
     pid_file = tmp_path / "pid.txt"
     cmd = ProbeCommand(
         display_name="MuMuManager.exe",
         executable=Path(_PYTHON),
         prefix_arguments=(_FAKE_CLI, "--mode", "sleep_forever", "--pid-file", str(pid_file)),
     )
-    probe = MumuCliProbe(attempt_timeout_seconds=0.2, total_timeout_seconds=1.0)
+    probe = MumuCliProbe(attempt_timeout_seconds=0.30, total_timeout_seconds=0.30)
     t0 = time.monotonic()
     report = probe.probe(cmd)
     elapsed = time.monotonic() - t0
 
     assert elapsed < 5.0
     assert report.status == MumuCliCandidateStatus.UNSAFE_OR_HANGING
-    attempt = report.attempts[0]
-    assert attempt.status == MumuCliAttemptStatus.TIMEOUT
-    if pid_file.exists():
-        pid = int(pid_file.read_text().strip())
-        _check_pid_exited(pid, "timeout测试")
+    assert len(report.attempts) == 1
+    assert report.attempts[0].status == MumuCliAttemptStatus.TIMEOUT
+    assert pid_file.exists()
+
+    pid = int(pid_file.read_text(encoding="utf-8").strip())
+    _check_pid_exited(pid, "timeout测试")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -238,7 +261,6 @@ def test_timeout_is_bounded_and_process_exits(tmp_path: Path) -> None:
 
 
 def test_cancellation_is_not_timeout(tmp_path: Path) -> None:
-    """cancel → CANCELLED，非 timeout。"""
     pid_file = tmp_path / "pid.txt"
     cmd = ProbeCommand(
         display_name="MuMuManager.exe",
@@ -262,11 +284,12 @@ def test_cancellation_is_not_timeout(tmp_path: Path) -> None:
 
     assert elapsed < 5.0
     assert report.status == MumuCliCandidateStatus.CANCELLED
-    attempt = report.attempts[0]
-    assert attempt.status == MumuCliAttemptStatus.CANCELLED
-    if pid_file.exists():
-        pid = int(pid_file.read_text().strip())
-        _check_pid_exited(pid, "cancel测试")
+    assert len(report.attempts) == 1
+    assert report.attempts[0].status == MumuCliAttemptStatus.CANCELLED
+    assert pid_file.exists()
+
+    pid = int(pid_file.read_text(encoding="utf-8").strip())
+    _check_pid_exited(pid, "cancel测试")
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -274,18 +297,45 @@ def test_cancellation_is_not_timeout(tmp_path: Path) -> None:
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_total_deadline_not_reset_between_arguments() -> None:
-    """三个参数各自不会获得完整总超时。"""
-    cmd = _make_command("no_output")  # 每个参数无帮助，会全部尝试
-    probe = MumuCliProbe(attempt_timeout_seconds=0.5, total_timeout_seconds=1.0)
-    t0 = time.monotonic()
-    report = probe.probe(cmd)
-    elapsed = time.monotonic() - t0
-    # 三个参数共 1.0 秒总预算，即使单个不会超过 0.5 秒
-    assert elapsed < 2.0
-    # 可能未用完所有参数（取决于 wall clock）
+def test_total_deadline_not_reset_between_arguments(tmp_path: Path) -> None:
+    pid_file = tmp_path / "deadline-pid.txt"
+    command = ProbeCommand(
+        display_name="MuMuManager.exe",
+        executable=Path(_PYTHON),
+        prefix_arguments=(_FAKE_CLI, "--mode", "sleep_forever", "--pid-file", str(pid_file)),
+    )
+    probe = MumuCliProbe(attempt_timeout_seconds=0.40, total_timeout_seconds=0.75)
+
+    started = time.monotonic()
+    report = probe.probe(command)
+    elapsed = time.monotonic() - started
+
+    assert report.status == MumuCliCandidateStatus.UNSAFE_OR_HANGING
+    assert 0.50 <= elapsed < 1.50
     assert 1 <= len(report.attempts) <= 3
+    assert all(attempt.status == MumuCliAttemptStatus.TIMEOUT for attempt in report.attempts)
+    assert sum(attempt.duration_ms for attempt in report.attempts) < 1500
+    assert pid_file.exists()
+
+    pid = int(pid_file.read_text(encoding="utf-8").strip())
+    _check_pid_exited(pid, "总Deadline测试")
+
+
+# ════════════════════════════════════════════════════════════════════
+# 启动失败
+# ════════════════════════════════════════════════════════════════════
+
+
+def test_start_failure_is_reported(tmp_path: Path) -> None:
+    command = ProbeCommand(display_name="MuMuManager.exe", executable=tmp_path / "missing.exe")
+
+    report = MumuCliProbe(attempt_timeout_seconds=0.2, total_timeout_seconds=0.6).probe(command)
+
     assert report.status == MumuCliCandidateStatus.NO_HELP_DISCOVERED
+    assert len(report.attempts) == 3
+    assert all(attempt.status == MumuCliAttemptStatus.START_FAILED for attempt in report.attempts)
+    assert report.diagnostics["reason"] == "candidate process could not be started"
+    assert report.runtime_approved is False
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -303,10 +353,86 @@ def test_report_to_dict_is_json_serializable() -> None:
     assert d["runtime_approved"] is False
 
 
-def test_cli_emits_json_for_fake_candidate(tmp_path: Path) -> None:
-    from autogame_orchestrator.diagnostics.mumu_cli_probe import main
+def test_cli_emits_json_for_fake_candidate(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from autogame_orchestrator.diagnostics import mumu_cli_probe
 
-    p = tmp_path / "MuMuManager.exe"
-    p.write_text("", encoding="utf-8")
-    rv = main(["--candidate", str(p), "--total-timeout-seconds", "3"])
-    assert rv == 0
+    fake_command = ProbeCommand(
+        display_name="MuMuManager.exe",
+        executable=Path(_PYTHON),
+        prefix_arguments=(_FAKE_CLI, "--mode", "help_stdout"),
+    )
+
+    monkeypatch.setattr(mumu_cli_probe, "validate_mumu_candidate", lambda path: fake_command)
+
+    result = mumu_cli_probe.main(
+        [
+            "--candidate",
+            "C:/Fake/MuMuManager.exe",
+            "--attempt-timeout-seconds",
+            "1",
+            "--total-timeout-seconds",
+            "2",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert result == 0
+    assert payload["candidate_name"] == "MuMuManager.exe"
+    assert payload["status"] == "help_discovered"
+    assert payload["runtime_approved"] is False
+    assert len(payload["attempts"]) == 1
+    assert payload["attempts"][0]["status"] == "help_evidence"
+
+
+def test_cli_rejects_forbidden_candidate(tmp_path: Path) -> None:
+    from autogame_orchestrator.diagnostics import mumu_cli_probe
+
+    forbidden = tmp_path / "MuMuNxMain.exe"
+    forbidden.write_bytes(b"not executable")
+
+    with patch.object(
+        mumu_cli_probe.MumuCliProbe, "probe", side_effect=AssertionError("禁止候选不应进入 probe")
+    ) as probe_mock:
+        result = mumu_cli_probe.main(["--candidate", str(forbidden)])
+
+    assert result == 2
+    probe_mock.assert_not_called()
+
+
+def test_cli_rejects_unknown_argument() -> None:
+    from autogame_orchestrator.diagnostics import mumu_cli_probe
+
+    with patch.object(
+        mumu_cli_probe.MumuCliProbe, "probe", side_effect=AssertionError("未知参数不应执行 probe")
+    ) as probe_mock:
+        with pytest.raises(SystemExit) as exc_info:
+            mumu_cli_probe.main(["--candidate", "C:/Fake/MuMuManager.exe", "--arguments", "start"])
+
+    assert exc_info.value.code == 2
+    probe_mock.assert_not_called()
+
+
+# ════════════════════════════════════════════════════════════════════
+# 路径脱敏
+# ════════════════════════════════════════════════════════════════════
+
+
+def test_candidate_path_redacts_user_home(tmp_path: Path) -> None:
+    user_home = tmp_path / "SecretUser"
+    candidate = user_home / "Tools" / "MuMuManager.exe"
+
+    result = _redact_user_home(candidate, user_home=user_home)
+
+    assert "SecretUser" not in result
+    assert result == str(Path("<USER_HOME>") / "Tools" / "MuMuManager.exe")
+
+
+def test_candidate_path_outside_user_home_is_preserved(tmp_path: Path) -> None:
+    user_home = tmp_path / "SecretUser"
+    candidate = tmp_path / "Program Files" / "MuMuManager.exe"
+
+    result = _redact_user_home(candidate, user_home=user_home)
+
+    assert result == str(candidate.resolve(strict=False))
