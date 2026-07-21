@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "OrchestratoRRR"
 version = "0.1.0"
-description = "A bounded process orchestrator for MuMu, StarRailCopilot, MAA, and AALC."
+description = "A bounded Windows process orchestrator for MuMu, StarRailCopilot, MAA, and AALC."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

@@ -18,15 +18,48 @@
 - [x] 总 Deadline 不重置（sleep_forever 实测）
 - [x] 无意义延迟已删除
 - [x] README 和品牌名更新（OrchestratoRRR）
-- [x] 24 项 diagnostics 测试
+- [x] 28 项 diagnostics 测试（pytest 收集确认）
 - [x] `runtime_approved` 始终 `False`
+- [x] README UTF-8 无 BOM
+- [x] 调试残留 `debug_utf16.txt` 已从版本控制和工作树移除
+- [x] 精确品牌版本输出（`OrchestratoRRR {__version__}`）
+- [x] pyproject description 一致性测试（含 "Windows"）
 
 ## 自动验收
 
-| 命令 | 退出码 | 结果 |
+| 命令 | pass/deselect | 退出码 |
 |---|---|---|
-| `ruff check .` | 0 | All checks passed |
-| `ruff format --check .` | 0 | 通过 |
-| `mypy src` | 0 | 通过 |
-| `pytest -q` | 0 | 全量通过 |
-| `pytest tests/diagnostics` | 0 | diagnostics 测试通过 |
+| `ruff check .` | All checks passed | 0 |
+| `ruff format --check .` | 65 files | 0 |
+| `mypy src` | 31 source files | 0 |
+| `pytest -q` | 268 passed | 0 |
+| `pytest -q tests/diagnostics` | 28 passed | 0 |
+| `pytest -q tests/diagnostics/test_mumu_cli_probe.py` | 28 passed | 0 |
+| boundary 筛选 | 12 passed, 16 deselected | 0 |
+| validation 筛选 | 28 passed | 0 |
+| `pytest -q tests/cli/test_cli.py` | 14 passed | 0 |
+
+## 边界测试持续时间（本次验收环境）
+
+| 测试 | 本次持续时间 | PID 验证 |
+|---|---|---|
+| `test_timeout_is_bounded_and_process_exits` | 0.37s | ✓ 具体 PID 已退出 |
+| `test_cancellation_is_not_timeout` | 0.22s | ✓ 具体 PID 已退出 |
+| `test_total_deadline_not_reset_between_arguments` | 0.81s | ✓ 具体 PID 已退出 |
+
+以上为本次验收环境中的 pytest 测试持续时间，不是性能承诺。
+
+## 调试残留
+
+- `debug_utf16.txt` 已从版本控制和工作树移除
+- 仓库中无其他本阶段生成的调试输出、PID 文件、临时输出或日志
+
+## 安全边界
+
+- 生产代码未使用 subprocess.run/Popen/os.system/shell=True
+- 未启动真实 MuMu/ADB
+- 未修改 process/probes/runtime 包
+- 未修改 config_model.py
+- 未修改阶段 0 Schema
+- 未修改历史验收文件（phase-2a、phase-2b、phase-2c）
+- 未执行 Git commit

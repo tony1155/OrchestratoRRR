@@ -1,4 +1,4 @@
-"""CLI integration tests using Typer's CliRunner."""
+"""CLI 集成测试。"""
 
 from __future__ import annotations
 
@@ -13,10 +13,10 @@ runner = CliRunner()
 
 
 def test_version_output() -> None:
+    """精确断言版本输出。"""
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert __version__ in result.stdout
-    assert "OrchestratoRRR" in result.stdout
+    assert result.stdout.strip() == f"OrchestratoRRR {__version__}"
 
 
 def test_validate_valid_config(valid_config: Path) -> None:
@@ -113,11 +113,23 @@ def test_cli_has_no_all_command() -> None:
 
 
 def test_project_distribution_name_is_orchestratorrr() -> None:
-    """pyproject.toml 中项目展示名称为 OrchestratoRRR。"""
+    """pyproject.toml 中的发行项目元数据使用正式品牌。"""
     import tomllib
-    from pathlib import Path
 
     pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
     data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    project = data.get("project", {})
-    assert project.get("name") == "OrchestratoRRR"
+    project = data["project"]
+
+    assert project["name"] == "OrchestratoRRR"
+    assert project["description"] == (
+        "A bounded Windows process orchestrator for MuMu, StarRailCopilot, MAA, and AALC."
+    )
+
+
+def test_readme_is_utf8_without_bom() -> None:
+    """README 使用 UTF-8 无 BOM，并包含正确标题。"""
+    readme = Path(__file__).resolve().parent.parent.parent / "README.md"
+    data = readme.read_bytes()
+
+    assert not data.startswith(b"\xef\xbb\xbf")
+    assert data.startswith(b"# OrchestratoRRR\n")

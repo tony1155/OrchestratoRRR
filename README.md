@@ -1,4 +1,4 @@
-﻿# OrchestratoRRR
+# OrchestratoRRR
 
 OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进程编排器。
 
