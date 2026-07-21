@@ -184,6 +184,9 @@ def launch(spec: ProcessSpec) -> ManagedProcess:
             stdout_fd=stdout_fd,
             stderr_fd=stderr_fd,
             started_at_monotonic=started_at_monotonic,
+            name=spec.name,
+            stdout_path=spec.stdout_path,
+            stderr_path=spec.stderr_path,
         )
         return managed
 

@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-阶段 1A —— 进程基础契约与 Windows Job Object 最小底座。
+阶段 1B —— 通用 ProcessSupervisor。
 尚未启动任何真实外部程序。
 
 ## 项目身份

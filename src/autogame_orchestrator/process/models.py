@@ -75,6 +75,9 @@ class ManagedProcess:
         stdout_fd: int | None,
         stderr_fd: int | None,
         started_at_monotonic: float,
+        name: str = "",
+        stdout_path: Path | None = None,
+        stderr_path: Path | None = None,
     ) -> None:
         self._id = str(uuid.uuid4())
         self.pid = pid
@@ -83,6 +86,9 @@ class ManagedProcess:
         self._stdout_fd: int | None = stdout_fd
         self._stderr_fd: int | None = stderr_fd
         self._started_at_monotonic: float = started_at_monotonic
+        self._name = name
+        self._stdout_path = stdout_path
+        self._stderr_path = stderr_path
         self._closed = False
 
     @property
