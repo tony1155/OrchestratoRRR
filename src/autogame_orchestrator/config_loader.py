@@ -176,16 +176,20 @@ def _parse_starrail(raw: object) -> tuple[StarRailConfig | None, list[ErrorCode]
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return None, errors
 
-    executable = str(raw.get("executable", ""))
-    working_dir = str(raw.get("working_directory", ""))
-    log_path_tpl = str(raw.get("log_path_template", ""))
+    executable_raw = raw.get("executable")
+    working_directory_raw = raw.get("working_directory")
+    log_path_template_raw = raw.get("log_path_template")
 
-    if not executable.strip():
+    if not isinstance(executable_raw, str) or not executable_raw.strip():
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
-    if not working_dir.strip():
+    if not isinstance(working_directory_raw, str) or not working_directory_raw.strip():
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
-    if not log_path_tpl.strip():
+    if not isinstance(log_path_template_raw, str) or not log_path_template_raw.strip():
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    executable = executable_raw if isinstance(executable_raw, str) else ""
+    working_directory = working_directory_raw if isinstance(working_directory_raw, str) else ""
+    log_path_template = log_path_template_raw if isinstance(log_path_template_raw, str) else ""
 
     arguments_raw = raw.get("arguments")
     arg_list = _tolist(arguments_raw)
@@ -204,14 +208,16 @@ def _parse_starrail(raw: object) -> tuple[StarRailConfig | None, list[ErrorCode]
     if fkw_list is None:
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
-    env_val = raw.get("environment")
-    env = _to_string_mapping(env_val)
+    environment_raw = raw.get("environment")
+    environment = _to_string_mapping(environment_raw)
+    if environment is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
     task_to = raw.get("task_timeout_seconds", 3600)
     stop_to = raw.get("stop_timeout_seconds", 10)
-    if not isinstance(task_to, int):
+    if not isinstance(task_to, int) or isinstance(task_to, bool):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
-    if not isinstance(stop_to, int):
+    if not isinstance(stop_to, int) or isinstance(stop_to, bool):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
     if errors:
@@ -219,12 +225,12 @@ def _parse_starrail(raw: object) -> tuple[StarRailConfig | None, list[ErrorCode]
 
     return StarRailConfig(
         executable=executable,
-        working_directory=working_dir,
+        working_directory=working_directory,
         arguments=tuple(arg_list) if arg_list else (),
-        log_path_template=log_path_tpl,
+        log_path_template=log_path_template,
         success_keywords=tuple(skw_list) if skw_list else (),
         failure_keywords=tuple(fkw_list) if fkw_list else (),
-        environment_overrides=env if env else (),
+        environment_overrides=environment if environment is not None else (),
         task_timeout_seconds=int(task_to),
         stop_timeout_seconds=int(stop_to),
     ), []

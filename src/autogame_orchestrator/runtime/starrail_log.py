@@ -105,7 +105,11 @@ def read_log_update(cursor: StarRailLogCursor, *, max_bytes: int = MAX_LOG_READ_
 
     new_identity = (stat.st_dev, stat.st_ino)
 
-    if cursor.file_identity is not None and new_identity != cursor.file_identity:
+    rotated = False
+
+    if cursor.file_identity is None:
+        cursor.file_identity = new_identity
+    elif new_identity != cursor.file_identity:
         cursor.offset = 0
         cursor.rolling_text = ""
         cursor.file_identity = new_identity
@@ -114,8 +118,6 @@ def read_log_update(cursor: StarRailLogCursor, *, max_bytes: int = MAX_LOG_READ_
         cursor.offset = 0
         cursor.rolling_text = ""
         rotated = True
-    else:
-        rotated = False
 
     if stat.st_size <= cursor.offset:
         return StarRailLogUpdate(text="", overflow=False, rotated=rotated)

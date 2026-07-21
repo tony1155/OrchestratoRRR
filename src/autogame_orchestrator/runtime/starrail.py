@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import locale
 import tempfile
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -41,6 +43,16 @@ MAX_STDOUT_BYTES = 64 * 1024
 MAX_STDERR_BYTES = 64 * 1024
 
 
+@dataclass(frozen=True)
+class _StoppedProcessOutput:
+    process_result: ProcessResult | None
+    cleaned: bool
+    stdout_excerpt: str
+    stderr_excerpt: str
+    stdout_truncated: bool
+    stderr_truncated: bool
+
+
 class StarRailAdapter:
     """StarRailCopilot 任务 Adapter。
 
@@ -69,7 +81,6 @@ class StarRailAdapter:
                 owned_process_cleaned=True,
             )
 
-        # 验证配置
         config_errors = self._config.validate()
         if config_errors:
             return StarRailRunResult.from_monotonic(
@@ -82,7 +93,6 @@ class StarRailAdapter:
                 owned_process_cleaned=True,
             )
 
-        # 验证路径
         executable = Path(self._config.executable)
         wd = Path(self._config.working_directory)
 
@@ -108,7 +118,6 @@ class StarRailAdapter:
                 owned_process_cleaned=True,
             )
 
-        # 解析日志路径 + 验证父目录
         log_path = resolve_starrail_log_path(self._config)
         if not log_path.parent.is_dir():
             return StarRailRunResult.from_monotonic(
@@ -121,17 +130,27 @@ class StarRailAdapter:
                 owned_process_cleaned=True,
             )
 
-        # 建立 Deadline
         config_seconds = float(self._config.task_timeout_seconds)
         if deadline is None:
             effective_deadline = Deadline.after(config_seconds)
         else:
             effective_deadline = Deadline.after(min(config_seconds, deadline.remaining_seconds))
 
-        # 启动前捕获日志游标
-        log_cursor = capture_log_cursor(log_path)
+        try:
+            log_cursor = capture_log_cursor(log_path)
+        except OSError as exc:
+            return StarRailRunResult.from_monotonic(
+                status=StarRailRunStatus.FAILED,
+                error_code=StarRailErrorCode.LOG_READ_FAILED,
+                completion_mode=StarRailCompletionMode.LOG_ERROR,
+                started_at=started_at,
+                started_at_monotonic=started_at_mono,
+                pid=None,
+                log_path=str(log_path),
+                owned_process_cleaned=True,
+                diagnostics={"exception_type": type(exc).__name__},
+            )
 
-        # 准备输出文件
         try:
             tmp_dir = tempfile.TemporaryDirectory(prefix="orchestratorrr-starrail-")
         except OSError:
@@ -148,7 +167,6 @@ class StarRailAdapter:
         td = Path(tmp_dir.name)
         stdout_path = td / "stdout.bin"
         stderr_path = td / "stderr.bin"
-
         env_overrides = dict(self._config.environment_overrides)
 
         spec = ProcessSpec(
@@ -168,7 +186,6 @@ class StarRailAdapter:
             try:
                 managed = supervisor.launch(spec)
             except Exception:
-                tmp_dir.cleanup()
                 return StarRailRunResult.from_monotonic(
                     status=StarRailRunStatus.FAILED,
                     error_code=StarRailErrorCode.PROCESS_START_FAILED,
@@ -181,53 +198,31 @@ class StarRailAdapter:
 
             pid = managed.pid
 
-            # 主循环
             while True:
-                # A. cancellation
                 if cancel is not None and cancel.is_cancelled:
-                    stop_result, cleaned = self._stop_owned_process(supervisor, managed)
-                    out_ex, out_trunc = _read_output_excerpt(stdout_path, MAX_STDOUT_BYTES)
-                    err_ex, err_trunc = _read_output_excerpt(stderr_path, MAX_STDERR_BYTES)
-                    tmp_dir.cleanup()
-                    ec = stop_result.exit_code if stop_result else None
-                    if not cleaned:
-                        return StarRailRunResult.from_monotonic(
-                            status=StarRailRunStatus.CANCELLED,
-                            error_code=StarRailErrorCode.CLEANUP_FAILED,
-                            completion_mode=StarRailCompletionMode.CANCELLATION,
-                            started_at=started_at,
-                            started_at_monotonic=started_at_mono,
-                            pid=pid,
-                            exit_code=ec,
-                            owned_process_cleaned=False,
-                            stdout_excerpt=out_ex,
-                            stderr_excerpt=err_ex,
-                            stdout_truncated=out_trunc,
-                            stderr_truncated=err_trunc,
-                        )
+                    out = self._stop_and_collect(supervisor, managed, stdout_path, stderr_path)
+                    ec = out.process_result.exit_code if out.process_result else None
+                    code = StarRailErrorCode.CLEANUP_FAILED if not out.cleaned else StarRailErrorCode.CANCELLED
                     return StarRailRunResult.from_monotonic(
                         status=StarRailRunStatus.CANCELLED,
-                        error_code=StarRailErrorCode.CANCELLED,
+                        error_code=code,
                         completion_mode=StarRailCompletionMode.CANCELLATION,
                         started_at=started_at,
                         started_at_monotonic=started_at_mono,
                         pid=pid,
                         exit_code=ec,
-                        owned_process_cleaned=True,
-                        stdout_excerpt=out_ex,
-                        stderr_excerpt=err_ex,
-                        stdout_truncated=out_trunc,
-                        stderr_truncated=err_trunc,
+                        log_path=str(log_path),
+                        owned_process_cleaned=out.cleaned,
+                        stdout_excerpt=out.stdout_excerpt,
+                        stderr_excerpt=out.stderr_excerpt,
+                        stdout_truncated=out.stdout_truncated,
+                        stderr_truncated=out.stderr_truncated,
                     )
 
-                # B. deadline
                 if effective_deadline.expired:
-                    stop_result, cleaned = self._stop_owned_process(supervisor, managed)
-                    out_ex, out_trunc = _read_output_excerpt(stdout_path, MAX_STDOUT_BYTES)
-                    err_ex, err_trunc = _read_output_excerpt(stderr_path, MAX_STDERR_BYTES)
-                    tmp_dir.cleanup()
-                    ec = stop_result.exit_code if stop_result else None
-                    code = StarRailErrorCode.TASK_TIMEOUT if cleaned else StarRailErrorCode.CLEANUP_FAILED
+                    out = self._stop_and_collect(supervisor, managed, stdout_path, stderr_path)
+                    ec = out.process_result.exit_code if out.process_result else None
+                    code = StarRailErrorCode.TASK_TIMEOUT if out.cleaned else StarRailErrorCode.CLEANUP_FAILED
                     return StarRailRunResult.from_monotonic(
                         status=StarRailRunStatus.TIMEOUT,
                         error_code=code,
@@ -236,142 +231,184 @@ class StarRailAdapter:
                         started_at_monotonic=started_at_mono,
                         pid=pid,
                         exit_code=ec,
-                        owned_process_cleaned=cleaned,
-                        stdout_excerpt=out_ex,
-                        stderr_excerpt=err_ex,
-                        stdout_truncated=out_trunc,
-                        stderr_truncated=err_trunc,
+                        log_path=str(log_path),
+                        owned_process_cleaned=out.cleaned,
+                        stdout_excerpt=out.stdout_excerpt,
+                        stderr_excerpt=out.stderr_excerpt,
+                        stdout_truncated=out.stdout_truncated,
+                        stderr_truncated=out.stderr_truncated,
                     )
 
-                # C. 读取新增日志
                 try:
                     update = read_log_update(log_cursor, max_bytes=MAX_LOG_READ_BYTES)
-                except OSError:
-                    self._stop_owned_process(supervisor, managed)
-                    out_ex, out_trunc = _read_output_excerpt(stdout_path, MAX_STDOUT_BYTES)
-                    err_ex, err_trunc = _read_output_excerpt(stderr_path, MAX_STDERR_BYTES)
-                    tmp_dir.cleanup()
+                except OSError as exc:
+                    out = self._stop_and_collect(supervisor, managed, stdout_path, stderr_path)
+                    code = StarRailErrorCode.LOG_READ_FAILED if out.cleaned else StarRailErrorCode.CLEANUP_FAILED
                     return StarRailRunResult.from_monotonic(
                         status=StarRailRunStatus.FAILED,
-                        error_code=StarRailErrorCode.LOG_READ_FAILED,
+                        error_code=code,
                         completion_mode=StarRailCompletionMode.LOG_ERROR,
                         started_at=started_at,
                         started_at_monotonic=started_at_mono,
                         pid=pid,
-                        owned_process_cleaned=True,
-                        stdout_excerpt=out_ex,
-                        stderr_excerpt=err_ex,
-                        stdout_truncated=out_trunc,
-                        stderr_truncated=err_trunc,
+                        log_path=str(log_path),
+                        owned_process_cleaned=out.cleaned,
+                        stdout_excerpt=out.stdout_excerpt,
+                        stderr_excerpt=out.stderr_excerpt,
+                        stdout_truncated=out.stdout_truncated,
+                        stderr_truncated=out.stderr_truncated,
+                        diagnostics={"primary_error": "LOG_READ_FAILED", "exception_type": type(exc).__name__},
                     )
 
-                # D. 日志超限
                 if update.overflow:
-                    self._stop_owned_process(supervisor, managed)
-                    out_ex, out_trunc = _read_output_excerpt(stdout_path, MAX_STDOUT_BYTES)
-                    err_ex, err_trunc = _read_output_excerpt(stderr_path, MAX_STDERR_BYTES)
-                    tmp_dir.cleanup()
+                    out = self._stop_and_collect(supervisor, managed, stdout_path, stderr_path)
+                    code = StarRailErrorCode.LOG_OUTPUT_LIMIT if out.cleaned else StarRailErrorCode.CLEANUP_FAILED
                     return StarRailRunResult.from_monotonic(
                         status=StarRailRunStatus.FAILED,
-                        error_code=StarRailErrorCode.LOG_OUTPUT_LIMIT,
+                        error_code=code,
                         completion_mode=StarRailCompletionMode.LOG_ERROR,
                         started_at=started_at,
                         started_at_monotonic=started_at_mono,
                         pid=pid,
-                        owned_process_cleaned=True,
-                        stdout_excerpt=out_ex,
-                        stderr_excerpt=err_ex,
-                        stdout_truncated=out_trunc,
-                        stderr_truncated=err_trunc,
+                        log_path=str(log_path),
+                        owned_process_cleaned=out.cleaned,
+                        stdout_excerpt=out.stdout_excerpt,
+                        stderr_excerpt=out.stderr_excerpt,
+                        stdout_truncated=out.stdout_truncated,
+                        stderr_truncated=out.stderr_truncated,
+                        diagnostics={"primary_error": "LOG_OUTPUT_LIMIT"},
                     )
 
-                # E. failure keyword (在 rolling_text 中搜索，包含增量历史)
                 match = match_starrail_keyword(
                     log_cursor.rolling_text,
                     success_keywords=self._config.success_keywords,
                     failure_keywords=self._config.failure_keywords,
                 )
                 if match and match.kind == "failure":
-                    self._stop_owned_process(supervisor, managed)
-                    out_ex, out_trunc = _read_output_excerpt(stdout_path, MAX_STDOUT_BYTES)
-                    err_ex, err_trunc = _read_output_excerpt(stderr_path, MAX_STDERR_BYTES)
-                    tmp_dir.cleanup()
+                    out = self._stop_and_collect(supervisor, managed, stdout_path, stderr_path)
+                    if out.cleaned:
+                        return StarRailRunResult.from_monotonic(
+                            status=StarRailRunStatus.FAILED,
+                            error_code=StarRailErrorCode.FAILURE_KEYWORD,
+                            completion_mode=StarRailCompletionMode.LOG_FAILURE,
+                            started_at=started_at,
+                            started_at_monotonic=started_at_mono,
+                            pid=pid,
+                            matched_keyword=match.keyword,
+                            log_path=str(log_path),
+                            owned_process_cleaned=True,
+                            stdout_excerpt=out.stdout_excerpt,
+                            stderr_excerpt=out.stderr_excerpt,
+                            stdout_truncated=out.stdout_truncated,
+                            stderr_truncated=out.stderr_truncated,
+                            diagnostics={"primary_error": "FAILURE_KEYWORD"},
+                        )
                     return StarRailRunResult.from_monotonic(
                         status=StarRailRunStatus.FAILED,
-                        error_code=StarRailErrorCode.FAILURE_KEYWORD,
+                        error_code=StarRailErrorCode.CLEANUP_FAILED,
                         completion_mode=StarRailCompletionMode.LOG_FAILURE,
                         started_at=started_at,
                         started_at_monotonic=started_at_mono,
                         pid=pid,
                         matched_keyword=match.keyword,
-                        owned_process_cleaned=True,
-                        stdout_excerpt=out_ex,
-                        stderr_excerpt=err_ex,
-                        stdout_truncated=out_trunc,
-                        stderr_truncated=err_trunc,
+                        log_path=str(log_path),
+                        owned_process_cleaned=False,
+                        stdout_excerpt=out.stdout_excerpt,
+                        stderr_excerpt=out.stderr_excerpt,
+                        stdout_truncated=out.stdout_truncated,
+                        stderr_truncated=out.stderr_truncated,
                         diagnostics={"primary_error": "FAILURE_KEYWORD"},
                     )
 
-                # F. success keyword
                 if match and match.kind == "success":
-                    self._stop_owned_process(supervisor, managed)
-                    out_ex, out_trunc = _read_output_excerpt(stdout_path, MAX_STDOUT_BYTES)
-                    err_ex, err_trunc = _read_output_excerpt(stderr_path, MAX_STDERR_BYTES)
-                    tmp_dir.cleanup()
+                    out = self._stop_and_collect(supervisor, managed, stdout_path, stderr_path)
+                    if out.cleaned:
+                        return StarRailRunResult.from_monotonic(
+                            status=StarRailRunStatus.COMPLETED,
+                            error_code=StarRailErrorCode.OK,
+                            completion_mode=StarRailCompletionMode.LOG_SUCCESS,
+                            started_at=started_at,
+                            started_at_monotonic=started_at_mono,
+                            pid=pid,
+                            matched_keyword=match.keyword,
+                            log_path=str(log_path),
+                            owned_process_cleaned=True,
+                            stdout_excerpt=out.stdout_excerpt,
+                            stderr_excerpt=out.stderr_excerpt,
+                            stdout_truncated=out.stdout_truncated,
+                            stderr_truncated=out.stderr_truncated,
+                        )
                     return StarRailRunResult.from_monotonic(
-                        status=StarRailRunStatus.COMPLETED,
-                        error_code=StarRailErrorCode.OK,
+                        status=StarRailRunStatus.FAILED,
+                        error_code=StarRailErrorCode.CLEANUP_FAILED,
                         completion_mode=StarRailCompletionMode.LOG_SUCCESS,
                         started_at=started_at,
                         started_at_monotonic=started_at_mono,
                         pid=pid,
                         matched_keyword=match.keyword,
-                        owned_process_cleaned=True,
-                        stdout_excerpt=out_ex,
-                        stderr_excerpt=err_ex,
-                        stdout_truncated=out_trunc,
-                        stderr_truncated=err_trunc,
+                        log_path=str(log_path),
+                        owned_process_cleaned=False,
+                        stdout_excerpt=out.stdout_excerpt,
+                        stderr_excerpt=out.stderr_excerpt,
+                        stdout_truncated=out.stdout_truncated,
+                        stderr_truncated=out.stderr_truncated,
+                        diagnostics={"primary_completion": "LOG_SUCCESS"},
                     )
 
-                # G. 检查进程退出
                 exit_code = managed.poll()
                 if exit_code is not None:
-                    stop_result, _ = self._stop_owned_process(supervisor, managed)
-                    out_ex, out_trunc = _read_output_excerpt(stdout_path, MAX_STDOUT_BYTES)
-                    err_ex, err_trunc = _read_output_excerpt(stderr_path, MAX_STDERR_BYTES)
-                    tmp_dir.cleanup()
+                    out = self._stop_and_collect(supervisor, managed, stdout_path, stderr_path)
                     ec = exit_code
-                    if ec != 0:
+                    if out.cleaned:
+                        if ec != 0:
+                            return StarRailRunResult.from_monotonic(
+                                status=StarRailRunStatus.FAILED,
+                                error_code=StarRailErrorCode.PROCESS_EXIT_NONZERO,
+                                completion_mode=StarRailCompletionMode.PROCESS_EXIT,
+                                started_at=started_at,
+                                started_at_monotonic=started_at_mono,
+                                pid=pid,
+                                exit_code=ec,
+                                log_path=str(log_path),
+                                owned_process_cleaned=True,
+                                stdout_excerpt=out.stdout_excerpt,
+                                stderr_excerpt=out.stderr_excerpt,
+                                stdout_truncated=out.stdout_truncated,
+                                stderr_truncated=out.stderr_truncated,
+                            )
                         return StarRailRunResult.from_monotonic(
                             status=StarRailRunStatus.FAILED,
-                            error_code=StarRailErrorCode.PROCESS_EXIT_NONZERO,
+                            error_code=StarRailErrorCode.PROCESS_EXIT_BEFORE_SUCCESS,
                             completion_mode=StarRailCompletionMode.PROCESS_EXIT,
                             started_at=started_at,
                             started_at_monotonic=started_at_mono,
                             pid=pid,
                             exit_code=ec,
+                            log_path=str(log_path),
                             owned_process_cleaned=True,
-                            stdout_excerpt=out_ex,
-                            stderr_excerpt=err_ex,
-                            stdout_truncated=out_trunc,
-                            stderr_truncated=err_trunc,
+                            stdout_excerpt=out.stdout_excerpt,
+                            stderr_excerpt=out.stderr_excerpt,
+                            stdout_truncated=out.stdout_truncated,
+                            stderr_truncated=out.stderr_truncated,
                         )
+                    primary = "PROCESS_EXIT_NONZERO" if ec != 0 else "PROCESS_EXIT_BEFORE_SUCCESS"
                     return StarRailRunResult.from_monotonic(
                         status=StarRailRunStatus.FAILED,
-                        error_code=StarRailErrorCode.PROCESS_EXIT_BEFORE_SUCCESS,
+                        error_code=StarRailErrorCode.CLEANUP_FAILED,
                         completion_mode=StarRailCompletionMode.PROCESS_EXIT,
                         started_at=started_at,
                         started_at_monotonic=started_at_mono,
                         pid=pid,
                         exit_code=ec,
-                        owned_process_cleaned=True,
-                        stdout_excerpt=out_ex,
-                        stderr_excerpt=err_ex,
-                        stdout_truncated=out_trunc,
-                        stderr_truncated=err_trunc,
+                        log_path=str(log_path),
+                        owned_process_cleaned=False,
+                        stdout_excerpt=out.stdout_excerpt,
+                        stderr_excerpt=out.stderr_excerpt,
+                        stdout_truncated=out.stdout_truncated,
+                        stderr_truncated=out.stderr_truncated,
+                        diagnostics={"primary_error": primary},
                     )
 
-                # H. 有限等待
                 wait_sec = min(self._poll_interval, effective_deadline.remaining_seconds)
                 if cancel is not None:
                     cancelled = cancel.wait(timeout_seconds=wait_sec)
@@ -380,31 +417,42 @@ class StarRailAdapter:
                 else:
                     time.sleep(wait_sec)
 
-        except Exception:
-            # 确保清理
+        except Exception as exc:
+            collected: _StoppedProcessOutput | None = None
             if managed is not None:
                 try:
-                    self._stop_owned_process(supervisor, managed)
+                    collected = self._stop_and_collect(supervisor, managed, stdout_path, stderr_path)
                 except Exception:
                     pass
+            code = (
+                StarRailErrorCode.INTERNAL_ERROR
+                if (collected and collected.cleaned)
+                else StarRailErrorCode.CLEANUP_FAILED
+            )
+            return StarRailRunResult.from_monotonic(
+                status=StarRailRunStatus.FAILED,
+                error_code=code,
+                completion_mode=StarRailCompletionMode.PROCESS_EXIT,
+                started_at=started_at,
+                started_at_monotonic=started_at_mono,
+                pid=managed.pid if managed else None,
+                log_path=str(log_path) if managed else "",
+                owned_process_cleaned=collected.cleaned if collected else False,
+                diagnostics={"exception_type": type(exc).__name__},
+            )
+        finally:
+            try:
+                supervisor.close()
+            except Exception:
+                pass
             try:
                 tmp_dir.cleanup()
             except Exception:
                 pass
-            return StarRailRunResult.from_monotonic(
-                status=StarRailRunStatus.FAILED,
-                error_code=StarRailErrorCode.PROCESS_START_FAILED,
-                completion_mode=StarRailCompletionMode.START_FAILURE,
-                started_at=started_at,
-                started_at_monotonic=started_at_mono,
-                pid=managed.pid if managed else None,
-                owned_process_cleaned=False,
-            )
 
     def _stop_owned_process(
         self, supervisor: ProcessSupervisor, managed: ManagedProcess
     ) -> tuple[ProcessResult | None, bool]:
-        """停止受管进程树，返回 (ProcessResult, 是否已清理)。"""
         try:
             stop_result = supervisor.stop(
                 managed, confirmation_deadline=Deadline.after(float(self._config.stop_timeout_seconds))
@@ -419,11 +467,24 @@ class StarRailAdapter:
         except Exception:
             return None, False
 
+    def _stop_and_collect(
+        self, supervisor: ProcessSupervisor, managed: ManagedProcess, stdout_path: Path, stderr_path: Path
+    ) -> _StoppedProcessOutput:
+        process_result, cleaned = self._stop_owned_process(supervisor, managed)
+        stdout_excerpt, stdout_truncated = _read_output_excerpt(stdout_path, MAX_STDOUT_BYTES)
+        stderr_excerpt, stderr_truncated = _read_output_excerpt(stderr_path, MAX_STDERR_BYTES)
+        return _StoppedProcessOutput(
+            process_result=process_result,
+            cleaned=cleaned,
+            stdout_excerpt=stdout_excerpt,
+            stderr_excerpt=stderr_excerpt,
+            stdout_truncated=stdout_truncated,
+            stderr_truncated=stderr_truncated,
+        )
+
 
 def _read_output_excerpt(path: Path, byte_limit: int) -> tuple[str, bool]:
     """有界读取输出文件摘录。"""
-    import locale
-
     try:
         with path.open("rb") as stream:
             data = stream.read(byte_limit + 1)
@@ -434,13 +495,24 @@ def _read_output_excerpt(path: Path, byte_limit: int) -> tuple[str, bool]:
     if truncated:
         data = data[:byte_limit]
 
-    try:
-        text = data.decode("utf-8", errors="replace")
-    except UnicodeDecodeError:
+    text: str | None = None
+    if data.startswith(b"\xef\xbb\xbf"):
+        text = data.decode("utf-8-sig", errors="strict")
+    else:
         try:
-            text = data.decode(locale.getpreferredencoding(False), errors="replace")
+            text = data.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            pass
+
+    if text is None:
+        preferred = locale.getpreferredencoding(False)
+        try:
+            text = data.decode(preferred, errors="strict")
         except (LookupError, UnicodeDecodeError):
             text = data.decode("utf-8", errors="replace")
+
+    if text is None:
+        text = ""
 
     if len(text) > MAX_OUTPUT_EXCERPT_CHARS:
         text = text[:MAX_OUTPUT_EXCERPT_CHARS]

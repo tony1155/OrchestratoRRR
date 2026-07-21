@@ -48,6 +48,7 @@ class StarRailErrorCode(StrEnum):
     TASK_TIMEOUT = "TASK_TIMEOUT"
     CANCELLED = "CANCELLED"
     CLEANUP_FAILED = "CLEANUP_FAILED"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
 @dataclass(frozen=True)

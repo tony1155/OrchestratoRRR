@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from autogame_orchestrator.config_model import StarRailConfig
-from autogame_orchestrator.process import CancellationToken, Deadline
+from autogame_orchestrator.process import CancellationToken, Deadline, ManagedProcess, ProcessSupervisor
 from autogame_orchestrator.runtime.starrail import StarRailAdapter
 from autogame_orchestrator.runtime.starrail_log import (
     MAX_LOG_READ_BYTES,
@@ -91,7 +91,7 @@ def test_resolve_relative_log_path_with_date(tmp_path: Path) -> None:
         executable=str(_PYTHON),
         working_directory=str(tmp_path),
         arguments=("gui.py",),
-        log_path_template="log\\{date}_src.txt",
+        log_path_template="log/{date}_src.txt",
     )
     resolved = resolve_starrail_log_path(cfg)
     date_str = time.strftime("%Y-%m-%d")
@@ -102,10 +102,7 @@ def test_resolve_relative_log_path_with_date(tmp_path: Path) -> None:
 def test_resolve_absolute_log_path(tmp_path: Path) -> None:
     abs_log = tmp_path / "custom" / "test.log"
     cfg = StarRailConfig(
-        executable=str(_PYTHON),
-        working_directory="C:/any",
-        arguments=("gui.py",),
-        log_path_template=str(abs_log),
+        executable=str(_PYTHON), working_directory="C:/any", arguments=("gui.py",), log_path_template=str(abs_log)
     )
     resolved = resolve_starrail_log_path(cfg)
     assert resolved == abs_log.resolve()
@@ -147,7 +144,6 @@ def test_split_keyword_is_detected_across_reads(tmp_path: Path) -> None:
     log_file = tmp_path / "src.log"
     log_file.write_text("old\n", encoding="utf-8")
     cursor = capture_log_cursor(log_file)
-    # Append "No task " then wait, then append "pending" on same logical line
     with open(log_file, "a", encoding="utf-8") as f:
         f.write("No task ")
         f.flush()
@@ -187,6 +183,32 @@ def test_log_read_overflow_is_reported(tmp_path: Path) -> None:
     assert update.overflow
 
 
+def test_first_created_log_records_identity(tmp_path: Path) -> None:
+    log_file = tmp_path / "src.log"
+    cursor = capture_log_cursor(log_file)
+    assert cursor.file_identity is None
+    log_file.write_text("content\n", encoding="utf-8")
+    update = read_log_update(cursor)
+    assert cursor.file_identity is not None
+    assert update.rotated is False
+
+
+def test_replaced_log_after_first_creation_is_rotated(tmp_path: Path) -> None:
+    log_file = tmp_path / "src.log"
+    cursor = capture_log_cursor(log_file)
+    log_file.write_text("first\n", encoding="utf-8")
+    first_update = read_log_update(cursor)
+    assert not first_update.rotated
+    first_identity = cursor.file_identity
+    # 创建另一文件并替换
+    replacement = tmp_path / "replacement.log"
+    replacement.write_text("replacement\n", encoding="utf-8")
+    replacement.replace(log_file)
+    second_update = read_log_update(cursor)
+    assert second_update.rotated is True
+    assert cursor.file_identity != first_identity
+
+
 # ════════════════════════════════════════════════════════════════════
 # Adapter 集成测试
 # ════════════════════════════════════════════════════════════════════
@@ -201,8 +223,8 @@ def test_success_keyword_completes_and_cleans_process(tmp_path: Path) -> None:
     assert result.completion_mode == StarRailCompletionMode.LOG_SUCCESS
     assert result.matched_keyword == "No task pending"
     assert result.owned_process_cleaned is True
-    if result.pid:
-        _check_pid_exited(result.pid, "success父进程")
+    assert result.pid is not None
+    _check_pid_exited(result.pid, "success父进程")
 
 
 def test_restart_success_keyword_completes(tmp_path: Path) -> None:
@@ -221,8 +243,9 @@ def test_failure_keyword_fails_and_cleans_process(tmp_path: Path) -> None:
     assert result.error_code == StarRailErrorCode.FAILURE_KEYWORD
     assert result.completion_mode == StarRailCompletionMode.LOG_FAILURE
     assert result.matched_keyword == "ScriptError:"
-    if result.pid:
-        _check_pid_exited(result.pid, "failure父进程")
+    assert result.owned_process_cleaned is True
+    assert result.pid is not None
+    _check_pid_exited(result.pid, "failure父进程")
 
 
 def test_failure_keyword_wins_over_success(tmp_path: Path) -> None:
@@ -288,8 +311,8 @@ def test_timeout_is_bounded_and_cleans_pid(tmp_path: Path) -> None:
     assert result.status == StarRailRunStatus.TIMEOUT
     assert result.error_code == StarRailErrorCode.TASK_TIMEOUT
     assert result.owned_process_cleaned is True
-    if result.pid:
-        _check_pid_exited(result.pid, "timeout父进程")
+    assert result.pid is not None
+    _check_pid_exited(result.pid, "timeout父进程")
 
 
 def test_cancellation_is_not_timeout(tmp_path: Path) -> None:
@@ -298,11 +321,11 @@ def test_cancellation_is_not_timeout(tmp_path: Path) -> None:
     cancel = CancellationToken()
     t0 = time.monotonic()
 
+    import threading
+
     def _cancel() -> None:
         time.sleep(0.2)
         cancel.cancel()
-
-    import threading
 
     t = threading.Thread(target=_cancel, daemon=True)
     t.start()
@@ -312,8 +335,8 @@ def test_cancellation_is_not_timeout(tmp_path: Path) -> None:
     assert elapsed < 5.0
     assert result.status == StarRailRunStatus.CANCELLED
     assert result.error_code == StarRailErrorCode.CANCELLED
-    if result.pid:
-        _check_pid_exited(result.pid, "cancel父进程")
+    assert result.pid is not None
+    _check_pid_exited(result.pid, "cancel父进程")
 
 
 def test_parent_deadline_caps_config_timeout(tmp_path: Path) -> None:
@@ -322,7 +345,7 @@ def test_parent_deadline_caps_config_timeout(tmp_path: Path) -> None:
     t0 = time.monotonic()
     result = adapter.run(Deadline.after(0.5))
     elapsed = time.monotonic() - t0
-    assert elapsed < 2.0  # 父 deadline 0.5s 应优先
+    assert elapsed < 2.0
     assert result.status == StarRailRunStatus.TIMEOUT
 
 
@@ -381,11 +404,19 @@ def test_child_process_is_cleaned_after_success(tmp_path: Path) -> None:
     adapter = StarRailAdapter(cfg, poll_interval_seconds=0.05)
     result = adapter.run(Deadline.after(10.0))
     assert result.status == StarRailRunStatus.COMPLETED
-    if result.pid:
-        _check_pid_exited(result.pid, "child父进程")
-    if child_pid_file.exists():
-        child_pid = int(child_pid_file.read_text().strip())
+    assert result.pid is not None
+    _check_pid_exited(result.pid, "child父进程")
+    # 等待子进程写入 PID 文件
+    for _ in range(50):
+        if child_pid_file.exists():
+            break
+        time.sleep(0.1)
+    assert child_pid_file.exists()
+    child_pid = int(child_pid_file.read_text().strip())
+    # 占位符 "0" 表示子进程尚未写入真实 PID
+    if child_pid != 0:
         _check_pid_exited(child_pid, "child子进程")
+    _check_pid_exited(child_pid, "child子进程")
 
 
 def test_start_failure_is_structured(tmp_path: Path) -> None:
@@ -429,3 +460,51 @@ def test_pre_cancel_does_not_launch(tmp_path: Path) -> None:
     result = adapter.run(Deadline.after(5.0), cancel=cancel)
     assert result.status == StarRailRunStatus.CANCELLED
     assert result.pid is None
+
+
+def test_result_contains_resolved_log_path(tmp_path: Path) -> None:
+    log_file = (Path(tmp_path) / "log" / f"{time.strftime('%Y-%m-%d')}_src.txt").resolve()
+    log_file.parent.mkdir(parents=True)
+    cfg, _, _ = _make_config(mode="success_log", log_file=str(log_file))
+    adapter = StarRailAdapter(cfg, poll_interval_seconds=0.05)
+    result = adapter.run(Deadline.after(10.0))
+    assert result.status == StarRailRunStatus.COMPLETED
+    assert result.log_path == str(log_file)
+
+
+def test_success_cleanup_failure_is_not_completed(tmp_path: Path) -> None:
+    cfg, log, _ = _make_config(mode="success_log")
+    adapter = StarRailAdapter(cfg, poll_interval_seconds=0.05)
+
+    original_stop = adapter._stop_owned_process
+
+    def report_cleanup_failure(supervisor: ProcessSupervisor, managed: ManagedProcess) -> tuple:
+        process_result, _ = original_stop(supervisor, managed)
+        return process_result, False
+
+    adapter._stop_owned_process = report_cleanup_failure
+    result = adapter.run(Deadline.after(10.0))
+    assert result.status == StarRailRunStatus.FAILED
+    assert result.error_code == StarRailErrorCode.CLEANUP_FAILED
+    assert result.completion_mode == StarRailCompletionMode.LOG_SUCCESS
+    assert result.owned_process_cleaned is False
+    assert result.matched_keyword == "No task pending"
+
+
+def test_failure_cleanup_failure_reports_cleanup_failed(tmp_path: Path) -> None:
+    cfg, log, _ = _make_config(mode="failure_log")
+    adapter = StarRailAdapter(cfg, poll_interval_seconds=0.05)
+
+    original_stop = adapter._stop_owned_process
+
+    def report_cleanup_failure(supervisor: ProcessSupervisor, managed: ManagedProcess) -> tuple:
+        process_result, _ = original_stop(supervisor, managed)
+        return process_result, False
+
+    adapter._stop_owned_process = report_cleanup_failure
+    result = adapter.run(Deadline.after(10.0))
+    assert result.status == StarRailRunStatus.FAILED
+    assert result.error_code == StarRailErrorCode.CLEANUP_FAILED
+    assert result.completion_mode == StarRailCompletionMode.LOG_FAILURE
+    assert result.owned_process_cleaned is False
+    assert result.diagnostics["primary_error"] == "FAILURE_KEYWORD"

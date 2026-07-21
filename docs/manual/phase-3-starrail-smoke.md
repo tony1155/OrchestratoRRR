@@ -20,69 +20,49 @@ Copy-Item config/orchestrator.example.toml config/orchestrator.local.toml
 
 ### 2. 填入真实路径
 
-编辑 `config/orchestrator.local.toml` 的 `[starrail]` 节：
-
-```toml
-[starrail]
-executable = "D:\\path\\to\\StarRailCopilot\\toolkit\\python.exe"
-working_directory = "D:\\path\\to\\StarRailCopilot"
-arguments = ["gui.py", "--run", "src", "--port", "22367"]
-log_path_template = "log\\{date}_src.txt"
-```
+编辑 `config/orchestrator.local.toml` 的 `[starrail]` 节。
 
 ### 3. 保持 MuMu 真实 start/stop 禁用
 
 不得修改 `start_arguments` 和 `stop_arguments`。
 
-### 4. 加载配置并执行
+### 4. 使用正式加载器执行
 
 ```python
-import tomllib
 from pathlib import Path
-from autogame_orchestrator.config_model import StarRailConfig
-from autogame_orchestrator.runtime.starrail import StarRailAdapter
+
+from autogame_orchestrator.config_loader import load_config
 from autogame_orchestrator.process import Deadline
+from autogame_orchestrator.runtime import StarRailAdapter
 
-# 加载本地配置
-data = tomllib.loads(Path("config/orchestrator.local.toml").read_text())
-raw = data["starrail"]
+config_path = Path("config/orchestrator.local.toml")
+config, errors = load_config(config_path, check_paths=True)
 
-config = StarRailConfig(
-    executable=raw["executable"],
-    working_directory=raw["working_directory"],
-    arguments=tuple(raw.get("arguments", [])),
-    log_path_template=raw.get("log_path_template", ""),
-    success_keywords=tuple(raw.get("success_keywords", StarRailConfig.success_keywords)),
-    failure_keywords=tuple(raw.get("failure_keywords", StarRailConfig.failure_keywords)),
-    task_timeout_seconds=raw.get("task_timeout_seconds", 3600),
-    stop_timeout_seconds=raw.get("stop_timeout_seconds", 10),
-)
-```
+if errors or config is None:
+    raise RuntimeError(f"配置验证失败: {[e.value for e in errors]}")
 
-### 5. 执行一次 run
-
-```python
-adapter = StarRailAdapter(config, poll_interval_seconds=0.05)
+adapter = StarRailAdapter(config.starrail)
 result = adapter.run(deadline=Deadline.after(600.0))
 
-print(f"status={result.status}")
+print(f"status={result.status.value}")
+print(f"error_code={result.error_code.value}")
 print(f"matched_keyword={result.matched_keyword}")
 print(f"owned_process_cleaned={result.owned_process_cleaned}")
 ```
 
-### 6. 核对结果
+### 5. 核对结果
 
 - `COMPLETED`：任务完成，匹配到 success 关键词
 - `FAILED` + `FAILURE_KEYWORD`：匹配到 failure 关键词
 - `TIMEOUT`：任务超时
 - `owned_process_cleaned=True`：进程树已清理
 
-### 7. 失败时手工恢复
+### 6. 失败时手工恢复
 
 1. 查看 StarRailCopilot 日志（`log\YYYY-MM-DD_src.txt`）。
 2. 通过任务管理器确认没有残留 `python.exe`。
 3. 调整配置后重试。
 
-### 8. 确认未启动 MAA 或 AALC
+### 7. 确认未启动 MAA 或 AALC
 
 start/stop/restart 都不应启动 MAA 或 AALC。

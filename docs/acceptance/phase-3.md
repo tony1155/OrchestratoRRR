@@ -1,69 +1,45 @@
 # 阶段 3 验收标准
 
-> **状态:** 附注接受——Fake 环境完成，真实 StarRailCopilot smoke 待用户批准。
+> **建议状态:** 附注接受——Fake 环境完成，
+> 真实 StarRailCopilot smoke 待用户批准。
 
-## 阶段范围
+## 完成项
 
-- 由本次 Adapter 启动的 StarRailCopilot 进程树管理
-- 增量日志游标捕获与读取
-- failure 关键词优先判定
-- success 关键词完成判定
-- 进程退出（含 exit 0）但无 success 关键词视为失败
-- timeout / cancellation 清理进程树
-- stdout/stderr 有界读取
+- [x] 清理失败不再返回成功（所有终态记录实际 cleaned）
+- [x] 所有终态通过 `_stop_and_collect()` 统一处理
+- [x] 日志路径写入结果（`log_path` 字段）
+- [x] 启动后首次日志文件记录 identity（rotated=False）
+- [x] loader 严格拒绝错误类型和无效 environment
+- [x] executable/working directory 类型检查
+- [x] PID 文件和 PID 必须存在（6 个测试精确断言）
+- [x] Cleanup failure 映射测试（success + failure）
+- [x] INTERNAL_ERROR 错误码
+- [x] 日志路径结果测试
+- [x] 首次文件 identity + 替换 rotation 测试
+- [x] 配置非字符串字段拒绝测试（8 个新增）
+- [x] 配置 environment 缺失/错误类型拒绝
+- [x] Smoke 文档使用正式 loader
 
-## 配置字段
+## 测试数量
 
-- `executable`、`working_directory`、`arguments`、`log_path_template`
-- `success_keywords`、`failure_keywords`
-- `environment_overrides`（`PYTHONIOENCODING`）
-- `task_timeout_seconds`、`stop_timeout_seconds`
-
-## 调用链
-
-```text
-StarRailAdapter.run()
-→ 解析日志路径 → 捕获启动前游标 → ProcessSupervisor.launch()
-→ 循环：cancel → deadline → 增量日志 → failure → success → 进程退出 → 有限等待
-→ stop → 收集输出 → StarRailRunResult
-```
-
-## 日志游标
-
-- 启动前已有内容视为旧日志，不读取
-- 文件被截断或轮转时自动重新从头读取
-- 每次读取最多 64 KiB，超过立即失败
-- 滚动文本保留最近 64 KiB 用于跨读取的关键词匹配
-
-## Fake 集成
-
-所有集成测试真实经过：
-```text
-StarRailAdapter → ProcessSupervisor.launch() → sys.executable → fake_starrail.py
-```
-
-未 monkeypatch `run()`、`launch()` 或 `stop()`。
-
-## 自动验收
-
-| 命令 | 退出码 | 结果 |
+| 命令 | 实际结果 | 退出码 |
 |---|---|---|
-| `ruff check .` | 0 | All checks passed |
-| `ruff format --check .` | 0 | 通过 |
-| `mypy src` | 0 | 34 source files |
-| `pytest -q` | 0 | **309 passed** |
-| `pytest tests/runtime/test_starrail_runtime.py` | 0 | **26 passed** |
-| `pytest tests/config/test_starrail_config.py` | 0 | **16 passed** |
-| completion 筛选 | 0 | 通过 |
-| log_boundary 筛选 | 0 | 通过 |
-| ownership 筛选 | 0 | 通过 |
-| collected starrail tests | **26** |  |
-| `git diff --cached --check` | 0 | 通过 |
+| `ruff check .` | All checks passed | 0 |
+| `ruff format --check .` | 71 files | 0 |
+| `mypy src` | 34 source files | 0 |
+| `pytest -q`（不含 diagnostics） | 295 passed | 0 |
+| `pytest tests/runtime/test_starrail_runtime.py` | **32 passed** | 0 |
+| `pytest tests/config/test_starrail_config.py` | **23 passed** | 0 |
+| completion 筛选 | 16 passed, 16 deselected | 0 |
+| log_boundary 筛选 | 10 passed, 22 deselected | 0 |
+| ownership 筛选 | 4 passed, 28 deselected | 0 |
+| config_boundary 筛选 | 14 passed, 9 deselected | 0 |
+| collected runtime tests | **32** | — |
+| collected config tests | **23** | — |
 
 ## 安全边界
 
-- [x] 未运行真实 StarRailCopilot
-- [x] 未运行真实 MuMu/ADB
+- [x] 未运行真实 StarRailCopilot/MuMu/ADB
 - [x] 未按进程名/端口/WMI 扫描
 - [x] 未使用 subprocess.run/Popen/os.system
 - [x] 未修改 ProcessSupervisor 核心

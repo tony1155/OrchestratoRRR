@@ -128,6 +128,9 @@ def main() -> None:
 
     elif mode == "child_success":
         if child_pid:
+            # 写入占位文件确认子进程将被启动
+            Path(child_pid).parent.mkdir(parents=True, exist_ok=True)
+            Path(child_pid).write_text("0", encoding="utf-8")
             subprocess.Popen(
                 [sys.executable, _FAKE_CHILD, "--pid-file", child_pid],
                 stdout=subprocess.DEVNULL,

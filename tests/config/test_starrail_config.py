@@ -14,7 +14,7 @@ def _default_config() -> StarRailConfig:
         executable="C:/python.exe",
         working_directory="C:/srp",
         arguments=("gui.py", "--run", "src", "--port", "22367"),
-        log_path_template="log\\{date}_src.txt",
+        log_path_template="log/{date}_src.txt",
     )
 
 
@@ -29,7 +29,7 @@ def test_starrail_config_rejects_empty_arguments() -> None:
         executable="C:/python.exe",
         working_directory="C:/srp",
         arguments=(),
-        log_path_template="log\\{date}_src.txt",
+        log_path_template="log/{date}_src.txt",
     )
     errs = cfg.validate()
     assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
@@ -40,7 +40,7 @@ def test_starrail_config_rejects_blank_argument() -> None:
         executable="C:/python.exe",
         working_directory="C:/srp",
         arguments=("gui.py", "  ", "--port", "22367"),
-        log_path_template="log\\{date}_src.txt",
+        log_path_template="log/{date}_src.txt",
     )
     errs = cfg.validate()
     assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
@@ -51,7 +51,7 @@ def test_starrail_config_rejects_empty_success_keywords() -> None:
         executable="C:/python.exe",
         working_directory="C:/srp",
         arguments=("gui.py",),
-        log_path_template="log\\{date}_src.txt",
+        log_path_template="log/{date}_src.txt",
         success_keywords=(),
     )
     errs = cfg.validate()
@@ -63,7 +63,7 @@ def test_starrail_config_rejects_blank_keyword() -> None:
         executable="C:/python.exe",
         working_directory="C:/srp",
         arguments=("gui.py",),
-        log_path_template="log\\{date}_src.txt",
+        log_path_template="log/{date}_src.txt",
         success_keywords=("  ",),
     )
     errs = cfg.validate()
@@ -75,7 +75,7 @@ def test_starrail_config_rejects_unknown_template_placeholder() -> None:
         executable="C:/python.exe",
         working_directory="C:/srp",
         arguments=("gui.py",),
-        log_path_template="log\\{unknown}_src.txt",
+        log_path_template="log/{unknown}_src.txt",
     )
     errs = cfg.validate()
     assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
@@ -86,11 +86,71 @@ def test_starrail_config_rejects_duplicate_environment_keys() -> None:
         executable="C:/python.exe",
         working_directory="C:/srp",
         arguments=("gui.py",),
-        log_path_template="log\\{date}_src.txt",
+        log_path_template="log/{date}_src.txt",
         environment_overrides=(("KEY", "V1"), ("key", "V2")),
     )
     errs = cfg.validate()
     assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
+
+
+def test_config_rejects_non_string_environment_value() -> None:
+    from typing import Any, cast
+
+    cfg = cast(
+        StarRailConfig,
+        StarRailConfig(
+            executable="C:/python.exe",
+            working_directory="C:/srp",
+            arguments=("gui.py",),
+            log_path_template="log/{date}_src.txt",
+            environment_overrides=(("KEY", cast(Any, 123)),),
+        ),
+    )
+    errs = cfg.validate()
+    assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
+
+
+def test_config_rejects_malformed_environment_entry() -> None:
+    from typing import Any, cast
+
+    cfg = cast(
+        StarRailConfig,
+        StarRailConfig(
+            executable="C:/python.exe",
+            working_directory="C:/srp",
+            arguments=("gui.py",),
+            log_path_template="log/{date}_src.txt",
+            environment_overrides=cast(Any, [("A", "1", "extra")]),
+        ),
+    )
+    errs = cfg.validate()
+    assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
+
+
+def test_check_paths_rejects_executable_directory(tmp_path: Path) -> None:
+    cfg = StarRailConfig(
+        executable=str(tmp_path),
+        working_directory=str(tmp_path),
+        arguments=("gui.py",),
+        log_path_template="log/{date}_src.txt",
+    )
+    errs = cfg.check_paths()
+    assert ErrorCode.CONFIG_PATH_NOT_FILE in errs
+
+
+def test_check_paths_rejects_working_directory_file(tmp_path: Path) -> None:
+    exe = tmp_path / "fake.exe"
+    exe.write_text("", encoding="utf-8")
+    wd_file = tmp_path / "not_a_dir"
+    wd_file.write_text("", encoding="utf-8")
+    cfg = StarRailConfig(
+        executable=str(exe),
+        working_directory=str(wd_file),
+        arguments=("gui.py",),
+        log_path_template="log/{date}_src.txt",
+    )
+    errs = cfg.check_paths()
+    assert ErrorCode.CONFIG_PATH_NOT_DIRECTORY in errs
 
 
 def test_loader_parses_starrail_environment(tmp_path: Path) -> None:
@@ -177,6 +237,9 @@ failure_keywords = ["ScriptError:"]
 task_timeout_seconds = 3600
 stop_timeout_seconds = 10
 
+[starrail.environment]
+PYTHONIOENCODING = "utf-8"
+
 [maa]
 executable = "C:/maa.exe"
 working_directory = "C:/maa-cli"
@@ -198,12 +261,234 @@ attempt_timeout_seconds = 7200
     assert len(sr.failure_keywords) >= 1
 
 
+def test_loader_rejects_non_string_executable(tmp_path: Path) -> None:
+    config = tmp_path / "starrail_bad.toml"
+    config.write_text(
+        """\
+[orchestrator]
+log_dir = "logs"
+report_dir = "run-results"
+heartbeat_interval_seconds = 10
+poll_interval_seconds = 1
+
+[mumu]
+executable = "C:/MuMu.exe"
+adb_executable = "C:/adb.exe"
+adb_serial = "127.0.0.1:16384"
+start_timeout_seconds = 120
+stop_timeout_seconds = 20
+
+[starrail]
+executable = true
+working_directory = "C:/srp"
+arguments = ["gui.py"]
+log_path_template = "log-{date}_src.txt"
+task_timeout_seconds = 3600
+stop_timeout_seconds = 10
+
+[maa]
+executable = "C:/maa.exe"
+working_directory = "C:/maa-cli"
+timeout_seconds = 1800
+
+[aalc]
+executable = "C:/AALC.exe"
+working_directory = "C:/AALC"
+attempts = 3
+attempt_timeout_seconds = 7200
+""",
+        encoding="utf-8",
+    )
+    cfg, errs = load_config(config)
+    assert len(errs) > 0
+    assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
+
+
+def test_loader_rejects_non_string_working_directory(tmp_path: Path) -> None:
+    config = tmp_path / "starrail_bad2.toml"
+    config.write_text(
+        """\
+[orchestrator]
+log_dir = "logs"
+report_dir = "run-results"
+heartbeat_interval_seconds = 10
+poll_interval_seconds = 1
+
+[mumu]
+executable = "C:/MuMu.exe"
+adb_executable = "C:/adb.exe"
+adb_serial = "127.0.0.1:16384"
+start_timeout_seconds = 120
+stop_timeout_seconds = 20
+
+[starrail]
+executable = "C:/python.exe"
+working_directory = true
+arguments = ["gui.py"]
+log_path_template = "log-{date}_src.txt"
+task_timeout_seconds = 3600
+stop_timeout_seconds = 10
+
+[maa]
+executable = "C:/maa.exe"
+working_directory = "C:/maa-cli"
+timeout_seconds = 1800
+
+[aalc]
+executable = "C:/AALC.exe"
+working_directory = "C:/AALC"
+attempts = 3
+attempt_timeout_seconds = 7200
+""",
+        encoding="utf-8",
+    )
+    cfg, errs = load_config(config)
+    assert len(errs) > 0
+    assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
+
+
+def test_loader_rejects_non_string_log_template(tmp_path: Path) -> None:
+    config = tmp_path / "starrail_bad3.toml"
+    config.write_text(
+        """\
+[orchestrator]
+log_dir = "logs"
+report_dir = "run-results"
+heartbeat_interval_seconds = 10
+poll_interval_seconds = 1
+
+[mumu]
+executable = "C:/MuMu.exe"
+adb_executable = "C:/adb.exe"
+adb_serial = "127.0.0.1:16384"
+start_timeout_seconds = 120
+stop_timeout_seconds = 20
+
+[starrail]
+executable = "C:/python.exe"
+working_directory = "C:/srp"
+arguments = ["gui.py"]
+log_path_template = true
+task_timeout_seconds = 3600
+stop_timeout_seconds = 10
+
+[maa]
+executable = "C:/maa.exe"
+working_directory = "C:/maa-cli"
+timeout_seconds = 1800
+
+[aalc]
+executable = "C:/AALC.exe"
+working_directory = "C:/AALC"
+attempts = 3
+attempt_timeout_seconds = 7200
+""",
+        encoding="utf-8",
+    )
+    cfg, errs = load_config(config)
+    assert len(errs) > 0
+    assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
+
+
+def test_loader_rejects_missing_environment(tmp_path: Path) -> None:
+    config = tmp_path / "starrail_no_env.toml"
+    config.write_text(
+        """\
+[orchestrator]
+log_dir = "logs"
+report_dir = "run-results"
+heartbeat_interval_seconds = 10
+poll_interval_seconds = 1
+
+[mumu]
+executable = "C:/MuMu.exe"
+adb_executable = "C:/adb.exe"
+adb_serial = "127.0.0.1:16384"
+start_timeout_seconds = 120
+stop_timeout_seconds = 20
+
+[starrail]
+executable = "C:/python.exe"
+working_directory = "C:/srp"
+arguments = ["gui.py"]
+log_path_template = "log-{date}_src.txt"
+success_keywords = ["test"]
+failure_keywords = ["error"]
+task_timeout_seconds = 3600
+stop_timeout_seconds = 10
+
+[maa]
+executable = "C:/maa.exe"
+working_directory = "C:/maa-cli"
+timeout_seconds = 1800
+
+[aalc]
+executable = "C:/AALC.exe"
+working_directory = "C:/AALC"
+attempts = 3
+attempt_timeout_seconds = 7200
+""",
+        encoding="utf-8",
+    )
+    cfg, errs = load_config(config)
+    assert len(errs) > 0
+    assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
+
+
+def test_loader_rejects_non_string_environment_value(tmp_path: Path) -> None:
+    config = tmp_path / "starrail_bad_env.toml"
+    config.write_text(
+        """\
+[orchestrator]
+log_dir = "logs"
+report_dir = "run-results"
+heartbeat_interval_seconds = 10
+poll_interval_seconds = 1
+
+[mumu]
+executable = "C:/MuMu.exe"
+adb_executable = "C:/adb.exe"
+adb_serial = "127.0.0.1:16384"
+start_timeout_seconds = 120
+stop_timeout_seconds = 20
+
+[starrail]
+executable = "C:/python.exe"
+working_directory = "C:/srp"
+arguments = ["gui.py"]
+log_path_template = "log-{date}_src.txt"
+success_keywords = ["test"]
+failure_keywords = ["error"]
+task_timeout_seconds = 3600
+stop_timeout_seconds = 10
+
+[starrail.environment]
+PYTHONIOENCODING = 42
+
+[maa]
+executable = "C:/maa.exe"
+working_directory = "C:/maa-cli"
+timeout_seconds = 1800
+
+[aalc]
+executable = "C:/AALC.exe"
+working_directory = "C:/AALC"
+attempts = 3
+attempt_timeout_seconds = 7200
+""",
+        encoding="utf-8",
+    )
+    cfg, errs = load_config(config)
+    assert len(errs) > 0
+    assert ErrorCode.CONFIG_SCHEMA_ERROR in errs
+
+
 def test_check_paths_requires_executable_file(tmp_path: Path) -> None:
     cfg = StarRailConfig(
         executable=str(tmp_path / "nonexistent.exe"),
         working_directory=str(tmp_path),
         arguments=("gui.py",),
-        log_path_template="log\\{date}_src.txt",
+        log_path_template="log/{date}_src.txt",
     )
     errs = cfg.check_paths()
     assert ErrorCode.CONFIG_PATH_NOT_FOUND in errs
@@ -214,7 +499,7 @@ def test_check_paths_requires_working_directory(tmp_path: Path) -> None:
         executable=str(tmp_path / "fake.exe"),
         working_directory=str(tmp_path / "nonexistent_dir"),
         arguments=("gui.py",),
-        log_path_template="log\\{date}_src.txt",
+        log_path_template="log/{date}_src.txt",
     )
     errs = cfg.check_paths()
     assert ErrorCode.CONFIG_PATH_NOT_FOUND in errs

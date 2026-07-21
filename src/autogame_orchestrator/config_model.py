@@ -155,8 +155,15 @@ class StarRailConfig:
             if not isinstance(kw, str) or not kw.strip():
                 errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         seen_keys: set[str] = set()
-        for key, _ in self.environment_overrides:
-            if not key.strip():
+        for entry in self.environment_overrides:
+            if not isinstance(entry, tuple) or len(entry) != 2:
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+                continue
+            key, value = entry
+            if not isinstance(key, str) or not key.strip():
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+                continue
+            if not isinstance(value, str):
                 errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
             folded = key.casefold()
             if folded in seen_keys:
@@ -170,13 +177,19 @@ class StarRailConfig:
         from pathlib import Path
 
         errors: list[ErrorCode] = []
-        errors.extend(_check_required_path(Path(self.executable), "executable"))
-        if self.working_directory:
-            wd = Path(self.working_directory)
-            if not wd.exists():
-                errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
-            elif not wd.is_dir():
-                errors.append(ErrorCode.CONFIG_PATH_NOT_DIRECTORY)
+
+        executable = Path(self.executable)
+        if not executable.exists():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+        elif not executable.is_file():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_FILE)
+
+        working_directory = Path(self.working_directory)
+        if not working_directory.exists():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+        elif not working_directory.is_dir():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_DIRECTORY)
+
         return errors
 
 

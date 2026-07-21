@@ -72,6 +72,9 @@ failure_keywords = ["ScriptError:"]
 task_timeout_seconds = 3600
 stop_timeout_seconds = 10
 
+[starrail.environment]
+PYTHONIOENCODING = "utf-8"
+
 [maa]
 executable = "C:/path/to/maa.exe"
 working_directory = "C:/path/to/maa-cli"
@@ -113,6 +116,9 @@ arguments = "not-a-list"
 log_path_template = 'log/{date}_src.txt'
 task_timeout_seconds = 3600
 stop_timeout_seconds = 10
+
+[starrail.environment]
+PYTHONIOENCODING = "utf-8"
 
 [maa]
 executable = "C:/maa.exe"
