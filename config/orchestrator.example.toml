@@ -1,0 +1,35 @@
+# Autogame Orchestrator — example TOML configuration.
+#
+# Copy this file to `orchestrator.local.toml` and adjust paths for your machine.
+# `orchestrator.local.toml` is git-ignored.
+
+[orchestrator]
+log_dir = "logs"
+report_dir = "run-results"
+heartbeat_interval_seconds = 10
+poll_interval_seconds = 1
+
+[mumu]
+executable = "C:\\path\\to\\MuMuNxDevice.exe"
+adb_executable = "C:\\path\\to\\adb.exe"
+adb_serial = "127.0.0.1:16384"
+start_timeout_seconds = 120
+stop_timeout_seconds = 20
+
+[starrail]
+executable = "C:\\path\\to\\python.exe"
+working_directory = "C:\\path\\to\\StarRailCopilot"
+arguments = ["gui.py", "--run", "src", "--port", "22367"]
+task_timeout_seconds = 3600
+stop_timeout_seconds = 10
+
+[maa]
+executable = "C:\\path\\to\\maa.exe"
+working_directory = "C:\\path\\to\\maa-cli"
+timeout_seconds = 1800
+
+[aalc]
+executable = "C:\\path\\to\\AALC.exe"
+working_directory = "C:\\path\\to\\AALC"
+attempts = 3
+attempt_timeout_seconds = 7200

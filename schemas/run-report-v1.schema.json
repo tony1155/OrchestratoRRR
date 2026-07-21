@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://autogame.local/schemas/run-report-v1.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "orchestrator_version",
+    "mode",
+    "status",
+    "error_code",
+    "started_at",
+    "finished_at",
+    "duration_ms",
+    "stages",
+    "diagnostics"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "$ref": "#/$defs/uuid" },
+    "orchestrator_version": { "type": "string", "minLength": 1 },
+    "mode": { "type": "string", "minLength": 1 },
+    "status": { "$ref": "#/$defs/run_status" },
+    "error_code": { "$ref": "#/$defs/error_code" },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "stages": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/stage_report" }
+    },
+    "diagnostics": { "type": "object" }
+  },
+  "additionalProperties": false,
+
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "run_status": {
+      "enum": ["running", "success", "failure", "cancelled"]
+    },
+    "error_code": {
+      "enum": [
+        "OK",
+        "CONFIG_FILE_NOT_FOUND",
+        "CONFIG_PARSE_ERROR",
+        "CONFIG_SCHEMA_ERROR",
+        "CONFIG_PATH_NOT_FOUND",
+        "CONFIG_PATH_NOT_FILE",
+        "CONFIG_PATH_NOT_DIRECTORY",
+        "LOG_WRITE_ERROR",
+        "RUN_REPORT_SERIALIZATION_ERROR",
+        "RUN_REPORT_VALIDATION_ERROR",
+        "RUN_REPORT_WRITE_ERROR",
+        "INTERNAL_ERROR",
+        "SKIPPED"
+      ]
+    },
+    "outcome_kind": {
+      "enum": ["success", "failure", "timeout", "skipped", "cancelled"]
+    },
+    "stage_name": {
+      "enum": [
+        "validate_config",
+        "sync_maa_config",
+        "update_maa",
+        "ensure_mumu_running",
+        "wait_mumu_adb_ready",
+        "run_starrail",
+        "stop_starrail",
+        "verify_starrail_stopped",
+        "stop_mumu",
+        "verify_mumu_stopped",
+        "start_mumu",
+        "wait_mumu_adb_ready_after_restart",
+        "run_maa",
+        "run_aalc",
+        "write_run_report"
+      ]
+    },
+    "stage_report": {
+      "type": "object",
+      "required": [
+        "stage",
+        "outcome",
+        "error_code",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "message",
+        "diagnostics"
+      ],
+      "properties": {
+        "stage": { "$ref": "#/$defs/stage_name" },
+        "outcome": { "$ref": "#/$defs/outcome_kind" },
+        "error_code": { "$ref": "#/$defs/error_code" },
+        "started_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+        },
+        "finished_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+        },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "message": { "type": "string" },
+        "diagnostics": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,7 @@
+# Missing required sections — only [orchestrator] is present.
+
+[orchestrator]
+log_dir = "logs"
+report_dir = "run-results"
+heartbeat_interval_seconds = 10
+poll_interval_seconds = 1
