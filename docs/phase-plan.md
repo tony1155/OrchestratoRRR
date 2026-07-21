@@ -9,11 +9,15 @@
 | 1A | 进程基础契约与 Job Object 底座 | Deadline、CancellationToken、ProcessSpec、ManagedProcess、Win32 句柄封装、Job Object、CreateProcessW 启动器、Fake 程序扩展 |
 | 1B | 通用进程监督器 | ProcessSupervisor 完整生命周期：launch/wait/run/stop/close、超时升级、取消升级、幂等关闭、进程树清理 |
 | 2A | 本地运行时与 ADB 只读探测 | 本地 TCP 端口探测、ADB 命令执行（通过 ProcessSupervisor）、ADB devices 解析、设备选择、MuMu readiness 组合探测 |
-| 2B | MuMu 启停与连接 | 启动/停止/重启 MuMu、adb connect、等待 ADB 就绪 |
+| 2B | MuMu 生命周期适配器 | MumuAdapter：status/start/stop/restart、管理命令通过 ProcessSupervisor、空参数默认拒绝、真实控制尚未获准 |
+| 2C | MuMu 管理命令发现 | 本机安装目录调查、候选文件元数据收集、安全性分类（B：候选存在但证据不足） |
+| 2D | MuMu 候选 CLI 安全探针 | 诊断模块：固定帮助参数白名单、ProcessSupervisor 有界执行、受限输出收集、真实候选因进程门禁跳过 |
 | 3 | StarRail Adapter | 启动 StarRailCopilot、监控退出、捕获输出 |
 | 4 | MAA Adapter | 启动 MAA CLI |
 | 5 | AALC Adapter | 启动 AALC（支持重试） |
 | 6 | 完整工作流 | 编排完整生命周期 |
 | 7 | 打包与默认入口 | PyInstaller EXE、无缝替换旧 PS1 入口点 |
+
+> **下一门禁：** 只有获得明确 start/stop/实例选择语法，并完成独立进程所有权验证后，才允许修改生产 start_arguments/stop_arguments。
 
 每个阶段基于前一阶段构建，但不得退化先前阶段的测试。
