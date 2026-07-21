@@ -1,18 +1,33 @@
-# Architecture
+# 架构
 
-## Status
+## 当前状态
 
-Phase 0 — project skeleton and behavioural contracts.
-No real external programs are launched.
+阶段 1A —— 进程基础契约与 Windows Job Object 最小底座。
+尚未启动任何真实外部程序。
 
-## Project Identity
+## 项目身份
 
-Autogame Orchestrator is a **standalone, independent project**.
-It does not live inside the old MAA / StarRailCopilot / AALC directory trees.
-The legacy `Invoke-LocalOrchestrator.ps1` script remains in place as a
-fallback implementation and is NOT modified or consumed by this project.
+Autogame Orchestrator 是一个**独立的、不与旧项目共享目录的**新编排器。
+旧版 `Invoke-LocalOrchestrator.ps1` 作为回退实现保留，本项目不会修改或消费它。
 
-## Phase 0 Boundaries
+## 阶段 1A 新增
+
+阶段 1A 在 `src/autogame_orchestrator/process/` 包中新增：
+
+| 模块 | 职责 |
+|---|---|
+| `deadline.py` | 基于 `time.monotonic()` 的硬截止时间 |
+| `cancellation.py` | 基于 `threading.Event` 的一次性取消令牌 |
+| `models.py` | `ProcessSpec`（冻结启动规格）、`ManagedProcess`（可变生命周期） |
+| `errors.py` | `ProcessLaunchErrorCode` 枚举 |
+| `win32_handles.py` | Win32 `CloseHandle` 的幂等、安全封装 |
+| `win32_job.py` | Job Object：创建、KILL_ON_JOB_CLOSE 配置、进程分配、终止 |
+| `win32_process.py` | `CreateProcessW(CREATE_SUSPENDED)` 和 `ResumeThread` 的 ctypes 封装 |
+| `launcher.py` | 启动编排器：挂起→Job→分配→恢复流程 |
+
+阶段 1A 不包含 `ProcessSupervisor`（完整生命周期编排），该功能留到阶段 1B。
+
+## 阶段 0 边界（已冻结）
 
 Phase 0 delivers:
 

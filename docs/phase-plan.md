@@ -1,20 +1,19 @@
-# Phase Plan
+# 阶段规划
 
-This document defines the staged roadmap for Autogame Orchestrator.
-Phases are strictly sequential; each phase must pass all tests before
-the next begins.
+本文档定义 Autogame Orchestrator 的阶段性路线。
+各阶段严格按顺序实施，每个阶段完成前必须通过所有测试。
 
-| Phase | Title | Scope |
+| 阶段 | 标题 | 范围 |
 |---|---|---|
-| 0 | Project Skeleton & Contracts | Package layout, data models, config validation, CLI skeleton (version/validate/plan), RunReport schema, JSONL logger, test suite, docs |
-| 1 | Generic Process Supervisor | ProcessSupervisor with Windows Job Object support, timeouts, stdout/stderr capture, exit-code handling, fake-program integration tests |
-| 2 | Probe Layer | ADB availability probe, TCP port probe, process-alive probe — each with stable ErrorCodes and configurable timeouts |
-| 3 | MuMu Adapter | Start/stop/query MuMu emulator via ADB, wait-for-ready, verify-stopped |
-| 4 | StarRail Adapter | Launch StarRailCopilot, monitor exit, capture output, enforce task timeout, verify-stopped |
-| 5 | MAA Adapter | Launch MAA CLI, enforce timeout, collect diagnostics |
-| 6 | AALC Adapter | Launch AALC with retry policy, enforce attempt timeouts |
-| 7 | Full Workflow | Orchestrate the complete lifecycle: validate → sync MAA config → update MAA → ensure-mumu → run SRP → stop SRP → stop MuMu → restart MuMu → run MAA → run AALC → write report |
-| 8 | Packaging & Default Entry Point | PyInstaller EXE, seamless replacement of legacy PS1 entry-point |
+| 0 | 项目骨架与行为契约 | 包布局、数据模型、配置校验、CLI（version/validate/plan）、RunReport schema、JSONL 日志、测试套件、文档 |
+| 1A | 进程基础契约与 Job Object 底座 | Deadline、CancellationToken、ProcessSpec、ManagedProcess、Win32 句柄封装、Job Object、CreateProcessW 启动器、Fake 程序扩展 |
+| 1B | 通用进程监督器 | ProcessSupervisor 完整生命周期：wait、timeout、cancel、优雅停止、强杀、幂等 close、进程树清理 |
+| 2 | 探针层 | ADB 可用性探针、TCP 端口探针、进程存活探针 |
+| 3 | MuMu Adapter | 通过 ADB 启动/停止/查询 MuMu 模拟器 |
+| 4 | StarRail Adapter | 启动 StarRailCopilot、监控退出、捕获输出 |
+| 5 | MAA Adapter | 启动 MAA CLI |
+| 6 | AALC Adapter | 启动 AALC（支持重试） |
+| 7 | 完整工作流 | 编排完整生命周期 |
+| 8 | 打包与默认入口 | PyInstaller EXE、无缝替换旧 PS1 入口点 |
 
-Each phase builds on the previous one but must not regress tests from
-earlier phases.
+每个阶段基于前一阶段构建，但不得退化先前阶段的测试。

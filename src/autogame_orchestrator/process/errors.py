@@ -1,0 +1,23 @@
+"""进程启动与生命周期错误码。
+
+阶段 1A 使用局部错误枚举，不与阶段 0 的全局 ErrorCode 耦合。
+阶段 1B 或后续集成阶段再决定映射关系。
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class ProcessLaunchErrorCode(StrEnum):
+    """进程启动阶段可能遇到的错误码。"""
+
+    EXECUTABLE_NOT_FOUND = "EXECUTABLE_NOT_FOUND"
+    WORKING_DIRECTORY_NOT_FOUND = "WORKING_DIRECTORY_NOT_FOUND"
+    OUTPUT_OPEN_FAILED = "OUTPUT_OPEN_FAILED"
+    CREATE_PROCESS_FAILED = "CREATE_PROCESS_FAILED"
+    JOB_CREATE_FAILED = "JOB_CREATE_FAILED"
+    JOB_CONFIGURE_FAILED = "JOB_CONFIGURE_FAILED"
+    JOB_ASSIGN_FAILED = "JOB_ASSIGN_FAILED"
+    RESUME_THREAD_FAILED = "RESUME_THREAD_FAILED"
+    HANDLE_CLOSE_FAILED = "HANDLE_CLOSE_FAILED"
