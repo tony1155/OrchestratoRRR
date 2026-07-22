@@ -197,21 +197,64 @@ class StarRailConfig:
 class MAAConfig:
     executable: str = ""
     working_directory: str = ""
+    arguments: tuple[str, ...] = ()
+    environment_overrides: tuple[tuple[str, str], ...] = ()
     timeout_seconds: int = 1800
+    stop_timeout_seconds: int = 10
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
-        errors.extend(_validate_non_empty_str(self.executable, "executable"))
-        errors.extend(_validate_non_empty_str(self.working_directory, "working_directory"))
-        errors.extend(_validate_positive_int(self.timeout_seconds, "timeout_seconds"))
+        if not isinstance(self.executable, str):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        else:
+            errors.extend(_validate_non_empty_str(self.executable, "executable"))
+        if not isinstance(self.working_directory, str):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        else:
+            errors.extend(_validate_non_empty_str(self.working_directory, "working_directory"))
+        if not isinstance(self.arguments, tuple):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        else:
+            for argument in self.arguments:
+                if not isinstance(argument, str) or not argument.strip():
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.environment_overrides, tuple):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        else:
+            seen_keys: set[str] = set()
+            for entry in self.environment_overrides:
+                if not isinstance(entry, tuple) or len(entry) != 2:
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+                    continue
+                key, value = entry
+                if not isinstance(key, str) or not key.strip() or not isinstance(value, str):
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+                    continue
+                folded = key.casefold()
+                if folded in seen_keys:
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+                seen_keys.add(folded)
+        for timeout_value in (self.timeout_seconds, self.stop_timeout_seconds):
+            if not isinstance(timeout_value, int) or isinstance(timeout_value, bool):
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            else:
+                errors.extend(_validate_positive_int(timeout_value, "timeout"))
         return errors
 
     def check_paths(self) -> list[ErrorCode]:
         from pathlib import Path
 
         errors: list[ErrorCode] = []
-        errors.extend(_check_required_path(Path(self.executable), "executable"))
-        errors.extend(_check_required_path(Path(self.working_directory), "working_directory"))
+        executable = Path(self.executable)
+        if not executable.exists():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+        elif not executable.is_file():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_FILE)
+        working_directory = Path(self.working_directory)
+        if not working_directory.exists():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+        elif not working_directory.is_dir():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_DIRECTORY)
         return errors
 
 

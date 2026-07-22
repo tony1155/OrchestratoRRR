@@ -242,22 +242,35 @@ def _parse_maa(raw: object) -> tuple[MAAConfig | None, list[ErrorCode]]:
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return None, errors
 
-    for fld in ("executable", "working_directory"):
-        val = raw.get(fld)
-        if not isinstance(val, str) or not val.strip():
-            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
-
+    executable = raw.get("executable")
+    working_directory = raw.get("working_directory")
+    if not isinstance(executable, str) or not executable.strip():
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    if not isinstance(working_directory, str) or not working_directory.strip():
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    arguments = _tolist(raw.get("arguments", []))
+    if arguments is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    environment = _to_string_mapping(raw.get("environment", {}))
+    if environment is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
     timeout = raw.get("timeout_seconds", 1800)
-    if not isinstance(timeout, int):
+    stop_timeout = raw.get("stop_timeout_seconds", 10)
+    if not isinstance(timeout, int) or isinstance(timeout, bool):
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    if not isinstance(stop_timeout, int) or isinstance(stop_timeout, bool):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
     if errors:
         return None, errors
 
     return MAAConfig(
-        executable=str(raw.get("executable", "")),
-        working_directory=str(raw.get("working_directory", "")),
-        timeout_seconds=int(timeout),
+        executable=executable if isinstance(executable, str) else "",
+        working_directory=working_directory if isinstance(working_directory, str) else "",
+        arguments=tuple(arguments) if arguments is not None else (),
+        environment_overrides=environment if environment is not None else (),
+        timeout_seconds=timeout,
+        stop_timeout_seconds=stop_timeout,
     ), []
 
 

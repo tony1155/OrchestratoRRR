@@ -1,5 +1,7 @@
 # OrchestratoRRR
 
+当前阶段：Phase 4——MAA CLI Runtime Adapter。Fake 环境已完成，真实 MAA 未运行。MAA 成功唯一依据为 exit 0，不解析输出；未实现 MAA 更新、MAA 配置同步、完整工作流或公开 run CLI，AALC Adapter 尚未实现。
+
 OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进程编排器。
 
 项目正在逐阶段替换旧的单体 PowerShell 编排流程，目标是可靠管理 MuMu Player、StarRailCopilot、MAA 和 AALC，并为每个外部进程提供明确的超时、取消、进程树清理和结构化结果。

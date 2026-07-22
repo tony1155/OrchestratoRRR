@@ -27,7 +27,12 @@ PYTHONIOENCODING = "utf-8"
 [maa]
 executable = "C:/path/to/maa.exe"
 working_directory = "C:/path/to/maa-cli"
+arguments = []
 timeout_seconds = 1800
+stop_timeout_seconds = 10
+
+[maa.environment]
+PYTHONIOENCODING = "utf-8"
 
 [aalc]
 executable = "C:/path/to/AALC.exe"

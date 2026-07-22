@@ -1,5 +1,9 @@
 # OrchestratoRRR 阶段规划
 
+## Phase 4——MAA CLI Runtime Adapter
+
+Fake 环境完成；真实 MAA smoke 待批准。未实现 MAA 更新、MAA 配置同步、完整工作流、公开 run CLI 或 AALC Adapter。
+
 本文档定义 Autogame Orchestrator 的阶段性路线。
 各阶段严格按顺序实施，每个阶段完成前必须通过所有测试。
 

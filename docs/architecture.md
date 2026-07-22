@@ -1,5 +1,9 @@
 # OrchestratoRRR 架构
 
+## Phase 4——MAA CLI Runtime Adapter
+
+Fake 环境完成；真实 MAA 未运行。MAAAdapter 仅以 exit 0 判定成功，不解析输出；未实现 MAA 更新、MAA 配置同步、完整工作流或公开 run CLI，AALC Adapter 尚未实现。
+
 ## 当前状态
 
 Phase 3——StarRailCopilot Adapter（Fake 环境完成，真实 smoke 待用户批准）。
