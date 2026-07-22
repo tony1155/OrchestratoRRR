@@ -18,8 +18,7 @@ Fake AALC 环境完成；真实 AALC smoke 待批准。成功仅依据 exit 0，
 | 2D | MuMu 候选 CLI 安全探针 | 诊断模块：固定帮助参数白名单、ProcessSupervisor 有界执行、受限输出收集；探针工具完成并完成安全收口；真实候选执行待安全窗口 |
 | 3 | StarRail Adapter | 启动 StarRailCopilot、监控退出、捕获输出 |
 | 4 | MAA Adapter | 启动 MAA CLI |
-| 5 | AALC Adapter | 有界运行 AALC，最多三次尝试 |
-| 5 | AALC Adapter | 启动 AALC（支持重试） |
+| 5 | AALC Adapter | 有界启动 AALC，最多三次尝试，仅非零退出和单次尝试超时允许重试 |
 | 6 | 完整工作流 | 编排完整生命周期 |
 | 7 | 打包与默认入口 | PyInstaller EXE、无缝替换旧 PS1 入口点 |
 
