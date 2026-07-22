@@ -19,6 +19,7 @@ Fake AALC 环境完成；真实 AALC smoke 待批准。成功仅依据 exit 0，
 | 3 | StarRail Adapter | 启动 StarRailCopilot、监控退出、捕获输出 |
 | 4 | MAA Adapter | 启动 MAA CLI |
 | 5 | AALC Adapter | 有界启动 AALC，最多三次尝试，仅非零退出和单次尝试超时允许重试 |
+| 门禁 | Phase 6 前的真实 smoke | 依次完成 StarRail、MAA、AALC 单 Adapter smoke 并人工评审；当前仅完成工具准备，真实 smoke 尚未执行 |
 | 6 | 完整工作流 | 编排完整生命周期 |
 | 7 | 打包与默认入口 | PyInstaller EXE、无缝替换旧 PS1 入口点 |
 

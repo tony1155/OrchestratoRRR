@@ -13,6 +13,7 @@ dist/
 
 logs/
 run-results/
+smoke-results/
 tmp/
 
 config/orchestrator.local.toml

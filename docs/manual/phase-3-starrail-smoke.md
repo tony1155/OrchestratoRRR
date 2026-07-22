@@ -1,5 +1,7 @@
 # 阶段 3——StarRailCopilot 手工验收说明
 
+执行前必须先遵循 [Adapter 真实 smoke 统一门禁](adapter-real-smoke-gate.md)。本 Adapter 的特有成功判定仍为增量日志成功关键词。
+
 > **实施代理不得执行本文件中的任何真实命令。**
 > 只有用户明确批准后，才允许执行真实 StarRailCopilot smoke。
 
