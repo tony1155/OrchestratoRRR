@@ -406,16 +406,21 @@ def test_child_process_is_cleaned_after_success(tmp_path: Path) -> None:
     assert result.status == StarRailRunStatus.COMPLETED
     assert result.pid is not None
     _check_pid_exited(result.pid, "child父进程")
-    # 等待子进程写入 PID 文件
-    for _ in range(50):
+    # 等待子进程写入真实 PID
+    child_pid: int = 0
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
         if child_pid_file.exists():
-            break
+            try:
+                raw = child_pid_file.read_text().strip()
+                child_pid = int(raw)
+                if child_pid > 0:
+                    break
+            except (ValueError, OSError):
+                pass
         time.sleep(0.1)
-    assert child_pid_file.exists()
-    child_pid = int(child_pid_file.read_text().strip())
-    # 占位符 "0" 表示子进程尚未写入真实 PID
-    if child_pid != 0:
-        _check_pid_exited(child_pid, "child子进程")
+
+    assert child_pid > 0, f"子进程 PID 文件应包含有效正整数，内容: {child_pid_file.read_text()!r}"
     _check_pid_exited(child_pid, "child子进程")
 
 

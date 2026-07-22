@@ -18,6 +18,7 @@ from autogame_orchestrator.diagnostics.mumu_cli_probe import (
     MumuCliAttemptStatus,
     MumuCliCandidateStatus,
     MumuCliProbe,
+    MumuCliProbeReport,
     ProbeCommand,
     _read_limited_text,
     _redact_user_home,
@@ -255,40 +256,81 @@ def test_timeout_is_bounded_and_process_exits(tmp_path: Path) -> None:
     _check_pid_exited(pid, "timeout测试")
 
 
+def _wait_for_pid_file(path: Path, *, timeout_seconds: float = 3.0) -> int:
+    """等待 PID 文件出现并包含有效正整数。"""
+    deadline = time.monotonic() + timeout_seconds
+    last_text = ""
+
+    while time.monotonic() < deadline:
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except (FileNotFoundError, OSError):
+            time.sleep(0.02)
+            continue
+
+        last_text = text
+        try:
+            pid = int(text)
+        except ValueError:
+            time.sleep(0.02)
+            continue
+
+        if pid > 0:
+            return pid
+        time.sleep(0.02)
+
+    raise AssertionError(f"等待 Fake 进程 PID 文件超时：path={path}, last_text={last_text!r}")
+
+
 # ════════════════════════════════════════════════════════════════════
-# cancellation
+# cancellation（基于 PID 同步，不依赖固定延迟）
 # ════════════════════════════════════════════════════════════════════
 
 
 def test_cancellation_is_not_timeout(tmp_path: Path) -> None:
-    pid_file = tmp_path / "pid.txt"
+    pid_file = tmp_path / "cancel-pid.txt"
     cmd = ProbeCommand(
         display_name="MuMuManager.exe",
         executable=Path(_PYTHON),
         prefix_arguments=(_FAKE_CLI, "--mode", "sleep_forever", "--pid-file", str(pid_file)),
     )
-    probe = MumuCliProbe(attempt_timeout_seconds=2.0, total_timeout_seconds=10.0)
+    probe = MumuCliProbe(attempt_timeout_seconds=10.0, total_timeout_seconds=10.0)
     cancel = CancellationToken()
-    t0 = time.monotonic()
 
-    def _cancel() -> None:
-        time.sleep(0.15)
+    results: list[MumuCliProbeReport] = []
+    failures: list[BaseException] = []
+
+    def run_probe() -> None:
+        try:
+            results.append(probe.probe(cmd, cancel=cancel))
+        except BaseException as exc:
+            failures.append(exc)
+
+    worker = threading.Thread(target=run_probe, daemon=True)
+    started = time.monotonic()
+    worker.start()
+
+    pid: int | None = None
+    try:
+        pid = _wait_for_pid_file(pid_file, timeout_seconds=3.0)
+    finally:
         cancel.cancel()
+        worker.join(timeout=5.0)
 
-    t = threading.Thread(target=_cancel, daemon=True)
-    t.start()
+    elapsed = time.monotonic() - started
 
-    report = probe.probe(cmd, cancel=cancel)
-    t.join()
-    elapsed = time.monotonic() - t0
+    assert worker.is_alive() is False
+    assert failures == []
+    assert len(results) == 1
+    assert pid is not None
+    assert pid > 0
 
-    assert elapsed < 5.0
+    report = results[0]
+    assert isinstance(report, MumuCliProbeReport)
     assert report.status == MumuCliCandidateStatus.CANCELLED
     assert len(report.attempts) == 1
     assert report.attempts[0].status == MumuCliAttemptStatus.CANCELLED
-    assert pid_file.exists()
-
-    pid = int(pid_file.read_text(encoding="utf-8").strip())
+    assert elapsed < 5.0
     _check_pid_exited(pid, "cancel测试")
 
 

@@ -128,14 +128,15 @@ def main() -> None:
 
     elif mode == "child_success":
         if child_pid:
-            # 写入占位文件确认子进程将被启动
-            Path(child_pid).parent.mkdir(parents=True, exist_ok=True)
-            Path(child_pid).write_text("0", encoding="utf-8")
-            subprocess.Popen(
-                [sys.executable, _FAKE_CHILD, "--pid-file", child_pid],
+            proc = subprocess.Popen(
+                [sys.executable, _FAKE_CHILD, "--pid-file", child_pid, "--sleep-seconds", "120"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            # 父进程直接写入子 PID，不依赖子进程写入
+            child_pid_path = Path(child_pid)
+            child_pid_path.parent.mkdir(parents=True, exist_ok=True)
+            child_pid_path.write_text(str(proc.pid), encoding="utf-8")
         _append_log(log_file, "No task pending")
         while True:
             time.sleep(1.0)
