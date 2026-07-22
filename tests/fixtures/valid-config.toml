@@ -37,5 +37,10 @@ PYTHONIOENCODING = "utf-8"
 [aalc]
 executable = "C:/path/to/AALC.exe"
 working_directory = "C:/path/to/AALC"
+arguments = []
 attempts = 3
 attempt_timeout_seconds = 7200
+stop_timeout_seconds = 10
+
+[aalc.environment]
+PYTHONIOENCODING = "utf-8"

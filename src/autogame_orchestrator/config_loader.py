@@ -280,25 +280,37 @@ def _parse_aalc(raw: object) -> tuple[AALCConfig | None, list[ErrorCode]]:
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return None, errors
 
-    for fld in ("executable", "working_directory"):
-        val = raw.get(fld)
-        if not isinstance(val, str) or not val.strip():
-            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
-
-    attempts = raw.get("attempts", 3)
-    if not isinstance(attempts, int):
+    executable = raw.get("executable")
+    working_directory = raw.get("working_directory")
+    if not isinstance(executable, str) or not executable.strip():
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
-
+    if not isinstance(working_directory, str) or not working_directory.strip():
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    arguments = _tolist(raw.get("arguments", []))
+    if arguments is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    environment = _to_string_mapping(raw.get("environment", {}))
+    if environment is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    attempts = raw.get("attempts", 3)
+    if not isinstance(attempts, int) or isinstance(attempts, bool):
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
     att_to = raw.get("attempt_timeout_seconds", 7200)
-    if not isinstance(att_to, int):
+    stop_to = raw.get("stop_timeout_seconds", 10)
+    if not isinstance(att_to, int) or isinstance(att_to, bool):
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    if not isinstance(stop_to, int) or isinstance(stop_to, bool):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
     if errors:
         return None, errors
 
     return AALCConfig(
-        executable=str(raw.get("executable", "")),
-        working_directory=str(raw.get("working_directory", "")),
-        attempts=int(attempts),
-        attempt_timeout_seconds=int(att_to),
+        executable=executable if isinstance(executable, str) else "",
+        working_directory=working_directory if isinstance(working_directory, str) else "",
+        arguments=tuple(arguments) if arguments is not None else (),
+        environment_overrides=environment if environment is not None else (),
+        attempts=attempts,
+        attempt_timeout_seconds=att_to,
+        stop_timeout_seconds=stop_to,
     ), []

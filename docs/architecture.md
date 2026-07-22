@@ -1,12 +1,12 @@
 # OrchestratoRRR 架构
 
-## Phase 4——MAA CLI Runtime Adapter
+## Phase 5——AALC Runtime Adapter
 
-Fake 环境完成；真实 MAA 未运行。MAAAdapter 仅以 exit 0 判定成功，不解析输出；未实现 MAA 更新、MAA 配置同步、完整工作流或公开 run CLI，AALC Adapter 尚未实现。
+Fake AALC 环境完成；真实 AALC smoke 待用户批准。AALCAdapter 通过 ProcessSupervisor 创建独立 Job Object 尝试，成功仅依据 exit 0，最多三次尝试。只有非零退出和单次尝试超时可重试；cleanup failure、取消、路径、配置和启动失败不重试。
 
 ## 当前状态
 
-Phase 3——StarRailCopilot Adapter（Fake 环境完成，真实 smoke 待用户批准）。
+Phase 5——AALC Runtime Adapter（Fake 环境完成，真实 smoke 待用户批准）。
 
 自动测试只启动仓库 Fake 子进程；未启动任何真实业务程序。
 
