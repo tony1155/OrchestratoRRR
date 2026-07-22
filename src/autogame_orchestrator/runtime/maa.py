@@ -11,13 +11,51 @@ from pathlib import Path
 
 from autogame_orchestrator.config_model import MAAConfig
 from autogame_orchestrator.process import CancellationToken, Deadline, ProcessSpec, ProcessSupervisor
-from autogame_orchestrator.process.errors import TerminationReason
+from autogame_orchestrator.process.errors import ProcessExecutionErrorCode, TerminationReason
+from autogame_orchestrator.process.result import ProcessResult
 from autogame_orchestrator.runtime.maa_models import MAAErrorCode, MAARunResult, MAARunStatus
 
 DEFAULT_POLL_INTERVAL_SECONDS = 0.05
 MAX_STDOUT_BYTES = 64 * 1024
 MAX_STDERR_BYTES = 64 * 1024
 MAX_OUTPUT_EXCERPT_CHARS = 8 * 1024
+
+
+def _map_process_result(
+    process_result: ProcessResult,
+    *,
+    cancelled: bool,
+    deadline_expired: bool,
+) -> tuple[MAARunStatus, MAAErrorCode, bool]:
+    """将通用进程结果映射为稳定的 MAA 结果。"""
+    mapping = {
+        TerminationReason.NORMAL_EXIT: (MAARunStatus.COMPLETED, MAAErrorCode.OK, True),
+        TerminationReason.NONZERO_EXIT: (MAARunStatus.FAILED, MAAErrorCode.PROCESS_EXIT_NONZERO, True),
+        TerminationReason.TIMEOUT: (MAARunStatus.TIMEOUT, MAAErrorCode.PROCESS_TIMEOUT, True),
+        TerminationReason.CANCELLED: (MAARunStatus.CANCELLED, MAAErrorCode.CANCELLED, True),
+        TerminationReason.START_FAILED: (MAARunStatus.FAILED, MAAErrorCode.PROCESS_START_FAILED, True),
+        TerminationReason.WAIT_FAILED: (MAARunStatus.FAILED, MAAErrorCode.WAIT_FAILED, False),
+        TerminationReason.TERMINATION_FAILED: (MAARunStatus.FAILED, MAAErrorCode.CLEANUP_FAILED, False),
+        TerminationReason.STOPPED: (MAARunStatus.FAILED, MAAErrorCode.INTERNAL_ERROR, False),
+    }
+    status, code, cleaned = mapping[process_result.termination_reason]
+    if process_result.termination_reason == TerminationReason.TERMINATION_FAILED:
+        if cancelled:
+            status = MAARunStatus.CANCELLED
+        elif deadline_expired:
+            status = MAARunStatus.TIMEOUT
+    return status, code, cleaned
+
+
+def _stable_process_diagnostics(process_result: ProcessResult) -> dict[str, str | int]:
+    """只保留不会泄漏本机路径的稳定进程诊断字段。"""
+    diagnostics: dict[str, str | int] = {"process_error_code": process_result.error_code.value}
+    if process_result.error_code == ProcessExecutionErrorCode.START_FAILED:
+        for key in ("launch_error_code", "win32_code"):
+            value = process_result.diagnostics.get(key)
+            if isinstance(value, (str, int)) and not isinstance(value, bool):
+                diagnostics[key] = value
+    return diagnostics
 
 
 def _read_output_excerpt(path: Path, *, byte_limit: int) -> tuple[str, bool, bool]:
@@ -118,7 +156,12 @@ class MAAAdapter:
                         close_failed = True
                 stdout, stdout_truncated, stdout_failed = _read_output_excerpt(stdout_path, byte_limit=MAX_STDOUT_BYTES)
                 stderr, stderr_truncated, stderr_failed = _read_output_excerpt(stderr_path, byte_limit=MAX_STDERR_BYTES)
-                diagnostics = {"stdout_read_failed": stdout_failed, "stderr_read_failed": stderr_failed}
+                diagnostics: dict[str, str | int | bool] = {
+                    "stdout_read_failed": stdout_failed,
+                    "stderr_read_failed": stderr_failed,
+                }
+                if process_result is not None:
+                    diagnostics.update(_stable_process_diagnostics(process_result))
                 if close_failed:
                     status = MAARunStatus.FAILED
                     if process_result is not None and process_result.termination_reason == TerminationReason.TIMEOUT:
@@ -142,22 +185,11 @@ class MAAAdapter:
                     return result(
                         MAARunStatus.FAILED, MAAErrorCode.INTERNAL_ERROR, pid=None, owned_process_cleaned=False
                     )
-                mapping = {
-                    TerminationReason.NORMAL_EXIT: (MAARunStatus.COMPLETED, MAAErrorCode.OK, True),
-                    TerminationReason.NONZERO_EXIT: (MAARunStatus.FAILED, MAAErrorCode.PROCESS_EXIT_NONZERO, True),
-                    TerminationReason.TIMEOUT: (MAARunStatus.TIMEOUT, MAAErrorCode.PROCESS_TIMEOUT, True),
-                    TerminationReason.CANCELLED: (MAARunStatus.CANCELLED, MAAErrorCode.CANCELLED, True),
-                    TerminationReason.START_FAILED: (MAARunStatus.FAILED, MAAErrorCode.PROCESS_START_FAILED, True),
-                    TerminationReason.WAIT_FAILED: (MAARunStatus.FAILED, MAAErrorCode.WAIT_FAILED, False),
-                    TerminationReason.TERMINATION_FAILED: (MAARunStatus.FAILED, MAAErrorCode.CLEANUP_FAILED, False),
-                    TerminationReason.STOPPED: (MAARunStatus.FAILED, MAAErrorCode.INTERNAL_ERROR, False),
-                }
-                status, code, cleaned = mapping[process_result.termination_reason]
-                if process_result.termination_reason == TerminationReason.TERMINATION_FAILED:
-                    if cancel is not None and cancel.is_cancelled:
-                        status = MAARunStatus.CANCELLED
-                    elif effective_deadline.expired:
-                        status = MAARunStatus.TIMEOUT
+                status, code, cleaned = _map_process_result(
+                    process_result,
+                    cancelled=cancel is not None and cancel.is_cancelled,
+                    deadline_expired=effective_deadline.expired,
+                )
                 return result(
                     status,
                     code,

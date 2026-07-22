@@ -53,8 +53,16 @@ class MAARunResult:
     diagnostics: Mapping[str, JsonValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.started_at.tzinfo is None or self.finished_at.tzinfo is None or self.duration_ms < 0:
-            raise ValueError("时间必须带时区且耗时非负")
+        if not isinstance(self.started_at, datetime) or self.started_at.tzinfo is None:
+            raise ValueError("started_at 必须是带时区的时间")
+        if not isinstance(self.finished_at, datetime) or self.finished_at.tzinfo is None:
+            raise ValueError("finished_at 必须是带时区的时间")
+        if self.finished_at < self.started_at:
+            raise ValueError("finished_at 不得早于 started_at")
+        if not isinstance(self.duration_ms, int) or isinstance(self.duration_ms, bool) or self.duration_ms < 0:
+            raise ValueError("duration_ms 必须是非负整数")
+        if not isinstance(self.stdout_excerpt, str) or not isinstance(self.stderr_excerpt, str):
+            raise ValueError("输出摘要必须是字符串")
         if self.status == MAARunStatus.COMPLETED:
             valid = self.error_code == MAAErrorCode.OK and self.termination_reason == TerminationReason.NORMAL_EXIT
             if not valid or self.exit_code != 0 or not self.owned_process_cleaned:
@@ -73,7 +81,11 @@ class MAARunResult:
                 raise ValueError("取消错误码不匹配")
             if self.termination_reason not in {TerminationReason.CANCELLED, TerminationReason.TERMINATION_FAILED}:
                 raise ValueError("取消终止原因不匹配")
-        if not is_json_serializable(dict(self.diagnostics)):
+        try:
+            diagnostics = dict(self.diagnostics)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("诊断信息必须是映射") from exc
+        if not is_json_serializable(diagnostics):
             raise ValueError("诊断信息必须可 JSON 序列化")
 
     @classmethod

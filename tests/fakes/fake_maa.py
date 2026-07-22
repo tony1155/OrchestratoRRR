@@ -54,18 +54,18 @@ def main() -> None:
         sys.stdout.buffer.write("中文输出".encode("utf-16"))
         return
     if args.mode in {"child_exit_zero", "child_hang"}:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [
                 sys.executable,
                 str(Path(__file__).with_name("fake_child.py")),
-                "--pid-file",
-                args.child_pid_file,
                 "--sleep-seconds",
                 "120",
             ]
         )
+        _write(args.child_pid_file, str(proc.pid))
         if args.mode == "child_hang":
             time.sleep(120)
+        print("子进程已启动", flush=True)
         return
     raise SystemExit(9)
 
