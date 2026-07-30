@@ -4,7 +4,11 @@
 
 `diagnostics.adapter_smoke` 是用户手工触发的受限诊断入口，不是公开生产 run CLI，也不属于完整工作流。它在精确确认后使用正式配置加载器，仅校验并构造所选 Adapter，传入有限 Deadline 和取消令牌，再将安全字段投影原子写入 JSON。真实进程的启动与清理仍完全由现有 Adapter 和 ProcessSupervisor 负责。
 
-该门禁不编排 MuMu/ADB，不串联多个 Adapter，不记录本机路径、环境值、输出原文或 PID 数值。当前只完成工具与替身测试，真实 smoke 尚未执行。
+该门禁不编排 MuMu/ADB，不串联多个 Adapter，不记录本机路径、环境值、输出原文或 PID 数值。当前只完成工具与替身测试，尚无可接受的完整真实 smoke 验收证据。
+
+`platform.windows_elevation` 提供可复用的入口级 Windows 自提权 API。它先用进程 Token 判断权限，再通过 `ShellExecuteExW` 的 `runas` 提升当前 Python 模块，等待子入口结束并转发退出码。普通父入口不构造 Adapter 或 ProcessSupervisor；提升后的入口继续走 ProcessSupervisor → CreateProcessW(CREATE_SUSPENDED) → Job Object → ResumeThread。UAC 取消和提权失败分别使用独立稳定结果，命令行只转发既有 CLI 参数和路径，不传递配置内容或环境敏感值。
+
+未来 Phase 6 必须在启动任何阶段前读取完整计划，判断是否包含 `requires_administrator=true` 的 Adapter，必要时先提升整个 OrchestratoRRR，再启动第一个真实阶段。不得运行到 AALC 阶段才临时提升。本任务未实现该完整工作流。
 
 ## Phase 5——AALC Runtime Adapter
 

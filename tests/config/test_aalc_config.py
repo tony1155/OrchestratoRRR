@@ -69,6 +69,22 @@ def test_aalc_config_rejects_bool_stop_timeout() -> None:
     assert AALCConfig("x", "y", stop_timeout_seconds=False).validate() == E
 
 
+def test_aalc_requires_administrator_defaults_false() -> None:
+    assert AALCConfig("x", "y").requires_administrator is False
+
+
+def test_aalc_requires_administrator_accepts_bool() -> None:
+    assert AALCConfig("x", "y", requires_administrator=True).validate() == []
+
+
+def test_aalc_requires_administrator_rejects_string() -> None:
+    assert AALCConfig("x", "y", requires_administrator="true").validate() == E  # type: ignore[arg-type]
+
+
+def test_aalc_requires_administrator_rejects_integer() -> None:
+    assert AALCConfig("x", "y", requires_administrator=1).validate() == E  # type: ignore[arg-type]
+
+
 def test_loader_parses_all_aalc_fields() -> None:
     c, e = _parse_aalc(
         {
@@ -79,10 +95,11 @@ def test_loader_parses_all_aalc_fields() -> None:
             "attempts": 2,
             "attempt_timeout_seconds": 30,
             "stop_timeout_seconds": 4,
+            "requires_administrator": True,
         }
     )
     assert e == []
-    assert c == AALCConfig("a", "w", ("x",), (("A", "1"),), 2, 30, 4)
+    assert c == AALCConfig("a", "w", ("x",), (("A", "1"),), 2, 30, 4, True)
 
 
 def test_loader_defaults_optional_arguments_and_environment() -> None:
@@ -97,6 +114,14 @@ def test_loader_defaults_retry_and_timeout_values() -> None:
     assert e == []
     assert c is not None
     assert (c.attempts, c.attempt_timeout_seconds, c.stop_timeout_seconds) == (3, 7200, 10)
+    assert c.requires_administrator is False
+
+
+def test_loader_rejects_non_bool_requires_administrator() -> None:
+    assert _parse_aalc({"executable": "a", "working_directory": "w", "requires_administrator": "true"}) == (
+        None,
+        E,
+    )
 
 
 def test_loader_rejects_non_string_executable() -> None:

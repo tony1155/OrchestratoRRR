@@ -267,6 +267,7 @@ class AALCConfig:
     attempts: int = 3
     attempt_timeout_seconds: int = 7200
     stop_timeout_seconds: int = 10
+    requires_administrator: bool = False
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
@@ -301,6 +302,8 @@ class AALCConfig:
         for timeout_value in (self.attempt_timeout_seconds, self.stop_timeout_seconds):
             if not isinstance(timeout_value, int) or isinstance(timeout_value, bool) or timeout_value <= 0:
                 errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.requires_administrator, bool):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return errors
 
     def check_paths(self) -> list[ErrorCode]:

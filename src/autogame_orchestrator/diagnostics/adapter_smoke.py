@@ -7,6 +7,7 @@ import json
 import math
 import os
 import signal
+import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import replace
@@ -18,6 +19,11 @@ from typing import cast
 from autogame_orchestrator.config_loader import load_config
 from autogame_orchestrator.config_model import AALCConfig, MAAConfig, StarRailConfig
 from autogame_orchestrator.models import JsonValue
+from autogame_orchestrator.platform.windows_elevation import (
+    ElevationErrorCode,
+    is_process_elevated,
+    relaunch_current_process_elevated,
+)
 from autogame_orchestrator.process import CancellationToken, Deadline
 from autogame_orchestrator.runtime import AALCAdapter, MAAAdapter, StarRailAdapter
 from autogame_orchestrator.runtime.aalc_models import AALCRunResult
@@ -27,6 +33,10 @@ from autogame_orchestrator.runtime.starrail_models import StarRailRunResult
 CONFIRMATION = "I_UNDERSTAND_THIS_LAUNCHES_A_REAL_PROGRAM"
 EXIT_INPUT_ERROR = 2
 EXIT_INTERNAL_ERROR = 8
+EXIT_ELEVATION_CANCELLED = 9
+EXIT_ELEVATION_FAILED = 10
+ELEVATION_MARKER = "--_elevation-child"
+MODULE_NAME = "autogame_orchestrator.diagnostics.adapter_smoke"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -37,6 +47,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output")
     parser.add_argument("--confirm-real-execution")
     parser.add_argument("--allow-aalc-retries", action="store_true")
+    parser.add_argument(ELEVATION_MARKER, action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
@@ -162,7 +173,8 @@ def _deadline(raw: str | None) -> float | None:
 def main(argv: Sequence[str] | None = None) -> int:
     """执行单个 Adapter；参数错误以稳定退出码返回。"""
     try:
-        args = _parser().parse_args(argv)
+        raw_arguments = list(sys.argv[1:] if argv is None else argv)
+        args = _parser().parse_args(raw_arguments)
     except SystemExit:
         return EXIT_INPUT_ERROR
     if args.confirm_real_execution != CONFIRMATION:
@@ -190,6 +202,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         if selected.check_paths():
             print("拒绝执行：所选 Adapter 路径校验失败。")
             return EXIT_INPUT_ERROR
+        elevation_required = args.adapter == "aalc" and cast(AALCConfig, selected).requires_administrator
+        process_elevated = False
+        if elevation_required:
+            try:
+                process_elevated = is_process_elevated()
+            except OSError:
+                print("无法确认当前管理员权限，已安全停止。")
+                return EXIT_ELEVATION_FAILED
+            if not process_elevated:
+                if args._elevation_child:
+                    print("提权后的入口仍未获得管理员权限，已安全停止。")
+                    return EXIT_ELEVATION_FAILED
+                elevation = relaunch_current_process_elevated(["-m", MODULE_NAME, *raw_arguments, ELEVATION_MARKER])
+                if elevation.error_code == ElevationErrorCode.ELEVATION_CANCELLED:
+                    print("用户取消了管理员权限请求，未启动 Adapter。")
+                    return EXIT_ELEVATION_CANCELLED
+                if elevation.error_code == ElevationErrorCode.ELEVATION_FAILED or elevation.exit_code is None:
+                    print("管理员权限重启失败，未启动 Adapter。")
+                    return EXIT_ELEVATION_FAILED
+                return elevation.exit_code
         token = CancellationToken()
         previous = signal.getsignal(signal.SIGINT)
 
@@ -210,6 +242,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if not args.allow_aalc_retries:
                     aalc = replace(aalc, attempts=1)
                 payload = _project_aalc(AALCAdapter(aalc).run(deadline, token), token.is_cancelled)
+            payload["elevation_required"] = elevation_required
+            payload["process_elevated"] = process_elevated
         finally:
             signal.signal(signal.SIGINT, previous)
         try:

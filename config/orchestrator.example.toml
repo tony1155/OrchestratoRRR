@@ -54,6 +54,7 @@ arguments = []
 attempts = 3
 attempt_timeout_seconds = 7200
 stop_timeout_seconds = 10
+requires_administrator = false
 
 [aalc.environment]
 PYTHONIOENCODING = "utf-8"

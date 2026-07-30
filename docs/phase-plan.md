@@ -19,10 +19,12 @@ Fake AALC 环境完成；真实 AALC smoke 待批准。成功仅依据 exit 0，
 | 3 | StarRail Adapter | 启动 StarRailCopilot、监控退出、捕获输出 |
 | 4 | MAA Adapter | 启动 MAA CLI |
 | 5 | AALC Adapter | 有界启动 AALC，最多三次尝试，仅非零退出和单次尝试超时允许重试 |
-| 门禁 | Phase 6 前的真实 smoke | 依次完成 StarRail、MAA、AALC 单 Adapter smoke 并人工评审；当前仅完成工具准备，真实 smoke 尚未执行 |
+| 门禁 | Phase 6 前的真实 smoke | 依次完成 StarRail、MAA、AALC 单 Adapter smoke 并人工评审；当前已准备工具，尚未完成最终真实 smoke 验收 |
 | 6 | 完整工作流 | 编排完整生命周期 |
 | 7 | 打包与默认入口 | PyInstaller EXE、无缝替换旧 PS1 入口点 |
 
 > **下一门禁：** 只有获得明确 start/stop/实例选择语法，并完成独立进程所有权验证后，才允许修改生产 start_arguments/stop_arguments。
 
 每个阶段基于前一阶段构建，但不得退化先前阶段的测试。
+
+Phase 6 的入口权限规划必须先读取完整计划；只要计划包含 `requires_administrator=true` 的 Adapter，就在第一个真实阶段前提升整个 OrchestratoRRR。不得在执行到 AALC 时才临时提升，也不得用 `runas` 绕过现有 ProcessSupervisor 单独启动 AALC。当前仅提供可复用 bootstrap，Phase 6 尚未实现。

@@ -297,9 +297,12 @@ def _parse_aalc(raw: object) -> tuple[AALCConfig | None, list[ErrorCode]]:
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
     att_to = raw.get("attempt_timeout_seconds", 7200)
     stop_to = raw.get("stop_timeout_seconds", 10)
+    requires_administrator = raw.get("requires_administrator", False)
     if not isinstance(att_to, int) or isinstance(att_to, bool):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
     if not isinstance(stop_to, int) or isinstance(stop_to, bool):
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    if not isinstance(requires_administrator, bool):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
     if errors:
@@ -313,4 +316,5 @@ def _parse_aalc(raw: object) -> tuple[AALCConfig | None, list[ErrorCode]]:
         attempts=attempts,
         attempt_timeout_seconds=att_to,
         stop_timeout_seconds=stop_to,
+        requires_administrator=requires_administrator,
     ), []
