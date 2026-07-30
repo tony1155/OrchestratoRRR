@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import locale
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -21,7 +23,6 @@ from autogame_orchestrator.diagnostics.mumu_cli_probe import (
     MumuCliProbeReport,
     ProbeCommand,
     _read_limited_text,
-    _redact_user_home,
     report_to_dict,
     validate_mumu_candidate,
 )
@@ -78,40 +79,40 @@ def test_validate_candidate_accepts_nemu_shell(tmp_path: Path) -> None:
 
 
 def test_validate_candidate_rejects_relative_path() -> None:
-    with pytest.raises(ValueError, match="绝对路径"):
+    with pytest.raises(ValueError, match="^candidate_not_absolute$"):
         validate_mumu_candidate(Path("relative/MuMuManager.exe"))
 
 
 def test_validate_candidate_rejects_directory(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="普通文件"):
+    with pytest.raises(ValueError, match="^candidate_not_file$"):
         validate_mumu_candidate(tmp_path)
 
 
 def test_validate_candidate_rejects_mumu_nx_main(tmp_path: Path) -> None:
     p = tmp_path / "MuMuNxMain.exe"
     p.write_text("", encoding="utf-8")
-    with pytest.raises(ValueError, match="禁止"):
+    with pytest.raises(ValueError, match="^candidate_forbidden$"):
         validate_mumu_candidate(p)
 
 
 def test_validate_candidate_rejects_mumu_nx_device(tmp_path: Path) -> None:
     p = tmp_path / "MuMuNxDevice.exe"
     p.write_text("", encoding="utf-8")
-    with pytest.raises(ValueError, match="禁止"):
+    with pytest.raises(ValueError, match="^candidate_forbidden$"):
         validate_mumu_candidate(p)
 
 
 def test_validate_candidate_rejects_vmm_manage(tmp_path: Path) -> None:
     p = tmp_path / "MuMuVMMManage.exe"
     p.write_text("", encoding="utf-8")
-    with pytest.raises(ValueError, match="禁止"):
+    with pytest.raises(ValueError, match="^candidate_forbidden$"):
         validate_mumu_candidate(p)
 
 
 def test_validate_candidate_rejects_unknown_filename(tmp_path: Path) -> None:
     p = tmp_path / "unknown.exe"
     p.write_text("", encoding="utf-8")
-    with pytest.raises(ValueError, match="允许"):
+    with pytest.raises(ValueError, match="^candidate_not_allowlisted$"):
         validate_mumu_candidate(p)
 
 
@@ -393,6 +394,45 @@ def test_report_to_dict_is_json_serializable() -> None:
     s = json.dumps(d, ensure_ascii=False)
     assert "help_discovered" in s
     assert d["runtime_approved"] is False
+    assert "candidate_path" not in d
+    assert "stdout_excerpt" not in d["attempts"][0]
+    assert "stderr_excerpt" not in d["attempts"][0]
+    assert d["attempts"][0]["stdout_present"] is True
+    assert d["attempts"][0]["stderr_present"] is False
+
+
+def test_public_markers_are_fixed_allowlist() -> None:
+    report = MumuCliProbe().probe(_make_command("help_stdout"))
+    attempt = report_to_dict(report)["attempts"][0]
+
+    assert set(attempt["matched_markers"]) <= {
+        "usage",
+        "options",
+        "commands",
+        "command",
+        "help",
+        "start",
+        "stop",
+        "instance",
+        "device",
+        "用法",
+        "选项",
+        "命令",
+        "帮助",
+        "启动",
+        "停止",
+        "实例",
+        "设备",
+    }
+
+
+def test_stderr_presence_is_projected_without_excerpt() -> None:
+    report = MumuCliProbe().probe(_make_command("help_stderr_nonzero"))
+    attempt = report_to_dict(report)["attempts"][0]
+
+    assert attempt["stdout_present"] is False
+    assert attempt["stderr_present"] is True
+    assert "stderr_excerpt" not in attempt
 
 
 def test_cli_emits_json_for_fake_candidate(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -424,8 +464,11 @@ def test_cli_emits_json_for_fake_candidate(monkeypatch: pytest.MonkeyPatch, caps
     assert payload["candidate_name"] == "MuMuManager.exe"
     assert payload["status"] == "help_discovered"
     assert payload["runtime_approved"] is False
+    assert "candidate_path" not in payload
     assert len(payload["attempts"]) == 1
     assert payload["attempts"][0]["status"] == "help_evidence"
+    assert "stdout_excerpt" not in payload["attempts"][0]
+    assert "stderr_excerpt" not in payload["attempts"][0]
 
 
 def test_cli_rejects_forbidden_candidate(tmp_path: Path) -> None:
@@ -457,24 +500,158 @@ def test_cli_rejects_unknown_argument() -> None:
 
 
 # ════════════════════════════════════════════════════════════════════
-# 路径脱敏
+# 路径隐私和模块执行
 # ════════════════════════════════════════════════════════════════════
 
 
-def test_candidate_path_redacts_user_home(tmp_path: Path) -> None:
-    user_home = tmp_path / "SecretUser"
-    candidate = user_home / "Tools" / "MuMuManager.exe"
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        Path("Q:/private-tools/NemuShell.exe"),
+        Path("R:/") / ("Program" + " Files") / "NemuShell.exe",
+        Path("S:/") / ("Us" + "ers") / "PrivateUser" / "NemuShell.exe",
+    ],
+)
+def test_missing_candidate_error_does_not_expose_input_path(candidate: Path) -> None:
+    with pytest.raises(ValueError) as exc_info:
+        validate_mumu_candidate(candidate)
 
-    result = _redact_user_home(candidate, user_home=user_home)
-
-    assert "SecretUser" not in result
-    assert result == str(Path("<USER_HOME>") / "Tools" / "MuMuManager.exe")
+    assert str(exc_info.value) == "candidate_not_found"
+    assert str(candidate) not in str(exc_info.value)
 
 
-def test_candidate_path_outside_user_home_is_preserved(tmp_path: Path) -> None:
-    user_home = tmp_path / "SecretUser"
-    candidate = tmp_path / "Program Files" / "MuMuManager.exe"
+def test_forbidden_candidate_error_does_not_expose_input_path(tmp_path: Path) -> None:
+    candidate = tmp_path / "MuMuNxMain.exe"
+    candidate.write_bytes(b"fake")
 
-    result = _redact_user_home(candidate, user_home=user_home)
+    with pytest.raises(ValueError) as exc_info:
+        validate_mumu_candidate(candidate)
 
-    assert result == str(candidate.resolve(strict=False))
+    assert str(exc_info.value) == "candidate_forbidden"
+    assert str(candidate) not in str(exc_info.value)
+
+
+def test_not_allowlisted_error_does_not_expose_input_path(tmp_path: Path) -> None:
+    candidate = tmp_path / "unknown.exe"
+    candidate.write_bytes(b"fake")
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_mumu_candidate(candidate)
+
+    assert str(exc_info.value) == "candidate_not_allowlisted"
+    assert str(candidate) not in str(exc_info.value)
+
+
+def test_cli_candidate_error_is_one_safe_json_document(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from autogame_orchestrator.diagnostics import mumu_cli_probe
+
+    candidate = tmp_path / ("Program" + " Files") / "NemuShell.exe"
+    result = mumu_cli_probe.main(["--candidate", str(candidate)])
+    captured = capsys.readouterr()
+
+    assert result == 2
+    assert json.loads(captured.out) == {"error": "candidate_not_found"}
+    assert captured.out.count("{") == 1
+    assert str(candidate) not in captured.out
+    assert captured.err == ""
+
+
+def test_cli_internal_error_is_safe_json(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from autogame_orchestrator.diagnostics import mumu_cli_probe
+
+    fake_command = _make_command("help_stdout")
+    monkeypatch.setattr(mumu_cli_probe, "validate_mumu_candidate", lambda path: fake_command)
+    monkeypatch.setattr(
+        mumu_cli_probe.MumuCliProbe,
+        "probe",
+        lambda self, command: (_ for _ in ()).throw(RuntimeError("private-path-and-value")),
+    )
+
+    result = mumu_cli_probe.main(["--candidate", "Q:/private/NemuShell.exe"])
+    captured = capsys.readouterr()
+
+    assert result == 3
+    assert json.loads(captured.out) == {"error": "internal_error"}
+    assert "private-path-and-value" not in captured.out
+    assert captured.err == ""
+
+
+def test_diagnostics_package_does_not_eagerly_import_probe() -> None:
+    script = (
+        "import sys; import autogame_orchestrator.diagnostics; "
+        "print('autogame_orchestrator.diagnostics.mumu_cli_probe' in sys.modules)"
+    )
+    completed = subprocess.run(
+        [_PYTHON, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == "False"
+    assert completed.stderr == ""
+
+
+def test_diagnostics_package_keeps_lazy_probe_exports() -> None:
+    import autogame_orchestrator.diagnostics as diagnostics
+
+    assert diagnostics.MumuCliProbe is MumuCliProbe
+    assert diagnostics.validate_mumu_candidate is validate_mumu_candidate
+
+
+def test_python_module_has_no_runtime_warning(tmp_path: Path) -> None:
+    candidate = tmp_path / "missing" / "NemuShell.exe"
+    completed = subprocess.run(
+        [
+            _PYTHON,
+            "-m",
+            "autogame_orchestrator.diagnostics.mumu_cli_probe",
+            "--candidate",
+            str(candidate),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 2
+    assert json.loads(completed.stdout) == {"error": "candidate_not_found"}
+    assert "RuntimeWarning" not in completed.stderr
+    assert "found in sys.modules" not in completed.stderr
+    assert "unpredictable behaviour" not in completed.stderr
+    assert str(candidate) not in completed.stdout
+    assert completed.stderr == ""
+
+
+def test_python_module_success_stdout_is_one_json_document(tmp_path: Path) -> None:
+    candidate = tmp_path / "NemuShell.exe"
+    shutil.copy2(_PYTHON, candidate)
+    completed = subprocess.run(
+        [
+            _PYTHON,
+            "-m",
+            "autogame_orchestrator.diagnostics.mumu_cli_probe",
+            "--candidate",
+            str(candidate),
+            "--attempt-timeout-seconds",
+            "2",
+            "--total-timeout-seconds",
+            "3",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(completed.stdout)
+    assert completed.returncode == 0
+    assert payload["candidate_name"] == "NemuShell.exe"
+    assert payload["runtime_approved"] is False
+    assert "candidate_path" not in payload
+    assert "stdout_excerpt" not in completed.stdout
+    assert "stderr_excerpt" not in completed.stdout
+    assert completed.stderr == ""
