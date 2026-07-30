@@ -1,6 +1,8 @@
-# Phase 6C2——external 真实工作流 smoke 手册
+# Phase 6C2B/6C2C——external 修复后复验手册
 
-本手册只供操作者在 Phase 6C2 明确批准后执行。实施代理不得在 Phase 6C1 运行真实程序、ADB、网络或 UAC。
+第一次 Phase 6C2 external 真实工作流 smoke 已按批准执行一次，并在 MuMu readiness 安全停止。StarRail、MAA、AALC 和 MuMu 生命周期命令均未启动；根因是旧解析器拒绝了合法的空格分隔 ADB devices 记录。Phase 6C2A 只完成解析兼容和安全诊断修复，没有执行修复后复验。
+
+后续必须先在 6C2B 使用新提交和新批准基线完成只读 readiness 复验，再由操作者另行批准 6C2C 完整 smoke。两次操作均不是对旧代码基线的自动重试。
 
 ## 前置门禁
 
@@ -65,4 +67,4 @@ AALC 可能使用无限工作负载，不存在自然业务完成终点。验收
 
 只记录 Adapter/Stage 名称、稳定状态、稳定错误码、耗时、退出码以及清理、提升、取消等布尔结果。不得记录真实路径、ADB serial 或端口、PID、配置内容、完整命令、stdout/stderr、原始 JSONL 或原始 RunReport。
 
-真实 smoke 只有在操作者完成执行、核验脱敏证据并单独批准后才能关闭 Phase 6C2。Phase 6C1 的 Fake 结果不能替代该证据。
+修复后的真实 smoke 只有在操作者完成 6C2B readiness 复验、随后完成 6C2C、核验脱敏证据并单独批准后才能进入 Phase 6C3。Phase 6C1 的 Fake 结果和第一次失败的真实运行都不能替代该证据。

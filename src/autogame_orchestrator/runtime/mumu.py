@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from autogame_orchestrator.probes.adb_client import AdbClient, AdbClientConfig
-from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeStatus
+from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeResult, ProbeStatus
 from autogame_orchestrator.probes.mumu_readiness import MumuReadinessProbe
 from autogame_orchestrator.process import CancellationToken, Deadline, ProcessSpec, ProcessSupervisor
 from autogame_orchestrator.process.errors import TerminationReason
@@ -28,6 +28,24 @@ from autogame_orchestrator.runtime.models import (
 
 _POLL_INTERVAL = 0.3  # readiness 轮询间隔（秒）
 _CommandResult = dict[str, Any]  # _run_manager_command 返回类型
+_PROBE_STEP_ALLOWLIST = {
+    "tcp_probe",
+    "adb_devices",
+    "select_device",
+    "adb_get_state",
+    "adb_boot_completed",
+    "none",
+}
+
+
+def _safe_probe_diagnostics(result: ProbeResult) -> dict[str, str]:
+    step = result.diagnostics.get("step", "none")
+    safe_step = step if isinstance(step, str) and step in _PROBE_STEP_ALLOWLIST else "none"
+    return {
+        "probe_status": result.status.value,
+        "probe_error": result.error_code.value,
+        "probe_step": safe_step,
+    }
 
 
 class MumuAdapter:
@@ -77,11 +95,21 @@ class MumuAdapter:
 
         if result.status == ProbeStatus.READY:
             return MumuRuntimeResult.from_monotonic(
-                MumuAction.STATUS, MumuRuntimeStatus.READY, MumuRuntimeErrorCode.OK, started_at, changed=False
+                MumuAction.STATUS,
+                MumuRuntimeStatus.READY,
+                MumuRuntimeErrorCode.OK,
+                started_at,
+                changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
             )
         if result.error_code in (ProbeErrorCode.PORT_CLOSED, ProbeErrorCode.DEVICE_NOT_FOUND):
             return MumuRuntimeResult.from_monotonic(
-                MumuAction.STATUS, MumuRuntimeStatus.STOPPED, MumuRuntimeErrorCode.OK, started_at, changed=False
+                MumuAction.STATUS,
+                MumuRuntimeStatus.STOPPED,
+                MumuRuntimeErrorCode.OK,
+                started_at,
+                changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
             )
         if result.status == ProbeStatus.TIMEOUT:
             return MumuRuntimeResult.from_monotonic(
@@ -90,6 +118,7 @@ class MumuAdapter:
                 MumuRuntimeErrorCode.READINESS_FAILED,
                 started_at,
                 changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
             )
         if result.error_code == ProbeErrorCode.ADB_CANCELLED:
             return MumuRuntimeResult.from_monotonic(
@@ -98,6 +127,7 @@ class MumuAdapter:
                 MumuRuntimeErrorCode.CANCELLED,
                 started_at,
                 changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
             )
         return MumuRuntimeResult.from_monotonic(
             MumuAction.STATUS,
@@ -105,7 +135,7 @@ class MumuAdapter:
             MumuRuntimeErrorCode.READINESS_FAILED,
             started_at,
             changed=False,
-            diagnostics={"probe_status": result.status.value, "probe_error": result.error_code.value},
+            diagnostics=_safe_probe_diagnostics(result),
         )
 
     def start(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:

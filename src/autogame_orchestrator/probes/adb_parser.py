@@ -57,24 +57,19 @@ def parse_adb_devices(output: str) -> tuple[AdbDevice, ...]:
         if not stripped:
             continue
 
-        # 格式：{serial}\t{state} [key:val ...]
-        parts = stripped.split("\t")
-        if len(parts) < 2:
+        # 格式：{serial}<whitespace>{state} [key:val ...]
+        # ADB 的不同版本可能使用 Tab、空格或混合空白。
+        tokens = stripped.split()
+        if len(tokens) < 2:
             msg = f"无法解析的设备行: {stripped!r}"
             raise AdbParseError(msg, ProbeErrorCode.ADB_OUTPUT_INVALID)
 
-        serial = parts[0].strip()
+        serial = tokens[0]
         if not serial:
             msg = f"设备行缺少 serial: {stripped!r}"
             raise AdbParseError(msg, ProbeErrorCode.ADB_OUTPUT_INVALID)
 
-        # 第二个 tab 字段可能包含 state + 空格分隔的属性
-        tail_parts = parts[1].split()
-        if not tail_parts:
-            msg = f"设备行缺少 state: {stripped!r}"
-            raise AdbParseError(msg, ProbeErrorCode.ADB_OUTPUT_INVALID)
-
-        state = _parse_state(tail_parts[0])
+        state = _parse_state(tokens[1])
 
         # 检查重复 serial
         if serial in seen_serials:
@@ -82,9 +77,7 @@ def parse_adb_devices(output: str) -> tuple[AdbDevice, ...]:
             raise AdbParseError(msg, ProbeErrorCode.ADB_OUTPUT_INVALID)
         seen_serials.add(serial)
 
-        # 解析属性（剩余 tab 字段 + 第二个 tab 字段中的空格分词）
-        attr_tokens = tail_parts[1:] + list(parts[2:])
-        attrs = _parse_attributes(attr_tokens)
+        attrs = _parse_attributes(tokens[2:])
 
         devices.append(AdbDevice(serial=serial, state=state, attributes=attrs))
 

@@ -6,10 +6,22 @@ from collections.abc import Mapping
 
 from autogame_orchestrator.config_model import MumuLifecycleMode
 from autogame_orchestrator.models import ErrorCode, JsonValue, OutcomeKind, StageName, StageReport
+from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeStatus
 from autogame_orchestrator.runtime.aalc_models import AALCRunResult, AALCRunStatus
 from autogame_orchestrator.runtime.maa_models import MAARunResult, MAARunStatus
 from autogame_orchestrator.runtime.models import MumuRuntimeResult, MumuRuntimeStatus
 from autogame_orchestrator.runtime.starrail_models import StarRailRunResult, StarRailRunStatus
+
+_PROBE_STEP_ALLOWLIST = {
+    "tcp_probe",
+    "adb_devices",
+    "select_device",
+    "adb_get_state",
+    "adb_boot_completed",
+    "none",
+}
+_PROBE_STATUS_ALLOWLIST = {item.value for item in ProbeStatus}
+_PROBE_ERROR_ALLOWLIST = {item.value for item in ProbeErrorCode}
 
 
 def _outcome(
@@ -108,6 +120,15 @@ def project_mumu(
         "changed": result.changed,
         "lifecycle_mode": lifecycle_mode.value,
     }
+    probe_status = result.diagnostics.get("probe_status")
+    probe_error = result.diagnostics.get("probe_error")
+    probe_step = result.diagnostics.get("probe_step")
+    if isinstance(probe_status, str) and probe_status in _PROBE_STATUS_ALLOWLIST:
+        diagnostics["probe_status"] = probe_status
+    if isinstance(probe_error, str) and probe_error in _PROBE_ERROR_ALLOWLIST:
+        diagnostics["probe_error"] = probe_error
+    if isinstance(probe_step, str) and probe_step in _PROBE_STEP_ALLOWLIST:
+        diagnostics["probe_step"] = probe_step
     if result.status == MumuRuntimeStatus.TIMEOUT:
         outcome, code = OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT
     elif result.status == MumuRuntimeStatus.CANCELLED:

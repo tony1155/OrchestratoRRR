@@ -2,7 +2,7 @@
 
 ## 当前验证状态
 
-StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前已完成 Phase 6C1 的 external-only 公开 run v1 和完整 Fake 验收；maa-cli 自更新、MuMu managed 实例化生命周期控制及真实完整工作流仍未完成，Phase 6 整体尚未完成。
+StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。Phase 6C2 的第一次 external 真实工作流 smoke 已执行一次并在初始 MuMu readiness 安全停止；Phase 6C2A 已完成解析兼容修复，修复后的只读 readiness 和完整 smoke 尚未执行。maa-cli 自更新与 MuMu managed 实例化生命周期控制仍未完成，Phase 6 整体尚未完成。
 
 ## Phase 6 前的真实 smoke 门禁
 
@@ -75,6 +75,12 @@ maa-cli 自更新属于安装生命周期，6B2B2B 继续阻断；旧 hot-update
 生产 application composition root 复用 `WorkflowCoordinator` 和现有 Windows elevation API。权限不足时，普通父入口先提升整个 OrchestratoRRR，再由提升子入口打开 JSONL、构造 `workflow_external` Runner、惰性 production executor factory 和 ProductionReportSink。普通父入口不构造 Adapter、不写第二份报告，并原样转发子入口退出码；UAC 取消与提升失败分别使用稳定退出码 9 和 10。UAC 等待时间不计入子入口根据原始秒数建立的业务 Deadline，两进程不共享内存 Deadline。
 
 SIGINT handler 只取消同一个 CancellationToken，并在退出时恢复原 handler。Runner 不增加全工作流重试，对所有终态只尝试一次报告写入。run 控制台、JSONL 和 RunReport 不记录配置路径、设备地址、PID、输出原文或完整命令。Phase 6C1 只执行 Fake 验收；真实 external 工作流留待 Phase 6C2 由操作者按手册执行，Phase 6C3 和 Phase 6 最终收口尚未开始。
+
+## Phase 6C2A ADB 解析兼容与安全诊断
+
+第一次 external 真实工作流 smoke 已按批准执行一次，在 `ENSURE_MUMU_RUNNING` 以 `READINESS_FAILED` 安全停止。后续脱敏只读证据确认：ADB 命令正常退出、标题有效且存在一个合法状态设备行，但该行使用空格分隔，旧解析器因仅接受 Tab 而返回 `ADB_OUTPUT_INVALID`。StarRail、MAA 和 AALC 均未启动，MuMu start/stop/restart 均未调用。
+
+Phase 6C2A 仅将设备记录改为按连续空白切分，兼容空格、Tab 和混合格式；标题位置、最少 token、重复 serial、状态和属性语义保持严格。MuMu Runtime 与生产投影只增加固定枚举值 `probe_status`、`probe_error`、`probe_step`，不传递 detail、设备地址、端口、路径或输出。未增加 ADB connect/server restart、重试、轮询或 Deadline 重置，external 11 阶段计划不变。修复后 readiness 留待 6C2B，修复后完整 smoke 留待 6C2C。
 
 ## Phase 5——AALC Runtime Adapter
 
