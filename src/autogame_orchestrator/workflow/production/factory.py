@@ -10,11 +10,15 @@ from autogame_orchestrator.workflow.production.executors import ProductionStageE
 from autogame_orchestrator.workflow.production.ports import (
     AALCRunPort,
     MAARunPort,
+    MAASyncPort,
     MumuRuntimePort,
     RuntimeFactories,
     StarRailRunPort,
 )
-from autogame_orchestrator.workflow.production.runtime_bindings import build_default_runtime_factories
+from autogame_orchestrator.workflow.production.runtime_bindings import (
+    RuntimeBindingError,
+    build_default_runtime_factories,
+)
 from autogame_orchestrator.workflow.production.state import ProductionWorkflowState
 
 _T = TypeVar("_T")
@@ -42,6 +46,11 @@ class _RuntimeCache:
     def mumu(self) -> MumuRuntimePort:
         return cast("MumuRuntimePort", self._get("mumu", self._factories.mumu))
 
+    def maa_sync(self) -> MAASyncPort:
+        if self._factories.maa_sync is None:
+            raise RuntimeBindingError("MAA Sync 构造器未注册")
+        return cast("MAASyncPort", self._get("maa_sync", self._factories.maa_sync))
+
 
 class ProductionExecutorFactory:
     """一次工作流专用；状态与 Runtime 缓存不跨运行共享。"""
@@ -62,6 +71,7 @@ class ProductionExecutorFactory:
             maa=self._runtime.maa,
             aalc=self._runtime.aalc,
             mumu=self._runtime.mumu,
+            maa_sync=self._runtime.maa_sync,
         )
 
 

@@ -6,6 +6,7 @@ validation functions — every error is mapped to a stable *ErrorCode*.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -324,11 +325,77 @@ class AALCConfig:
 
 
 @dataclass(frozen=True)
+class MAASyncConfig:
+    """MAA GUI 配置到 CLI 配置的安全同步契约。"""
+
+    enabled: bool = False
+    gui_settings_source: str = ""
+    gui_tasks_source: str = ""
+    cli_profile_destination: str = ""
+    cli_tasks_destination: str = ""
+    backup_enabled: bool = True
+    max_source_bytes: int = 4 * 1024 * 1024
+
+    def validate(self) -> list[ErrorCode]:
+        errors: list[ErrorCode] = []
+        if not isinstance(self.enabled, bool):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.backup_enabled, bool):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if (
+            not isinstance(self.max_source_bytes, int)
+            or isinstance(self.max_source_bytes, bool)
+            or self.max_source_bytes <= 0
+        ):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.enabled, bool):
+            return errors
+        paths = (
+            self.gui_settings_source,
+            self.gui_tasks_source,
+            self.cli_profile_destination,
+            self.cli_tasks_destination,
+        )
+        if not self.enabled:
+            return errors
+        if any(not isinstance(value, str) or not value.strip() for value in paths):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            return errors
+        normalized = [os.path.normcase(os.path.abspath(value)) for value in paths]
+        sources = normalized[:2]
+        targets = normalized[2:]
+        if sources[0] == sources[1] or targets[0] == targets[1]:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if any(target in sources for target in targets):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        return errors
+
+    def check_paths(self) -> list[ErrorCode]:
+        from pathlib import Path
+
+        if not self.enabled:
+            return []
+        errors: list[ErrorCode] = []
+        for value in (self.gui_settings_source, self.gui_tasks_source):
+            path = Path(value)
+            if not path.exists():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+            elif not path.is_file():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_FILE)
+        for value in (self.cli_profile_destination, self.cli_tasks_destination):
+            path = Path(value)
+            if path.exists() and not path.is_file():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_FILE)
+        return errors
+
+
+@dataclass(frozen=True)
 class AppConfig:
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
     mumu: MuMuConfig = field(default_factory=MuMuConfig)
     starrail: StarRailConfig = field(default_factory=StarRailConfig)
     maa: MAAConfig = field(default_factory=MAAConfig)
+    maa_sync: MAASyncConfig = field(default_factory=MAASyncConfig)
     aalc: AALCConfig = field(default_factory=AALCConfig)
 
     def validate(self) -> list[ErrorCode]:
@@ -337,6 +404,7 @@ class AppConfig:
         errors.extend(self.mumu.validate())
         errors.extend(self.starrail.validate())
         errors.extend(self.maa.validate())
+        errors.extend(self.maa_sync.validate())
         errors.extend(self.aalc.validate())
         return errors
 
@@ -345,5 +413,6 @@ class AppConfig:
         errors.extend(self.mumu.check_paths())
         errors.extend(self.starrail.check_paths())
         errors.extend(self.maa.check_paths())
+        errors.extend(self.maa_sync.check_paths())
         errors.extend(self.aalc.check_paths())
         return errors

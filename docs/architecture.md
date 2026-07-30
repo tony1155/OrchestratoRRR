@@ -2,7 +2,7 @@
 
 ## 当前验证状态
 
-StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A、Phase 6B1 与 Phase 6B2A；6B2B 未获实施授权，公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
+StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A、Phase 6B1、Phase 6B2A 与 Phase 6B2B1；MAA 更新、MuMu 实例化控制、公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
 
 ## Phase 6 前的真实 smoke 门禁
 
@@ -36,7 +36,15 @@ Phase 6B2A 只通过 PowerShell Parser/AST、文本和文件元数据调查旧�
 
 旧 MuMu 流程直接管理长期 GUI 进程，并通过进程树和安装根候选集合停止，不提供可验证的管理 CLI 或精确实例选择器。该模型与当前“短管理命令受管、长期模拟器仅做 readiness 验证”的安全边界不直接兼容，错误绑定到 kill-on-close Job 可能终止刚启动的长期进程。因此 MuMu start/stop 仍为 `UNSAFE`，实例选择为 `BLOCKED`，所有权仅为 `PARTIAL`。
 
-6B2 已正式拆分为 6B2A 调查和 6B2B 实现。由于关键证据不足，6B2B 当前未获授权，MAA 同步/更新及 MuMu start/stop 的生产阻断继续保留。完整调查见 `docs/acceptance/phase-6b2a-discovery.md`。Phase 6B 与 Phase 6 整体均未完成；Phase 6C 才会增加公开 run CLI、完整 Fake 验收和受控真实工作流 smoke。
+6B2 已继续拆分为 6B2A 调查、6B2B1 安全同步、6B2B2 MAA 更新与 6B2B3 MuMu 实例化控制。完整调查见 `docs/acceptance/phase-6b2a-discovery.md`。
+
+## Phase 6B2B1 安全 MAA 配置同步
+
+`maa_sync` 包将 GUI 根对象通过显式字段白名单纯转换为 CLI profile/tasks。同步器在触碰目标前完成双源有界读取、转换、编码和目标快照；目标临时文件与备份均 flush/fsync，并通过同目录 `os.replace()` 原子提交。第二个目标失败、取消或父 Deadline 到期时回滚已替换的首目标，回滚失败使用独立稳定错误码。
+
+同步默认关闭，关闭时不构造同步器。启用后生产 Stage 惰性构造服务并原样传递父 Deadline 与 CancellationToken，只投影稳定错误码和布尔状态。源/目标路径、配置值、异常文本和临时文件信息不会进入 StageReport 或 RunReport。
+
+默认完整生产计划的首个安全阻断点已移至 `UPDATE_MAA`；在该点之前不会构造业务 Runtime。MAA 更新继续留在 6B2B2，MuMu start/stop/实例选择继续留在 6B2B3，均未实现。Phase 6B2、Phase 6B 和 Phase 6 整体尚未完成；Phase 6C 才会增加公开 run CLI 和真实完整工作流验收。
 
 ## Phase 5——AALC Runtime Adapter
 

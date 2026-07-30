@@ -47,6 +47,15 @@ stop_timeout_seconds = 10
 [maa.environment]
 PYTHONIOENCODING = "utf-8"
 
+[maa_sync]
+enabled = false
+gui_settings_source = ""
+gui_tasks_source = ""
+cli_profile_destination = ""
+cli_tasks_destination = ""
+backup_enabled = true
+max_source_bytes = 4194304
+
 [aalc]
 executable = "C:\\path\\to\\AALC.exe"
 working_directory = "C:\\path\\to\\AALC"

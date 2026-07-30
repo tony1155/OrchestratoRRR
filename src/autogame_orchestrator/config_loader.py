@@ -15,6 +15,7 @@ from autogame_orchestrator.config_model import (
     AALCConfig,
     AppConfig,
     MAAConfig,
+    MAASyncConfig,
     MuMuConfig,
     OrchestratorConfig,
     StarRailConfig,
@@ -79,12 +80,14 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     cfg_mu = _parse_mumu(data.get("mumu"))
     cfg_sr = _parse_starrail(data.get("starrail"))
     cfg_ma = _parse_maa(data.get("maa"))
+    cfg_ms = _parse_maa_sync(data.get("maa_sync"))
     cfg_al = _parse_aalc(data.get("aalc"))
 
     all_errors.extend(cfg_or[1])
     all_errors.extend(cfg_mu[1])
     all_errors.extend(cfg_sr[1])
     all_errors.extend(cfg_ma[1])
+    all_errors.extend(cfg_ms[1])
     all_errors.extend(cfg_al[1])
 
     if all_errors:
@@ -95,6 +98,7 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
         mumu=cfg_mu[0],  # type: ignore[arg-type]
         starrail=cfg_sr[0],  # type: ignore[arg-type]
         maa=cfg_ma[0],  # type: ignore[arg-type]
+        maa_sync=cfg_ms[0],  # type: ignore[arg-type]
         aalc=cfg_al[0],  # type: ignore[arg-type]
     )
 
@@ -271,6 +275,40 @@ def _parse_maa(raw: object) -> tuple[MAAConfig | None, list[ErrorCode]]:
         environment_overrides=environment if environment is not None else (),
         timeout_seconds=timeout,
         stop_timeout_seconds=stop_timeout,
+    ), []
+
+
+def _parse_maa_sync(raw: object) -> tuple[MAASyncConfig | None, list[ErrorCode]]:
+    if raw is None:
+        return MAASyncConfig(), []
+    if not isinstance(raw, dict):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    enabled = raw.get("enabled", False)
+    backup_enabled = raw.get("backup_enabled", True)
+    max_source_bytes = raw.get("max_source_bytes", 4 * 1024 * 1024)
+    paths = [
+        raw.get("gui_settings_source", ""),
+        raw.get("gui_tasks_source", ""),
+        raw.get("cli_profile_destination", ""),
+        raw.get("cli_tasks_destination", ""),
+    ]
+    valid = (
+        isinstance(enabled, bool)
+        and isinstance(backup_enabled, bool)
+        and isinstance(max_source_bytes, int)
+        and not isinstance(max_source_bytes, bool)
+        and all(isinstance(value, str) for value in paths)
+    )
+    if not valid:
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    return MAASyncConfig(
+        enabled=enabled,
+        gui_settings_source=paths[0],
+        gui_tasks_source=paths[1],
+        cli_profile_destination=paths[2],
+        cli_tasks_destination=paths[3],
+        backup_enabled=backup_enabled,
+        max_source_bytes=max_source_bytes,
     ), []
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from autogame_orchestrator.config_model import AppConfig
+from autogame_orchestrator.maa_sync.synchronizer import MAASynchronizer
 from autogame_orchestrator.runtime.aalc import AALCAdapter
 from autogame_orchestrator.runtime.maa import MAAAdapter
 from autogame_orchestrator.runtime.mumu import MumuAdapter
@@ -55,4 +56,7 @@ def build_default_runtime_factories(config: AppConfig) -> RuntimeFactories:
             stop_timeout_seconds=float(config.mumu.stop_timeout_seconds),
         )
 
-    return RuntimeFactories(build_starrail, build_maa, build_aalc, build_mumu)
+    def build_maa_sync() -> MAASynchronizer:
+        return MAASynchronizer(config.maa_sync)
+
+    return RuntimeFactories(build_starrail, build_maa, build_aalc, build_mumu, build_maa_sync)

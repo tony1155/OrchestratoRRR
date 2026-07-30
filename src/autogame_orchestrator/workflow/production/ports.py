@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from autogame_orchestrator.maa_sync.models import MAASyncResult
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.runtime.aalc_models import AALCRunResult
@@ -46,6 +47,14 @@ class MumuRuntimePort(Protocol):
     ) -> MumuRuntimeResult: ...
 
 
+class MAASyncPort(Protocol):
+    def run(
+        self,
+        deadline: Deadline | None = None,
+        cancel: CancellationToken | None = None,
+    ) -> MAASyncResult: ...
+
+
 @dataclass(frozen=True)
 class RuntimeFactories:
     """仅在对应 Stage 到达时才调用的 Runtime 构造器。"""
@@ -54,3 +63,4 @@ class RuntimeFactories:
     maa: Callable[[], MAARunPort]
     aalc: Callable[[], AALCRunPort]
     mumu: Callable[[], MumuRuntimePort]
+    maa_sync: Callable[[], MAASyncPort] | None = None

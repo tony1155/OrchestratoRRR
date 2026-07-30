@@ -6,11 +6,13 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from autogame_orchestrator.config_model import AppConfig
+from autogame_orchestrator.maa_sync.models import MAASyncStatus
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, StageName, StageReport
 from autogame_orchestrator.workflow.contracts import StageExecutionContext
 from autogame_orchestrator.workflow.production.ports import (
     AALCRunPort,
     MAARunPort,
+    MAASyncPort,
     MumuRuntimePort,
     StarRailRunPort,
 )
@@ -55,6 +57,7 @@ class ProductionStageExecutor:
         maa: Callable[[], MAARunPort],
         aalc: Callable[[], AALCRunPort],
         mumu: Callable[[], MumuRuntimePort],
+        maa_sync: Callable[[], MAASyncPort],
     ) -> None:
         self._stage = stage
         self._config = config
@@ -63,6 +66,7 @@ class ProductionStageExecutor:
         self._maa = maa
         self._aalc = aalc
         self._mumu = mumu
+        self._maa_sync = maa_sync
 
     def execute(self, context: StageExecutionContext) -> StageReport:
         if context.stage != self._stage:
@@ -78,8 +82,9 @@ class ProductionStageExecutor:
         stage = self._stage
         if stage == StageName.VALIDATE_CONFIG:
             return self._validate()
+        if stage == StageName.SYNC_MAA_CONFIG:
+            return self._run_maa_sync(context)
         blockers = {
-            StageName.SYNC_MAA_CONFIG: "maa_config_sync_not_implemented",
             StageName.UPDATE_MAA: "maa_update_not_implemented",
             StageName.STOP_MUMU: "mumu_stop_not_approved",
             StageName.START_MUMU: "mumu_start_not_approved",
@@ -111,6 +116,42 @@ class ProductionStageExecutor:
         if stage == StageName.RUN_AALC:
             return project_aalc(stage, self._aalc().run(context.deadline, context.cancel))
         return _instant(stage, OutcomeKind.FAILURE, ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED)
+
+    def _run_maa_sync(self, context: StageExecutionContext) -> StageReport:
+        if not self._config.maa_sync.enabled:
+            return _instant(
+                self._stage,
+                OutcomeKind.SUCCESS,
+                ErrorCode.OK,
+                {"enabled": False, "changed": False},
+            )
+        sync_result = self._maa_sync().run(context.deadline, context.cancel)
+        mapping = {
+            MAASyncStatus.COMPLETED: (OutcomeKind.SUCCESS, ErrorCode.OK),
+            MAASyncStatus.FAILED: (OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_FAILED),
+            MAASyncStatus.TIMEOUT: (OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT),
+            MAASyncStatus.CANCELLED: (OutcomeKind.CANCELLED, ErrorCode.WORKFLOW_CANCELLED),
+        }
+        outcome, code = mapping[sync_result.status]
+        return StageReport(
+            self._stage,
+            outcome,
+            code,
+            sync_result.started_at,
+            sync_result.finished_at,
+            sync_result.duration_ms,
+            diagnostics={
+                "source_error_code": sync_result.error_code.value,
+                "enabled": sync_result.enabled,
+                "changed": sync_result.changed,
+                "profile_written": sync_result.profile_written,
+                "tasks_written": sync_result.tasks_written,
+                "profile_backup_written": sync_result.profile_backup_written,
+                "tasks_backup_written": sync_result.tasks_backup_written,
+                "rollback_attempted": sync_result.rollback_attempted,
+                "rollback_succeeded": sync_result.rollback_succeeded,
+            },
+        )
 
     def _validate(self) -> StageReport:
         errors = self._config.validate()
