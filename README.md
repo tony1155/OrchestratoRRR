@@ -1,19 +1,19 @@
 # OrchestratoRRR
 
-Adapter 真实 smoke 门禁已于 2026-07-30 正式关闭。当前完成 Phase 6A、Phase 6B1、Phase 6B2A、Phase 6B2B1、Phase 6B2B2A、Phase 6B2B3A 和 Phase 6B2B3B；maa-cli 自更新与 MuMu managed 实例化生命周期控制仍被阻断，Phase 6C 尚未实现，因此 Phase 6 整体尚未完成。脱敏 Adapter 证据见 [最终验收记录](docs/acceptance/adapter-real-smoke.md)。
+Adapter 真实 smoke 门禁已于 2026-07-30 正式关闭。当前已完成至 Phase 6C1：公开 `run` v1 只允许受控 external MuMu 工作流，并已通过完整 Fake 验收。真实完整工作流仍待 Phase 6C2 由操作者手工执行；maa-cli 自更新与 MuMu managed 实例化生命周期控制仍被阻断，因此 Phase 6 整体尚未完成。脱敏 Adapter 证据见 [最终验收记录](docs/acceptance/adapter-real-smoke.md)。
 
 Phase 5 后、Phase 6 前的单 Adapter 真实 smoke 门禁已经完成。诊断入口要求精确确认、有限 Deadline、单 Adapter 选择和原子安全结果；后续复验流程见 [统一门禁手册](docs/manual/adapter-real-smoke-gate.md)。
 
 AALC 可通过 `requires_administrator = true` 声明管理员权限要求。普通权限 smoke 入口会在 Adapter 构造前请求一次 UAC，提升整个 OrchestratoRRR/Python 入口；拒绝 UAC 时安全停止。不会用 `runas` 单独启动 AALC，提升后仍保留 ProcessSupervisor 与 Job Object 契约。该 bootstrap 已纳入真实 smoke 验收，但不代表 Phase 6 已实现。
 
-当前阶段：Phase 6B2B3B——外部管理 MuMu 生命周期模式。显式 `external` 模式要求用户或外部工具提前启动正确实例，OrchestratoRRR 只验证 ADB readiness，并从动态生产计划中移除四个不安全的 MuMu stop/start 阶段。默认 `managed` 模式和静态 15 阶段计划保持不变，managed start/stop 仍未授权。
+当前阶段：Phase 6C1——受控 external 工作流 `run` CLI 与完整 Fake 验收。显式 `external` 模式要求用户或外部工具提前启动正确实例，OrchestratoRRR 只验证 ADB readiness；run v1 还要求 MAA Sync/Update 关闭、AALC attempts 为 1、精确真实执行确认和有限 Deadline。
 
 OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进程编排器。
 
 项目正在逐阶段替换旧的单体 PowerShell 编排流程，目标是可靠管理 MuMu Player、StarRailCopilot、MAA 和 AALC，并为每个外部进程提供明确的超时、取消、进程树清理和结构化结果。
 
 > cleanup failure、取消、路径、配置和启动失败均不重试。
-> MuMu start/stop 仍未获准，maa-cli 自更新尚未实现，也未增加公开 run CLI；未执行真实完整工作流，未替换旧 PowerShell 编排入口。
+> MuMu managed start/stop 仍未获准，maa-cli 自更新尚未实现；公开 run v1 仅支持 external 安全路径。本轮未执行真实完整工作流，未替换旧 PowerShell 编排入口。
 
 ## 当前能力
 
@@ -33,6 +33,7 @@ OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进�
 - Phase 6B2B2A 提供默认关闭、显式网络授权的 MaaCore/资源更新；验收见 [阶段记录](docs/acceptance/phase-6b2b2a.md)。
 - Phase 6B2B3A 完成 MuMu CLI 探针路径脱敏、机器可读输出加固和只读否定证据固化；验收见 [阶段记录](docs/acceptance/phase-6b2b3a-mumu-cli-evidence.md)。
 - Phase 6B2B3B 提供只验证 readiness 的 external MuMu 安全路径；验收见 [阶段记录](docs/acceptance/phase-6b2b3b-external-mumu.md)。
+- Phase 6C1 提供 external-only 的公开 `run` v1、入口级 elevation 接线、稳定退出码和完整 Fake 验收；验收见 [阶段记录](docs/acceptance/phase-6c1.md)，后续人工步骤见 [真实 smoke 手册](docs/manual/phase-6c-external-real-smoke.md)。
 
 ## 当前安全边界
 

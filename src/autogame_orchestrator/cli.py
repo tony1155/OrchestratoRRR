@@ -10,6 +10,7 @@ validate 和 plan 不启动外部业务程序。
 
 from __future__ import annotations
 
+import signal
 import traceback
 import uuid
 from datetime import UTC, datetime
@@ -30,7 +31,9 @@ from autogame_orchestrator.models import (
     StageReport,
 )
 from autogame_orchestrator.planning import PLAN_HEADER, build_plan
+from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.reporter import write_report_atomic
+from autogame_orchestrator.run_application import RunRequest, execute_run_request
 
 if TYPE_CHECKING:
     pass
@@ -76,6 +79,47 @@ def version() -> None:
     typer.echo(f"OrchestratoRRR {__version__}")
 
 
+@app.command("run")
+def run_workflow(
+    config: str = typer.Option(..., "--config", "-c", help="Path to TOML configuration file."),  # noqa: B008
+    deadline_seconds: float = typer.Option(..., "--deadline-seconds", help="Finite workflow deadline."),  # noqa: B008
+    confirm_real_execution: str = typer.Option(  # noqa: B008
+        ...,
+        "--confirm-real-execution",
+        help="Exact acknowledgement required for real execution.",
+    ),
+    elevation_child: bool = typer.Option(False, "--_elevation-child", hidden=True),  # noqa: B008
+) -> None:
+    """运行受控 external 生产工作流。"""
+
+    token = CancellationToken()
+    previous_handler = signal.getsignal(signal.SIGINT)
+
+    def request_cancel(_signum: int, _frame: object) -> None:
+        token.cancel()
+
+    signal.signal(signal.SIGINT, request_cancel)
+    try:
+        result = execute_run_request(
+            RunRequest(
+                config_path=Path(config),
+                deadline_seconds=deadline_seconds,
+                confirmation=confirm_real_execution,
+                elevation_child=elevation_child,
+            ),
+            cancel=token,
+        )
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
+
+    if result.exit_code == 0 and result.status == "success":
+        typer.echo("Workflow completed: status=success error_code=OK")
+    else:
+        typer.echo(f"Workflow finished: status={result.status} error_code={result.error_code}")
+    if result.exit_code != 0:
+        raise typer.Exit(code=result.exit_code)
+
+
 @app.command()
 def validate(
     config: str = typer.Option(  # noqa: B008
@@ -118,7 +162,7 @@ def validate(
             traceback.print_exc()
 
     log_writer = _open_log(log_dir, run_id, log_writer)
-    _log_validation(log_writer, config_path, check_paths, error_code)
+    _log_validation(log_writer, check_paths, error_code)
 
     stage_report = _make_stage_report(StageName.VALIDATE_CONFIG, outcome_kind, error_code, started_at, stage_message)
 
@@ -207,7 +251,11 @@ def plan(
 
     log_writer = _open_log(log_dir, run_id, log_writer)
     if log_writer is not None:
-        log_writer.info("plan.start", "Execution plan requested", {"config": str(config_path)})
+        log_writer.info(
+            "plan.start",
+            "Execution plan requested",
+            {"config_provided": True, "check_paths": check_paths},
+        )
 
     if error_code != ErrorCode.OK:
         stage_reports.append(
@@ -316,7 +364,6 @@ def _safe_close_log(writer: JsonlLogWriter) -> None:
 
 def _log_validation(
     writer: JsonlLogWriter | None,
-    config_path: Path,
     check_paths: bool,
     error_code: ErrorCode,
 ) -> None:
@@ -327,7 +374,7 @@ def _log_validation(
             "validate.run",
             "Validation complete",
             {
-                "config": str(config_path),
+                "config_provided": True,
                 "check_paths": check_paths,
                 "error_code": error_code.value,
             },

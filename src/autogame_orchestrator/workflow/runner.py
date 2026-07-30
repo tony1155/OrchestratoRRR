@@ -72,11 +72,15 @@ class WorkflowRunner:
         report_sink: ReportSink,
         *,
         event_sink: WorkflowEventSink | None = None,
+        mode: str = "workflow_fake",
     ) -> None:
+        if mode not in {"workflow_fake", "workflow_external"}:
+            raise ValueError("工作流报告 mode 不受支持")
         self._plan = plan
         self._executor_factory = executor_factory
         self._report_sink = report_sink
         self._event_sink = event_sink
+        self._mode = mode
 
     def _emit(self, report: StageReport, index: int) -> None:
         if self._event_sink is None:
@@ -195,7 +199,7 @@ class WorkflowRunner:
             schema_version=1,
             run_id=workflow_run_id,
             orchestrator_version=__version__,
-            mode="workflow_fake",
+            mode=self._mode,
             status=top_status,
             error_code=top_error,
             started_at=started_at,

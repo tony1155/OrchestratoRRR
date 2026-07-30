@@ -102,9 +102,9 @@ def test_plan_invalid_config(invalid_toml: Path) -> None:
     assert "CONFIG_PARSE_ERROR" in result.stdout or "CONFIG_PARSE_ERROR" in result.stderr
 
 
-def test_cli_has_no_run_command() -> None:
-    result = runner.invoke(app, ["--help"])
-    assert "run" not in result.stdout.lower() or result.stdout.lower().count("run") <= 3
+def test_cli_has_controlled_run_command() -> None:
+    names = {command.name or command.callback.__name__ for command in app.registered_commands}
+    assert names == {"version", "validate", "plan", "run"}
 
 
 def test_cli_has_no_all_command() -> None:

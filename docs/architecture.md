@@ -2,7 +2,7 @@
 
 ## 当前验证状态
 
-StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A、Phase 6B1、Phase 6B2A、Phase 6B2B1、Phase 6B2B2A、Phase 6B2B3A 与 Phase 6B2B3B；maa-cli 自更新、MuMu managed 实例化生命周期控制、公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
+StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前已完成 Phase 6C1 的 external-only 公开 run v1 和完整 Fake 验收；maa-cli 自更新、MuMu managed 实例化生命周期控制及真实完整工作流仍未完成，Phase 6 整体尚未完成。
 
 ## Phase 6 前的真实 smoke 门禁
 
@@ -67,6 +67,14 @@ maa-cli 自更新属于安装生命周期，6B2B2B 继续阻断；旧 hot-update
 动态 `build_execution_plan(config)` 在未显式传入 stages 时为 external 精确移除 STOP_MUMU、VERIFY_MUMU_STOPPED、START_MUMU 和重启后的 readiness 阶段，保留初始 ENSURE/WAIT readiness，形成 11 阶段计划。显式 stages 不会被模式静默改写，公开 `plan` 仍使用静态 15 阶段。
 
 生产绑定只向 external Stage 暴露 `status()` Port。STOPPED 返回固定 `mumu_external_not_ready` 阻断，不调用 start/stop/restart，也不扫描进程、读取 `.nemu` 或解析 RPC instance。external 不新增管理员权限要求；完整 Fake 流程已到达 MAA 与 AALC 并成功写入报告。该模式不等价于旧 PowerShell 的完整生命周期行为，managed 控制留待 6B2B3C 且尚未获授权。
+
+## Phase 6C1 受控 external run 入口
+
+公开 `autogame-orch run` 首版只接受动态 11 阶段 external 计划，并在任何 Runner、Stage factory 或 Adapter 构造前校验精确确认值、有限父 Deadline、MAA Sync/Update 均关闭及 AALC attempts 为 1。CLI 不暴露阶段选择、跳过或强制执行参数；静态 `plan` 命令继续显示兼容的 15 阶段计划。
+
+生产 application composition root 复用 `WorkflowCoordinator` 和现有 Windows elevation API。权限不足时，普通父入口先提升整个 OrchestratoRRR，再由提升子入口打开 JSONL、构造 `workflow_external` Runner、惰性 production executor factory 和 ProductionReportSink。普通父入口不构造 Adapter、不写第二份报告，并原样转发子入口退出码；UAC 取消与提升失败分别使用稳定退出码 9 和 10。UAC 等待时间不计入子入口根据原始秒数建立的业务 Deadline，两进程不共享内存 Deadline。
+
+SIGINT handler 只取消同一个 CancellationToken，并在退出时恢复原 handler。Runner 不增加全工作流重试，对所有终态只尝试一次报告写入。run 控制台、JSONL 和 RunReport 不记录配置路径、设备地址、PID、输出原文或完整命令。Phase 6C1 只执行 Fake 验收；真实 external 工作流留待 Phase 6C2 由操作者按手册执行，Phase 6C3 和 Phase 6 最终收口尚未开始。
 
 ## Phase 5——AALC Runtime Adapter
 
