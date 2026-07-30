@@ -2,7 +2,7 @@
 
 ## 当前验证状态
 
-StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A 工作流契约与 Fake 编排内核；生产 Stage 绑定、公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
+StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A 与 Phase 6B1；6B2、公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
 
 ## Phase 6 前的真实 smoke 门禁
 
@@ -20,7 +20,15 @@ Phase 6A 已将入口权限决策固定在 Runner 之前：先构建完整计划
 
 `WRITE_RUN_REPORT` 是 Runner 内部最终化阶段，不向工厂请求执行器。无论业务结果如何，注入的报告 sink 只尝试一次；写入失败时，内存报告以 `RUN_REPORT_WRITE_ERROR` 为顶层错误，并用稳定诊断字段保留先前业务错误。核心继续复用 RunReport v1、`StageReport` 和 `RunReport`，没有建立第二套 schema。
 
-工作流核心不导入具体 Runtime Adapter、`ProcessSupervisor` 或 Win32 API。Phase 6B 才负责生产 Stage 投影与真实组件绑定；MuMu 真实停启、MAA 配置同步与更新仍是门禁。Phase 6C 才会增加公开 run CLI、完整 Fake 验收和受控真实工作流 smoke。
+工作流核心不导入具体 Runtime Adapter、`ProcessSupervisor` 或 Win32 API。具体 Adapter 只允许由 `workflow/production/runtime_bindings.py` 的 composition root 导入。
+
+## Phase 6B1 生产绑定骨架
+
+`workflow/production/` 定义最小 Runtime Port、白名单结果投影、每次运行独立状态、惰性 Runtime 缓存、生产 StageExecutor 和复用 `write_report_atomic()` 的 ReportSink。构建 factory 只创建闭包；Stage 到达前不创建 Adapter，同一 Runtime 在一次运行内最多构造一次，完整结果对象不会进入工作流状态。
+
+配置验证 Stage 只调用 `validate()` 与 `check_paths()`。StarRail、MAA、AALC Stage 原样传递父 Deadline 和 CancellationToken，复用既有 Adapter 生命周期；Stage 外层不重试。MuMu Stage 只允许调用一次 `status()`，并且 ADB 端点只接受 `127.0.0.1:<1-65535>`。StarRail 停止/验证 Stage 只检查本次受管进程清理证据，不扫描系统进程。
+
+默认完整生产计划在 `SYNC_MAA_CONFIG` 返回 `WORKFLOW_STAGE_BLOCKED`，阻断前 Runtime 构造数为零。MAA 同步与更新、MuMu start/stop 留待 6B2；Phase 6B 整体尚未完成。Phase 6C 才会增加公开 run CLI、完整 Fake 验收和受控真实工作流 smoke。
 
 ## Phase 5——AALC Runtime Adapter
 

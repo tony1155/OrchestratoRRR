@@ -1,6 +1,6 @@
 # OrchestratoRRR 阶段规划
 
-Adapter 真实 smoke 门禁已于 2026-07-30 关闭。Phase 6 现正式拆分为 6A、6B、6C；当前只完成 6A 工作流契约与 Fake 编排内核，Phase 6 整体尚未完成。
+Adapter 真实 smoke 门禁已于 2026-07-30 关闭。当前完成 6A 与 6B1；6B2、6C 尚未完成，Phase 6 整体尚未完成。
 
 ## Phase 5——AALC Runtime Adapter
 
@@ -23,7 +23,8 @@ Fake AALC 环境和真实 AALC smoke 验收均已完成。成功仅依据 exit 0
 | 5 | AALC Adapter | 有界启动 AALC，最多三次尝试，仅非零退出和单次尝试超时允许重试 |
 | 门禁 | Phase 6 前的真实 smoke | 已完成 StarRail、MAA、AALC 单 Adapter smoke 和人工评审；门禁已关闭，Phase 6 已获实施授权 |
 | 6A | 工作流契约与 Fake 编排内核 | 冻结执行计划、惰性 Fake Stage、fail-fast、取消与父 Deadline 传播、RunReport 最终化和入口提权前置决策契约 |
-| 6B | 生产 Stage 投影与真实组件绑定 | 将既有 Adapter、MuMu 生命周期和配置操作投影为生产 Stage；尚未实现 |
+| 6B1 | 生产 Stage 投影与安全绑定骨架 | 既有 Adapter 结果白名单投影、惰性 Runtime 绑定、单次运行状态和生产 ReportSink；默认计划在同步阶段安全阻断 |
+| 6B2 | MAA 同步/更新与 MuMu 控制门禁收口 | 实现 MAA 同步和更新，并在获得批准后收口 MuMu start/stop；尚未实现 |
 | 6C | 公开 run CLI 与完整验收 | 提供公开入口、完整 Fake 验收和受控真实工作流 smoke；尚未实现 |
 | 7 | 打包与默认入口 | PyInstaller EXE、无缝替换旧 PS1 入口点 |
 
@@ -33,4 +34,4 @@ Fake AALC 环境和真实 AALC smoke 验收均已完成。成功仅依据 exit 0
 
 Phase 6A 已固化入口权限规划契约：先构建完整计划；只要计划包含 `RUN_AALC` 且 AALC 声明 `requires_administrator=true`，就在 Runner 和任何 Stage 工厂构造前决定是否重启提升整个 OrchestratoRRR。不得在执行到 AALC 时才临时提升，也不得用 `runas` 绕过现有 ProcessSupervisor 单独启动 AALC。本阶段测试只使用 Fake gateway，未触发真实 UAC。
 
-Phase 6B 尚未完成生产 Stage 绑定，MuMu 真实停启门禁仍存在，MAA 配置同步与更新也尚未实现。Phase 6C 尚未提供公开 run CLI，未执行任何真实完整工作流，因此旧 PowerShell 尚不可替换。
+Phase 6B1 已完成生产投影与安全绑定骨架。默认完整生产计划在 `SYNC_MAA_CONFIG` 明确阻断，且阻断前不构造或执行任何 Runtime Adapter。MuMu 只允许只读 `status()`；start/stop 仍未获准。MAA 同步和更新留待 6B2，Phase 6B 整体尚未完成。Phase 6C 尚未提供公开 run CLI，未执行任何真实完整工作流，因此旧 PowerShell 尚不可替换。
