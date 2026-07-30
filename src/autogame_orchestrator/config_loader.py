@@ -18,6 +18,7 @@ from autogame_orchestrator.config_model import (
     MAASyncConfig,
     MAAUpdateConfig,
     MuMuConfig,
+    MumuLifecycleMode,
     OrchestratorConfig,
     StarRailConfig,
 )
@@ -154,27 +155,59 @@ def _parse_mumu(raw: object) -> tuple[MuMuConfig | None, list[ErrorCode]]:
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return None, errors
 
-    for fld in ("executable", "adb_executable", "adb_serial"):
-        val = raw.get(fld)
-        if not isinstance(val, str) or not val.strip():
+    mode_raw = raw.get("lifecycle_mode", MumuLifecycleMode.MANAGED.value)
+    if isinstance(mode_raw, str):
+        try:
+            lifecycle_mode = MumuLifecycleMode(mode_raw)
+        except ValueError:
+            lifecycle_mode = None
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    else:
+        lifecycle_mode = None
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    executable = raw.get("executable", "")
+    adb_executable = raw.get("adb_executable")
+    adb_serial = raw.get("adb_serial")
+    if not isinstance(executable, str) or lifecycle_mode == MumuLifecycleMode.MANAGED and not executable.strip():
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    for value in (adb_executable, adb_serial):
+        if not isinstance(value, str) or not value.strip():
             errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
     start_to = raw.get("start_timeout_seconds", 120)
     stop_to = raw.get("stop_timeout_seconds", 20)
-    if not isinstance(start_to, int):
+    if not isinstance(start_to, int) or isinstance(start_to, bool):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
-    if not isinstance(stop_to, int):
+    if not isinstance(stop_to, int) or isinstance(stop_to, bool):
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    start_arguments = _tolist(raw.get("start_arguments", []))
+    stop_arguments = _tolist(raw.get("stop_arguments", []))
+    if start_arguments is None or stop_arguments is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    if lifecycle_mode == MumuLifecycleMode.EXTERNAL and (start_arguments or stop_arguments):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
     if errors:
         return None, errors
 
+    assert lifecycle_mode is not None
+    assert isinstance(executable, str)
+    assert isinstance(adb_executable, str)
+    assert isinstance(adb_serial, str)
+    assert isinstance(start_to, int)
+    assert isinstance(stop_to, int)
+    assert start_arguments is not None
+    assert stop_arguments is not None
     return MuMuConfig(
-        executable=str(raw.get("executable", "")),
-        adb_executable=str(raw.get("adb_executable", "")),
-        adb_serial=str(raw.get("adb_serial", "127.0.0.1:16384")),
-        start_timeout_seconds=int(start_to),
-        stop_timeout_seconds=int(stop_to),
+        lifecycle_mode=lifecycle_mode,
+        executable=executable,
+        adb_executable=adb_executable,
+        adb_serial=adb_serial,
+        start_timeout_seconds=start_to,
+        stop_timeout_seconds=stop_to,
+        start_arguments=tuple(start_arguments),
+        stop_arguments=tuple(stop_arguments),
     ), []
 
 

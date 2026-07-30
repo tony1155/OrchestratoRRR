@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from autogame_orchestrator.models import ErrorCode
@@ -82,8 +83,16 @@ class OrchestratorConfig:
         return errors
 
 
+class MumuLifecycleMode(StrEnum):
+    """MuMu 生命周期的稳定管理模式。"""
+
+    MANAGED = "managed"
+    EXTERNAL = "external"
+
+
 @dataclass(frozen=True)
 class MuMuConfig:
+    lifecycle_mode: MumuLifecycleMode = MumuLifecycleMode.MANAGED
     executable: str = ""
     adb_executable: str = ""
     adb_serial: str = "127.0.0.1:16384"
@@ -94,22 +103,32 @@ class MuMuConfig:
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
-        errors.extend(_validate_non_empty_str(self.executable, "executable"))
-        errors.extend(_validate_non_empty_str(self.adb_executable, "adb_executable"))
-        errors.extend(_validate_non_empty_str(self.adb_serial, "adb_serial"))
-        errors.extend(_validate_positive_int(self.start_timeout_seconds, "start_timeout_seconds"))
-        errors.extend(_validate_positive_int(self.stop_timeout_seconds, "stop_timeout_seconds"))
-        if self.start_arguments:
-            errors.extend(_validate_str_list(list(self.start_arguments), "start_arguments"))
-        if self.stop_arguments:
-            errors.extend(_validate_str_list(list(self.stop_arguments), "stop_arguments"))
+        if not isinstance(self.lifecycle_mode, MumuLifecycleMode):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            return errors
+        if not isinstance(self.executable, str):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        elif self.lifecycle_mode == MumuLifecycleMode.MANAGED:
+            errors.extend(_validate_non_empty_str(self.executable, "executable"))
+        for value in (self.adb_executable, self.adb_serial):
+            if not isinstance(value, str) or not value.strip():
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        for timeout in (self.start_timeout_seconds, self.stop_timeout_seconds):
+            if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        for arguments in (self.start_arguments, self.stop_arguments):
+            if not isinstance(arguments, tuple) or not all(isinstance(item, str) for item in arguments):
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if self.lifecycle_mode == MumuLifecycleMode.EXTERNAL and (self.start_arguments or self.stop_arguments):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return errors
 
     def check_paths(self) -> list[ErrorCode]:
         from pathlib import Path
 
         errors: list[ErrorCode] = []
-        errors.extend(_check_required_path(Path(self.executable), "executable"))
+        if self.lifecycle_mode == MumuLifecycleMode.MANAGED:
+            errors.extend(_check_required_path(Path(self.executable), "executable"))
         errors.extend(_check_required_path(Path(self.adb_executable), "adb_executable"))
         return errors
 

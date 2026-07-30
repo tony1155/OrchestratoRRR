@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from autogame_orchestrator.config_model import MumuLifecycleMode
 from autogame_orchestrator.models import ErrorCode, JsonValue, OutcomeKind, StageName, StageReport
 from autogame_orchestrator.runtime.aalc_models import AALCRunResult, AALCRunStatus
 from autogame_orchestrator.runtime.maa_models import MAARunResult, MAARunStatus
@@ -94,12 +95,18 @@ def project_aalc(stage: StageName, result: AALCRunResult) -> StageReport:
 
 
 def project_mumu(
-    stage: StageName, result: MumuRuntimeResult, *, ensure_running: bool = False, verify_stopped: bool = False
+    stage: StageName,
+    result: MumuRuntimeResult,
+    *,
+    lifecycle_mode: MumuLifecycleMode = MumuLifecycleMode.MANAGED,
+    ensure_running: bool = False,
+    verify_stopped: bool = False,
 ) -> StageReport:
     diagnostics: dict[str, JsonValue] = {
         "source_error_code": result.error_code.value,
         "action": result.action.value,
         "changed": result.changed,
+        "lifecycle_mode": lifecycle_mode.value,
     }
     if result.status == MumuRuntimeStatus.TIMEOUT:
         outcome, code = OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT
@@ -109,7 +116,9 @@ def project_mumu(
         outcome, code = OutcomeKind.SUCCESS, ErrorCode.OK
     elif ensure_running and result.status == MumuRuntimeStatus.STOPPED:
         outcome, code = OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_BLOCKED
-        diagnostics["blocker"] = "mumu_start_not_approved"
+        diagnostics["blocker"] = (
+            "mumu_external_not_ready" if lifecycle_mode == MumuLifecycleMode.EXTERNAL else "mumu_start_not_approved"
+        )
     elif not verify_stopped and result.status == MumuRuntimeStatus.READY:
         outcome, code = OutcomeKind.SUCCESS, ErrorCode.OK
     else:

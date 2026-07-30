@@ -2,7 +2,7 @@
 
 ## 当前验证状态
 
-StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A、Phase 6B1、Phase 6B2A、Phase 6B2B1、Phase 6B2B2A 与 Phase 6B2B3A；maa-cli 自更新、MuMu 实例化生命周期控制、公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
+StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A、Phase 6B1、Phase 6B2A、Phase 6B2B1、Phase 6B2B2A、Phase 6B2B3A 与 Phase 6B2B3B；maa-cli 自更新、MuMu managed 实例化生命周期控制、公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
 
 ## Phase 6 前的真实 smoke 门禁
 
@@ -58,7 +58,15 @@ maa-cli 自更新属于安装生命周期，6B2B2B 继续阻断；旧 hot-update
 
 2026-07-30 的受控只读帮助探针仅发现 NemuShell 的 `<HOST_NAME> <RPC_INSTANCE> <CMD>` RPC/Shell 调用形状，没有发现启动、关闭或重启实例的生命周期命令，也没有解析出可验证的管理实例选择器。`RPC_INSTANCE` 不得视为生命周期管理实例编号，`runtime_approved=false`。
 
-诊断公开 JSON 已移除候选绝对路径和 stdout/stderr excerpt，只保留输出存在性、截断标志与固定白名单 marker；候选错误只返回稳定代码。诊断包不再提前导入模块，`python -m` 入口无 RuntimeWarning 且成功 stdout 为单一 JSON document。MuMu start/stop 继续 `UNSAFE`，实例选择继续 `BLOCKED`，生产控制没有实现；6B2B3B 未获授权。
+诊断公开 JSON 已移除候选绝对路径和 stdout/stderr excerpt，只保留输出存在性、截断标志与固定白名单 marker；候选错误只返回稳定代码。诊断包不再提前导入模块，`python -m` 入口无 RuntimeWarning 且成功 stdout 为单一 JSON document。该否定证据不授权 managed start/stop 或实例选择；相关生产控制继续阻断于 6B2B3C。
+
+## Phase 6B2B3B 外部管理 MuMu 模式
+
+`MumuLifecycleMode` 提供稳定的 `managed` 与 `external` 枚举，默认 managed 以保持既有配置和静态 15 阶段计划兼容。external 要求 MuMu 已由用户或外部工具启动；配置不要求 MuMu executable，但仍严格要求本地 ADB executable/serial，且拒绝任何 start/stop arguments。
+
+动态 `build_execution_plan(config)` 在未显式传入 stages 时为 external 精确移除 STOP_MUMU、VERIFY_MUMU_STOPPED、START_MUMU 和重启后的 readiness 阶段，保留初始 ENSURE/WAIT readiness，形成 11 阶段计划。显式 stages 不会被模式静默改写，公开 `plan` 仍使用静态 15 阶段。
+
+生产绑定只向 external Stage 暴露 `status()` Port。STOPPED 返回固定 `mumu_external_not_ready` 阻断，不调用 start/stop/restart，也不扫描进程、读取 `.nemu` 或解析 RPC instance。external 不新增管理员权限要求；完整 Fake 流程已到达 MAA 与 AALC 并成功写入报告。该模式不等价于旧 PowerShell 的完整生命周期行为，managed 控制留待 6B2B3C 且尚未获授权。
 
 ## Phase 5——AALC Runtime Adapter
 

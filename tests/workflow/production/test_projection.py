@@ -159,7 +159,8 @@ def test_mumu_stopped_succeeds_verify_stopped() -> None:
 
 def test_mumu_projection_uses_allowlist() -> None:
     report = project_mumu(StageName.WAIT_MUMU_ADB_READY, mumu_result(MumuRuntimeStatus.NOT_READY))
-    assert set(report.diagnostics) == {"source_error_code", "action", "changed"}
+    assert set(report.diagnostics) == {"source_error_code", "action", "changed", "lifecycle_mode"}
+    assert report.diagnostics["lifecycle_mode"] == "managed"
 
 
 @pytest.mark.parametrize(

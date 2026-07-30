@@ -220,6 +220,7 @@ class ProductionStageExecutor:
         return project_mumu(
             self._stage,
             result,
+            lifecycle_mode=self._config.mumu.lifecycle_mode,
             ensure_running=self._stage == StageName.ENSURE_MUMU_RUNNING,
             verify_stopped=self._stage == StageName.VERIFY_MUMU_STOPPED,
         )

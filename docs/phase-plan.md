@@ -1,6 +1,6 @@
 # OrchestratoRRR 阶段规划
 
-Adapter 真实 smoke 门禁已于 2026-07-30 关闭。当前完成 6A、6B1、6B2A、6B2B1、6B2B2A 与 6B2B3A；6B2B2B、6B2B3B 和 6C 尚未完成，Phase 6 整体尚未完成。
+Adapter 真实 smoke 门禁已于 2026-07-30 关闭。当前完成 6A、6B1、6B2A、6B2B1、6B2B2A、6B2B3A 与 6B2B3B；6B2B2B、6B2B3C 和 6C 尚未完成，Phase 6 整体尚未完成。
 
 ## Phase 5——AALC Runtime Adapter
 
@@ -29,7 +29,8 @@ Fake AALC 环境和真实 AALC smoke 验收均已完成。成功仅依据 exit 0
 | 6B2B2A | 安全 MaaCore/资源更新 | 默认关闭并要求显式网络授权；固定 update 动词，复用 MAAAdapter 生命周期；已完成 |
 | 6B2B2B | maa-cli 自更新决策 | CLI 自替换与包管理器所有权尚未闭合；继续阻断 |
 | 6B2B3A | MuMu CLI 探针加固与否定证据 | 公开投影脱敏、模块执行警告修复；只读帮助仅证明 RPC/Shell 形状，未发现生命周期管理命令；已完成 |
-| 6B2B3B | 实例化生命周期控制 | start/stop 语法、实例选择和长期进程所有权尚未闭合；未获授权 |
+| 6B2B3B | 外部管理 MuMu 生命周期模式 | 用户预先启动实例，OrchestratoRRR 只验证 readiness；动态计划安全跳过 stop/start；已完成 |
+| 6B2B3C | managed 实例化生命周期控制 | start/stop 语法、实例选择和长期进程所有权尚未闭合；继续阻断 |
 | 6C | 公开 run CLI 与完整验收 | 提供公开入口、完整 Fake 验收和受控真实工作流 smoke；尚未实现 |
 | 7 | 打包与默认入口 | PyInstaller EXE、无缝替换旧 PS1 入口点 |
 
@@ -41,4 +42,4 @@ Phase 6A 已固化入口权限规划契约：先构建完整计划；只要计�
 
 Phase 6B1 已完成生产投影与安全绑定骨架。默认完整生产计划在 `SYNC_MAA_CONFIG` 明确阻断，且阻断前不构造或执行任何 Runtime Adapter。MuMu 只允许只读 `status()`；start/stop 仍未获准。
 
-Phase 6B2A 已完成旧流程静态契约调查，6B2B1 已完成安全 MAA 同步。Phase 6B2B2A 只实现固定 `maa update` 的 MaaCore/资源更新，默认关闭并要求显式网络授权；未执行真实更新。maa-cli 自更新与旧 hot-update 继续阻断于 6B2B2B。Phase 6B2B3A 的只读帮助证据仅确认 NemuShell RPC/Shell 调用形状，没有发现生命周期命令或安全实例选择器；`runtime_approved=false`，MuMu start/stop 仍为 `UNSAFE`，实例选择为 `BLOCKED`，因此 6B2B3B 未获授权。Phase 6B2 与 Phase 6 整体尚未完成；Phase 6C 尚未提供公开 run CLI，也未执行任何真实完整工作流，因此旧 PowerShell 尚不可替换。
+Phase 6B2A 已完成旧流程静态契约调查，6B2B1 已完成安全 MAA 同步。Phase 6B2B2A 只实现固定 `maa update` 的 MaaCore/资源更新，默认关闭并要求显式网络授权；未执行真实更新。maa-cli 自更新与旧 hot-update 继续阻断于 6B2B2B。Phase 6B2B3A 的只读帮助证据仅确认 NemuShell RPC/Shell 调用形状，没有发现生命周期命令或安全实例选择器；`runtime_approved=false`。Phase 6B2B3B 提供 external 安全路径：用户预先启动正确实例，OrchestratoRRR 只验证 readiness，不调用 MuMu start/stop/restart；managed 模式仍保留静态 15 阶段，实例化控制继续阻断于 6B2B3C。Phase 6B2 与 Phase 6 整体尚未完成；Phase 6C 尚未提供公开 run CLI，也未执行任何真实完整工作流，因此旧 PowerShell 尚不可替换。

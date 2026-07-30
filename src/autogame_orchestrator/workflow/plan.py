@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from autogame_orchestrator.config_model import AppConfig
+from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
 from autogame_orchestrator.models import StageName
 from autogame_orchestrator.planning import build_plan
 
@@ -40,6 +40,14 @@ def build_execution_plan(
 ) -> ExecutionPlan:
     """纯函数构建执行计划，不做路径、进程或权限操作。"""
     selected = build_plan() if stages is None else stages
+    if stages is None and config.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL:
+        removed = {
+            StageName.STOP_MUMU,
+            StageName.VERIFY_MUMU_STOPPED,
+            StageName.START_MUMU,
+            StageName.WAIT_MUMU_ADB_READY_AFTER_RESTART,
+        }
+        selected = tuple(stage for stage in selected if stage not in removed)
     requires_administrator = (
         (StageName.RUN_AALC in selected and config.aalc.requires_administrator is True)
         or (
