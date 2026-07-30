@@ -2,7 +2,7 @@
 
 ## 当前验证状态
 
-StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A 与 Phase 6B1；6B2、公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
+StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A、Phase 6B1 与 Phase 6B2A；6B2B 未获实施授权，公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
 
 ## Phase 6 前的真实 smoke 门禁
 
@@ -28,7 +28,15 @@ Phase 6A 已将入口权限决策固定在 Runner 之前：先构建完整计划
 
 配置验证 Stage 只调用 `validate()` 与 `check_paths()`。StarRail、MAA、AALC Stage 原样传递父 Deadline 和 CancellationToken，复用既有 Adapter 生命周期；Stage 外层不重试。MuMu Stage 只允许调用一次 `status()`，并且 ADB 端点只接受 `127.0.0.1:<1-65535>`。StarRail 停止/验证 Stage 只检查本次受管进程清理证据，不扫描系统进程。
 
-默认完整生产计划在 `SYNC_MAA_CONFIG` 返回 `WORKFLOW_STAGE_BLOCKED`，阻断前 Runtime 构造数为零。MAA 同步与更新、MuMu start/stop 留待 6B2；Phase 6B 整体尚未完成。Phase 6C 才会增加公开 run CLI、完整 Fake 验收和受控真实工作流 smoke。
+默认完整生产计划在 `SYNC_MAA_CONFIG` 返回 `WORKFLOW_STAGE_BLOCKED`，阻断前 Runtime 构造数为零。
+
+## Phase 6B2A 旧流程静态契约调查
+
+Phase 6B2A 只通过 PowerShell Parser/AST、文本和文件元数据调查旧流程，没有执行旧脚本、真实程序、网络或 UAC。调查确认旧同步会生成并直接覆盖两个目标配置，旧更新按开关顺序执行有限命令，且二者失败均阻断后续流程；但原子替换、隐私白名单、更新子进程和取消契约仍未闭合。
+
+旧 MuMu 流程直接管理长期 GUI 进程，并通过进程树和安装根候选集合停止，不提供可验证的管理 CLI 或精确实例选择器。该模型与当前“短管理命令受管、长期模拟器仅做 readiness 验证”的安全边界不直接兼容，错误绑定到 kill-on-close Job 可能终止刚启动的长期进程。因此 MuMu start/stop 仍为 `UNSAFE`，实例选择为 `BLOCKED`，所有权仅为 `PARTIAL`。
+
+6B2 已正式拆分为 6B2A 调查和 6B2B 实现。由于关键证据不足，6B2B 当前未获授权，MAA 同步/更新及 MuMu start/stop 的生产阻断继续保留。完整调查见 `docs/acceptance/phase-6b2a-discovery.md`。Phase 6B 与 Phase 6 整体均未完成；Phase 6C 才会增加公开 run CLI、完整 Fake 验收和受控真实工作流 smoke。
 
 ## Phase 5——AALC Runtime Adapter
 
