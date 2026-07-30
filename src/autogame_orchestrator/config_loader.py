@@ -16,6 +16,7 @@ from autogame_orchestrator.config_model import (
     AppConfig,
     MAAConfig,
     MAASyncConfig,
+    MAAUpdateConfig,
     MuMuConfig,
     OrchestratorConfig,
     StarRailConfig,
@@ -81,6 +82,7 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     cfg_sr = _parse_starrail(data.get("starrail"))
     cfg_ma = _parse_maa(data.get("maa"))
     cfg_ms = _parse_maa_sync(data.get("maa_sync"))
+    cfg_up = _parse_maa_update(data.get("maa_update"))
     cfg_al = _parse_aalc(data.get("aalc"))
 
     all_errors.extend(cfg_or[1])
@@ -88,6 +90,7 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     all_errors.extend(cfg_sr[1])
     all_errors.extend(cfg_ma[1])
     all_errors.extend(cfg_ms[1])
+    all_errors.extend(cfg_up[1])
     all_errors.extend(cfg_al[1])
 
     if all_errors:
@@ -99,6 +102,7 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
         starrail=cfg_sr[0],  # type: ignore[arg-type]
         maa=cfg_ma[0],  # type: ignore[arg-type]
         maa_sync=cfg_ms[0],  # type: ignore[arg-type]
+        maa_update=cfg_up[0],  # type: ignore[arg-type]
         aalc=cfg_al[0],  # type: ignore[arg-type]
     )
 
@@ -286,6 +290,7 @@ def _parse_maa_sync(raw: object) -> tuple[MAASyncConfig | None, list[ErrorCode]]
     enabled = raw.get("enabled", False)
     backup_enabled = raw.get("backup_enabled", True)
     max_source_bytes = raw.get("max_source_bytes", 4 * 1024 * 1024)
+    requires_administrator = raw.get("requires_administrator", False)
     paths = [
         raw.get("gui_settings_source", ""),
         raw.get("gui_tasks_source", ""),
@@ -297,6 +302,7 @@ def _parse_maa_sync(raw: object) -> tuple[MAASyncConfig | None, list[ErrorCode]]
         and isinstance(backup_enabled, bool)
         and isinstance(max_source_bytes, int)
         and not isinstance(max_source_bytes, bool)
+        and isinstance(requires_administrator, bool)
         and all(isinstance(value, str) for value in paths)
     )
     if not valid:
@@ -309,6 +315,45 @@ def _parse_maa_sync(raw: object) -> tuple[MAASyncConfig | None, list[ErrorCode]]
         cli_tasks_destination=paths[3],
         backup_enabled=backup_enabled,
         max_source_bytes=max_source_bytes,
+        requires_administrator=requires_administrator,
+    ), []
+
+
+def _parse_maa_update(raw: object) -> tuple[MAAUpdateConfig | None, list[ErrorCode]]:
+    if raw is None:
+        return MAAUpdateConfig(), []
+    if not isinstance(raw, dict):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    allowed_fields = {
+        "enabled",
+        "allow_network",
+        "requires_administrator",
+        "arguments",
+        "timeout_seconds",
+    }
+    if any(key not in allowed_fields for key in raw):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    enabled = raw.get("enabled", False)
+    allow_network = raw.get("allow_network", False)
+    requires_administrator = raw.get("requires_administrator", False)
+    arguments = _tolist(raw.get("arguments", ["update"]))
+    timeout_seconds = raw.get("timeout_seconds", 1800)
+    valid = (
+        isinstance(enabled, bool)
+        and isinstance(allow_network, bool)
+        and isinstance(requires_administrator, bool)
+        and arguments is not None
+        and isinstance(timeout_seconds, int)
+        and not isinstance(timeout_seconds, bool)
+    )
+    if not valid:
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    return MAAUpdateConfig(
+        enabled=enabled,
+        allow_network=allow_network,
+        requires_administrator=requires_administrator,
+        arguments=tuple(arguments) if arguments is not None else (),
+        timeout_seconds=timeout_seconds,
     ), []
 
 

@@ -106,7 +106,6 @@ def test_validate_path_failure_does_not_expose_path(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("stage", "blocker"),
     [
-        (StageName.UPDATE_MAA, "maa_update_not_implemented"),
         (StageName.STOP_MUMU, "mumu_stop_not_approved"),
         (StageName.START_MUMU, "mumu_start_not_approved"),
     ],
@@ -119,15 +118,16 @@ def test_unapproved_stage_is_explicitly_blocked(stage: StageName, blocker: str) 
     assert counts == Counter()
 
 
-def test_default_plan_blocks_at_update_without_runtime(tmp_path: Path) -> None:
+def test_default_plan_passes_disabled_update_before_mumu_deadline_gate(tmp_path: Path) -> None:
     config = valid_config(tmp_path)
     runtime_factories, counts = factories()
     factory = build_production_executor_factory(config, runtime_factories=runtime_factories)
     report = WorkflowRunner(build_execution_plan(config), factory, MemorySink()).run()
     assert report.stages[0].outcome == OutcomeKind.SUCCESS
     assert report.stages[1].outcome == OutcomeKind.SUCCESS
-    assert report.stages[2].error_code == ErrorCode.WORKFLOW_STAGE_BLOCKED
-    assert all(item.outcome == OutcomeKind.SKIPPED for item in report.stages[3:-1])
+    assert report.stages[2].outcome == OutcomeKind.SUCCESS
+    assert report.stages[3].error_code == ErrorCode.WORKFLOW_DEADLINE_REQUIRED
+    assert all(item.outcome == OutcomeKind.SKIPPED for item in report.stages[4:-1])
     assert counts == Counter()
 
 

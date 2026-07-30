@@ -2,7 +2,7 @@
 
 ## 当前验证状态
 
-StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A、Phase 6B1、Phase 6B2A 与 Phase 6B2B1；MAA 更新、MuMu 实例化控制、公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
+StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A、Phase 6B1、Phase 6B2A、Phase 6B2B1 与 Phase 6B2B2A；maa-cli 自更新、MuMu 实例化控制、公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
 
 ## Phase 6 前的真实 smoke 门禁
 
@@ -36,7 +36,7 @@ Phase 6B2A 只通过 PowerShell Parser/AST、文本和文件元数据调查旧�
 
 旧 MuMu 流程直接管理长期 GUI 进程，并通过进程树和安装根候选集合停止，不提供可验证的管理 CLI 或精确实例选择器。该模型与当前“短管理命令受管、长期模拟器仅做 readiness 验证”的安全边界不直接兼容，错误绑定到 kill-on-close Job 可能终止刚启动的长期进程。因此 MuMu start/stop 仍为 `UNSAFE`，实例选择为 `BLOCKED`，所有权仅为 `PARTIAL`。
 
-6B2 已继续拆分为 6B2A 调查、6B2B1 安全同步、6B2B2 MAA 更新与 6B2B3 MuMu 实例化控制。完整调查见 `docs/acceptance/phase-6b2a-discovery.md`。
+6B2 已继续拆分为 6B2A 调查、6B2B1 安全同步、6B2B2A MaaCore/资源更新、6B2B2B maa-cli 自更新决策与 6B2B3 MuMu 实例化控制。完整调查见 `docs/acceptance/phase-6b2a-discovery.md`。
 
 ## Phase 6B2B1 安全 MAA 配置同步
 
@@ -44,7 +44,15 @@ Phase 6B2A 只通过 PowerShell Parser/AST、文本和文件元数据调查旧�
 
 同步默认关闭，关闭时不构造同步器。启用后生产 Stage 惰性构造服务并原样传递父 Deadline 与 CancellationToken，只投影稳定错误码和布尔状态。源/目标路径、配置值、异常文本和临时文件信息不会进入 StageReport 或 RunReport。
 
-默认完整生产计划的首个安全阻断点已移至 `UPDATE_MAA`；在该点之前不会构造业务 Runtime。MAA 更新继续留在 6B2B2，MuMu start/stop/实例选择继续留在 6B2B3，均未实现。Phase 6B2、Phase 6B 和 Phase 6 整体尚未完成；Phase 6C 才会增加公开 run CLI 和真实完整工作流验收。
+## Phase 6B2B2A 安全 MaaCore/资源更新
+
+`[maa_update]` 默认关闭并默认禁止网络，只允许固定 `update` 动词。启用且显式授权网络后，composition root 用冻结配置替换既有 MAA 参数和 timeout，继续复用 MAAAdapter → ProcessSupervisor → Job Object 生命周期，不复制监督器，也不增加 Stage 或工作流重试。
+
+UPDATE_MAA 关闭时直接安全跳过且不构造 Port；启用时原样传递父 Deadline 和 CancellationToken。投影只包含稳定错误码、终止原因、退出码、清理与截断布尔值，不记录 PID、输出、参数、路径、环境或原始 diagnostics。
+
+入口权限计划现在综合 AALC、启用的 MAA Sync 和启用的 MAA Update 管理员要求，并继续在 Runner/Stage factory 前统一决策。默认计划不再无条件阻断于 UPDATE_MAA：MuMu STOPPED 时在 ENSURE_MUMU_RUNNING 安全阻断，READY 时可以继续；STOP_MUMU 仍无条件禁止。
+
+maa-cli 自更新属于安装生命周期，6B2B2B 继续阻断；旧 hot-update 缺少当前正式命令证据，也不属于生产能力。MuMu start/stop/实例选择继续留在 6B2B3。Phase 6B2、Phase 6B 和 Phase 6 整体均未完成；Phase 6C 才会增加公开 run CLI 和真实完整工作流验收。
 
 ## Phase 5——AALC Runtime Adapter
 

@@ -11,6 +11,7 @@ from autogame_orchestrator.workflow.production.ports import (
     AALCRunPort,
     MAARunPort,
     MAASyncPort,
+    MAAUpdatePort,
     MumuRuntimePort,
     RuntimeFactories,
     StarRailRunPort,
@@ -51,6 +52,11 @@ class _RuntimeCache:
             raise RuntimeBindingError("MAA Sync 构造器未注册")
         return cast("MAASyncPort", self._get("maa_sync", self._factories.maa_sync))
 
+    def maa_update(self) -> MAAUpdatePort:
+        if self._factories.maa_update is None:
+            raise RuntimeBindingError("MAA Update 构造器未注册")
+        return cast("MAAUpdatePort", self._get("maa_update", self._factories.maa_update))
+
 
 class ProductionExecutorFactory:
     """一次工作流专用；状态与 Runtime 缓存不跨运行共享。"""
@@ -72,6 +78,7 @@ class ProductionExecutorFactory:
             aalc=self._runtime.aalc,
             mumu=self._runtime.mumu,
             maa_sync=self._runtime.maa_sync,
+            maa_update=self._runtime.maa_update,
         )
 
 

@@ -40,5 +40,17 @@ def build_execution_plan(
 ) -> ExecutionPlan:
     """纯函数构建执行计划，不做路径、进程或权限操作。"""
     selected = build_plan() if stages is None else stages
-    requires_administrator = StageName.RUN_AALC in selected and config.aalc.requires_administrator is True
+    requires_administrator = (
+        (StageName.RUN_AALC in selected and config.aalc.requires_administrator is True)
+        or (
+            StageName.SYNC_MAA_CONFIG in selected
+            and config.maa_sync.enabled is True
+            and config.maa_sync.requires_administrator is True
+        )
+        or (
+            StageName.UPDATE_MAA in selected
+            and config.maa_update.enabled is True
+            and config.maa_update.requires_administrator is True
+        )
+    )
     return ExecutionPlan(stages=selected, requires_administrator=requires_administrator)

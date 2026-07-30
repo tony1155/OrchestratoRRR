@@ -132,12 +132,13 @@ def test_stage_diagnostics_are_allowlisted() -> None:
     assert "sensitive-source" not in repr(report)
 
 
-def test_update_maa_remains_blocked() -> None:
+def test_update_maa_defaults_to_safe_skip() -> None:
     runtime_factories, counts = factories()
     report = build_production_executor_factory(AppConfig(), runtime_factories=runtime_factories)(
         StageName.UPDATE_MAA
     ).execute(
         StageExecutionContext("00000000-0000-0000-0000-000000000001", StageName.UPDATE_MAA, None, CancellationToken())
     )
-    assert report.error_code == ErrorCode.WORKFLOW_STAGE_BLOCKED
+    assert (report.outcome, report.error_code) == (OutcomeKind.SUCCESS, ErrorCode.OK)
+    assert report.diagnostics == {"enabled": False, "executed": False}
     assert counts == Counter()

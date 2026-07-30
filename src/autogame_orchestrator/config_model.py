@@ -335,12 +335,15 @@ class MAASyncConfig:
     cli_tasks_destination: str = ""
     backup_enabled: bool = True
     max_source_bytes: int = 4 * 1024 * 1024
+    requires_administrator: bool = False
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
         if not isinstance(self.enabled, bool):
             errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         if not isinstance(self.backup_enabled, bool):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.requires_administrator, bool):
             errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         if (
             not isinstance(self.max_source_bytes, int)
@@ -390,12 +393,54 @@ class MAASyncConfig:
 
 
 @dataclass(frozen=True)
+class MAAUpdateConfig:
+    """仅允许 MaaCore/资源 update 的安全配置。"""
+
+    enabled: bool = False
+    allow_network: bool = False
+    requires_administrator: bool = False
+    arguments: tuple[str, ...] = ("update",)
+    timeout_seconds: int = 1800
+
+    def validate(self) -> list[ErrorCode]:
+        errors: list[ErrorCode] = []
+        for value in (self.enabled, self.allow_network, self.requires_administrator):
+            if not isinstance(value, bool):
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if (
+            not isinstance(self.timeout_seconds, int)
+            or isinstance(self.timeout_seconds, bool)
+            or self.timeout_seconds <= 0
+        ):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.arguments, (tuple, list)) or not self.arguments or len(self.arguments) > 16:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        else:
+            forbidden = {"self", "hot-update", "install", "run", "task"}
+            for argument in self.arguments:
+                if (
+                    not isinstance(argument, str)
+                    or not argument
+                    or len(argument) > 512
+                    or any(ord(char) < 32 or ord(char) == 127 for char in argument)
+                    or argument.casefold() in forbidden
+                ):
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            if self.arguments[0] != "update":
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if isinstance(self.enabled, bool) and self.enabled and self.allow_network is not True:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        return errors
+
+
+@dataclass(frozen=True)
 class AppConfig:
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
     mumu: MuMuConfig = field(default_factory=MuMuConfig)
     starrail: StarRailConfig = field(default_factory=StarRailConfig)
     maa: MAAConfig = field(default_factory=MAAConfig)
     maa_sync: MAASyncConfig = field(default_factory=MAASyncConfig)
+    maa_update: MAAUpdateConfig = field(default_factory=MAAUpdateConfig)
     aalc: AALCConfig = field(default_factory=AALCConfig)
 
     def validate(self) -> list[ErrorCode]:
@@ -405,6 +450,7 @@ class AppConfig:
         errors.extend(self.starrail.validate())
         errors.extend(self.maa.validate())
         errors.extend(self.maa_sync.validate())
+        errors.extend(self.maa_update.validate())
         errors.extend(self.aalc.validate())
         return errors
 

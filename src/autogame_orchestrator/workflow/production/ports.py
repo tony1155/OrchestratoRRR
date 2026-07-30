@@ -55,6 +55,14 @@ class MAASyncPort(Protocol):
     ) -> MAASyncResult: ...
 
 
+class MAAUpdatePort(Protocol):
+    def run(
+        self,
+        deadline: Deadline | None = None,
+        cancel: CancellationToken | None = None,
+    ) -> MAARunResult: ...
+
+
 @dataclass(frozen=True)
 class RuntimeFactories:
     """仅在对应 Stage 到达时才调用的 Runtime 构造器。"""
@@ -64,3 +72,4 @@ class RuntimeFactories:
     aalc: Callable[[], AALCRunPort]
     mumu: Callable[[], MumuRuntimePort]
     maa_sync: Callable[[], MAASyncPort] | None = None
+    maa_update: Callable[[], MAAUpdatePort] | None = None

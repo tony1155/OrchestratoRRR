@@ -55,6 +55,14 @@ cli_profile_destination = ""
 cli_tasks_destination = ""
 backup_enabled = true
 max_source_bytes = 4194304
+requires_administrator = false
+
+[maa_update]
+enabled = false
+allow_network = false
+requires_administrator = false
+arguments = ["update"]
+timeout_seconds = 1800
 
 [aalc]
 executable = "C:\\path\\to\\AALC.exe"

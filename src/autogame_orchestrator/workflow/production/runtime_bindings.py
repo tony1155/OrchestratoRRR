@@ -6,6 +6,7 @@ from pathlib import Path
 
 from autogame_orchestrator.config_model import AppConfig
 from autogame_orchestrator.maa_sync.synchronizer import MAASynchronizer
+from autogame_orchestrator.maa_update import build_maa_update_runtime_config
 from autogame_orchestrator.runtime.aalc import AALCAdapter
 from autogame_orchestrator.runtime.maa import MAAAdapter
 from autogame_orchestrator.runtime.mumu import MumuAdapter
@@ -59,4 +60,7 @@ def build_default_runtime_factories(config: AppConfig) -> RuntimeFactories:
     def build_maa_sync() -> MAASynchronizer:
         return MAASynchronizer(config.maa_sync)
 
-    return RuntimeFactories(build_starrail, build_maa, build_aalc, build_mumu, build_maa_sync)
+    def build_maa_update() -> MAAAdapter:
+        return MAAAdapter(build_maa_update_runtime_config(config.maa, config.maa_update))
+
+    return RuntimeFactories(build_starrail, build_maa, build_aalc, build_mumu, build_maa_sync, build_maa_update)

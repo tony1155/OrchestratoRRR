@@ -13,6 +13,7 @@ from autogame_orchestrator.workflow.production.ports import (
     AALCRunPort,
     MAARunPort,
     MAASyncPort,
+    MAAUpdatePort,
     MumuRuntimePort,
     StarRailRunPort,
 )
@@ -58,6 +59,7 @@ class ProductionStageExecutor:
         aalc: Callable[[], AALCRunPort],
         mumu: Callable[[], MumuRuntimePort],
         maa_sync: Callable[[], MAASyncPort],
+        maa_update: Callable[[], MAAUpdatePort],
     ) -> None:
         self._stage = stage
         self._config = config
@@ -67,6 +69,7 @@ class ProductionStageExecutor:
         self._aalc = aalc
         self._mumu = mumu
         self._maa_sync = maa_sync
+        self._maa_update = maa_update
 
     def execute(self, context: StageExecutionContext) -> StageReport:
         if context.stage != self._stage:
@@ -84,8 +87,9 @@ class ProductionStageExecutor:
             return self._validate()
         if stage == StageName.SYNC_MAA_CONFIG:
             return self._run_maa_sync(context)
+        if stage == StageName.UPDATE_MAA:
+            return self._run_maa_update(context)
         blockers = {
-            StageName.UPDATE_MAA: "maa_update_not_implemented",
             StageName.STOP_MUMU: "mumu_stop_not_approved",
             StageName.START_MUMU: "mumu_start_not_approved",
         }
@@ -150,6 +154,45 @@ class ProductionStageExecutor:
                 "tasks_backup_written": sync_result.tasks_backup_written,
                 "rollback_attempted": sync_result.rollback_attempted,
                 "rollback_succeeded": sync_result.rollback_succeeded,
+            },
+        )
+
+    def _run_maa_update(self, context: StageExecutionContext) -> StageReport:
+        if not self._config.maa_update.enabled:
+            return _instant(
+                self._stage,
+                OutcomeKind.SUCCESS,
+                ErrorCode.OK,
+                {"enabled": False, "executed": False},
+            )
+        if not self._config.maa_update.allow_network or self._config.maa_update.validate():
+            return _instant(self._stage, OutcomeKind.FAILURE, ErrorCode.CONFIG_SCHEMA_ERROR)
+        update_result = self._maa_update().run(context.deadline, context.cancel)
+        mapping = {
+            "completed": (OutcomeKind.SUCCESS, ErrorCode.OK),
+            "failed": (OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_FAILED),
+            "timeout": (OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT),
+            "cancelled": (OutcomeKind.CANCELLED, ErrorCode.WORKFLOW_CANCELLED),
+        }
+        outcome, code = mapping[update_result.status.value]
+        return StageReport(
+            self._stage,
+            outcome,
+            code,
+            update_result.started_at,
+            update_result.finished_at,
+            update_result.duration_ms,
+            diagnostics={
+                "enabled": True,
+                "executed": True,
+                "source_error_code": update_result.error_code.value,
+                "termination_reason": (
+                    update_result.termination_reason.value if update_result.termination_reason is not None else ""
+                ),
+                "exit_code": update_result.exit_code,
+                "owned_process_cleaned": update_result.owned_process_cleaned,
+                "stdout_truncated": update_result.stdout_truncated,
+                "stderr_truncated": update_result.stderr_truncated,
             },
         )
 

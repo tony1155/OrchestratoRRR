@@ -1,12 +1,12 @@
 # OrchestratoRRR
 
-Adapter 真实 smoke 门禁已于 2026-07-30 正式关闭。当前完成 Phase 6A、Phase 6B1、Phase 6B2A 和 Phase 6B2B1——安全 MAA 配置同步；MAA 更新与 MuMu 实例化控制仍被阻断，Phase 6C 尚未实现，因此 Phase 6 整体尚未完成。脱敏 Adapter 证据见 [最终验收记录](docs/acceptance/adapter-real-smoke.md)。
+Adapter 真实 smoke 门禁已于 2026-07-30 正式关闭。当前完成 Phase 6A、Phase 6B1、Phase 6B2A、Phase 6B2B1 和 Phase 6B2B2A——安全 MaaCore/资源更新；maa-cli 自更新与 MuMu 实例化控制仍被阻断，Phase 6C 尚未实现，因此 Phase 6 整体尚未完成。脱敏 Adapter 证据见 [最终验收记录](docs/acceptance/adapter-real-smoke.md)。
 
 Phase 5 后、Phase 6 前的单 Adapter 真实 smoke 门禁已经完成。诊断入口要求精确确认、有限 Deadline、单 Adapter 选择和原子安全结果；后续复验流程见 [统一门禁手册](docs/manual/adapter-real-smoke-gate.md)。
 
 AALC 可通过 `requires_administrator = true` 声明管理员权限要求。普通权限 smoke 入口会在 Adapter 构造前请求一次 UAC，提升整个 OrchestratoRRR/Python 入口；拒绝 UAC 时安全停止。不会用 `runas` 单独启动 AALC，提升后仍保留 ProcessSupervisor 与 Job Object 契约。该 bootstrap 已纳入真实 smoke 验收，但不代表 Phase 6 已实现。
 
-当前阶段：Phase 6B2B1——安全 MAA 配置同步。`[maa_sync]` 默认关闭；启用后使用字段白名单、有界读取、原子替换、原子备份和双输出失败回滚。默认完整生产计划现安全通过关闭的同步阶段，并在 `UPDATE_MAA` 阻断。
+当前阶段：Phase 6B2B2A——安全 MaaCore/资源更新。`[maa_update]` 默认关闭且默认禁止网络；只有显式同时启用和授权网络时，才惰性复用现有 MAAAdapter 执行固定 `update` 命令。默认计划安全跳过更新，后续门禁取决于 MuMu 只读状态。
 
 OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进程编排器。
 
@@ -30,6 +30,7 @@ OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进�
 - Phase 6B1 Runtime 结果白名单投影、惰性生产绑定、每次运行独立状态和生产 ReportSink。
 - Phase 6B2A 以纯静态方式调查旧流程契约；结论与可实施性矩阵见 [验收记录](docs/acceptance/phase-6b2a-discovery.md)。
 - Phase 6B2B1 提供默认关闭的安全 MAA 配置同步；验收见 [阶段记录](docs/acceptance/phase-6b2b1.md)。
+- Phase 6B2B2A 提供默认关闭、显式网络授权的 MaaCore/资源更新；验收见 [阶段记录](docs/acceptance/phase-6b2b2a.md)。
 
 ## 当前安全边界
 
