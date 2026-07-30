@@ -1,19 +1,19 @@
 # OrchestratoRRR
 
-Adapter 真实 smoke 门禁已于 2026-07-30 正式关闭：StarRail、MAA、AALC 的受控真实 smoke 均已通过。AALC 使用无限工作负载，本次验收以操作者确认运行正常后优雅关闭作为终止条件，不声称无限业务自动完成。允许进入 Phase 6 完整工作流实施，但 Phase 6 尚未在本提交中实现。脱敏证据见 [最终验收记录](docs/acceptance/adapter-real-smoke.md)。
+Adapter 真实 smoke 门禁已于 2026-07-30 正式关闭。当前完成 Phase 6A——工作流契约与 Fake 编排内核；Phase 6B 生产 Stage 绑定和 Phase 6C 公开 run CLI/完整验收尚未实现，因此 Phase 6 整体尚未完成。脱敏 Adapter 证据见 [最终验收记录](docs/acceptance/adapter-real-smoke.md)。
 
 Phase 5 后、Phase 6 前的单 Adapter 真实 smoke 门禁已经完成。诊断入口要求精确确认、有限 Deadline、单 Adapter 选择和原子安全结果；后续复验流程见 [统一门禁手册](docs/manual/adapter-real-smoke-gate.md)。
 
 AALC 可通过 `requires_administrator = true` 声明管理员权限要求。普通权限 smoke 入口会在 Adapter 构造前请求一次 UAC，提升整个 OrchestratoRRR/Python 入口；拒绝 UAC 时安全停止。不会用 `runas` 单独启动 AALC，提升后仍保留 ProcessSupervisor 与 Job Object 契约。该 bootstrap 已纳入真实 smoke 验收，但不代表 Phase 6 已实现。
 
-当前阶段：Phase 5——AALC Runtime Adapter。Fake 环境和三个 Adapter 的真实 smoke 验收均已完成，Phase 6 已获实施授权但尚未实现。成功只依据 exit 0；最多三次尝试，只有非零退出和单次尝试超时允许重试。
+当前阶段：Phase 6A——完整工作流契约与 Fake 编排内核。默认十五阶段顺序保持不变，Fake Stage 支持惰性构造、fail-fast、取消与父 Deadline 传播、RunReport 单次最终化和入口提权前置决策。AALC Adapter 自身有限 attempts 未改变，Runner 不叠加全工作流重试。
 
 OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进程编排器。
 
 项目正在逐阶段替换旧的单体 PowerShell 编排流程，目标是可靠管理 MuMu Player、StarRailCopilot、MAA 和 AALC，并为每个外部进程提供明确的超时、取消、进程树清理和结构化结果。
 
 > cleanup failure、取消、路径、配置和启动失败均不重试。
-> 未实现完整工作流或公开 run CLI，未替换旧 PowerShell 编排入口。
+> 未绑定生产 Stage，未实现 MuMu 真实停启、MAA 配置同步或更新，也未增加公开 run CLI；未替换旧 PowerShell 编排入口。
 
 ## 当前能力
 
@@ -26,6 +26,7 @@ OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进�
 - MuMu 候选 CLI 固定帮助参数诊断探针；
 - JSONL 日志和结构化运行报告；
 - 配置验证和静态执行计划。
+- Phase 6A 冻结执行计划、Fake Stage 编排、失败/取消/Deadline 传播和 RunReport 最终化。
 
 ## 当前安全边界
 

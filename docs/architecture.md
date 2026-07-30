@@ -2,7 +2,7 @@
 
 ## 当前验证状态
 
-StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收，Adapter 真实 smoke 门禁已关闭。AALC 的无限工作负载由操作者确认运行正常后优雅关闭；其 `completed` 表示进程正常退出和生命周期管理成功，不表示无限业务自动完成。Phase 6 已获实施授权，但尚未在本提交中实现。
+StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。当前完成 Phase 6A 工作流契约与 Fake 编排内核；生产 Stage 绑定、公开 run CLI 和真实完整工作流仍未实现，Phase 6 整体尚未完成。
 
 ## Phase 6 前的真实 smoke 门禁
 
@@ -12,7 +12,15 @@ StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱�
 
 `platform.windows_elevation` 提供可复用的入口级 Windows 自提权 API。它先用进程 Token 判断权限，再通过 `ShellExecuteExW` 的 `runas` 提升当前 Python 模块，等待子入口结束并转发退出码。普通父入口不构造 Adapter 或 ProcessSupervisor；提升后的入口继续走 ProcessSupervisor → CreateProcessW(CREATE_SUSPENDED) → Job Object → ResumeThread。UAC 取消和提权失败分别使用独立稳定结果，命令行只转发既有 CLI 参数和路径，不传递配置内容或环境敏感值。
 
-未来 Phase 6 必须在启动任何阶段前读取完整计划，判断是否包含 `requires_administrator=true` 的 Adapter，必要时先提升整个 OrchestratoRRR，再启动第一个真实阶段。不得运行到 AALC 阶段才临时提升。本任务未实现该完整工作流。
+Phase 6A 已将入口权限决策固定在 Runner 之前：先构建完整计划，判断计划是否包含要求管理员权限的 AALC，必要时请求提升整个 OrchestratoRRR，权限满足后才允许构造 Runner 和惰性 Stage 工厂。不得运行到 AALC 阶段才临时提升。本阶段只测试可注入 Fake gateway，没有触发真实 UAC。
+
+## Phase 6A 工作流内核
+
+`workflow.plan.ExecutionPlan` 是冻结计划模型，并与既有 `planning.build_plan()` 的十五阶段顺序保持一致。`workflow.runner.WorkflowRunner` 只在阶段到达时请求 `StageExecutorFactory`；首次失败、超时、取消、非法结果、缺失绑定或异常后立即停止，剩余业务阶段写为 `SKIPPED`。所有到达的 Stage 共享同一 `run_id`、`CancellationToken` 和父 `Deadline`，Runner 不重置预算，也不提供全工作流重试。
+
+`WRITE_RUN_REPORT` 是 Runner 内部最终化阶段，不向工厂请求执行器。无论业务结果如何，注入的报告 sink 只尝试一次；写入失败时，内存报告以 `RUN_REPORT_WRITE_ERROR` 为顶层错误，并用稳定诊断字段保留先前业务错误。核心继续复用 RunReport v1、`StageReport` 和 `RunReport`，没有建立第二套 schema。
+
+工作流核心不导入具体 Runtime Adapter、`ProcessSupervisor` 或 Win32 API。Phase 6B 才负责生产 Stage 投影与真实组件绑定；MuMu 真实停启、MAA 配置同步与更新仍是门禁。Phase 6C 才会增加公开 run CLI、完整 Fake 验收和受控真实工作流 smoke。
 
 ## Phase 5——AALC Runtime Adapter
 
