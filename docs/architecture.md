@@ -1,10 +1,14 @@
 # OrchestratoRRR 架构
 
+## 当前验证状态
+
+StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收，Adapter 真实 smoke 门禁已关闭。AALC 的无限工作负载由操作者确认运行正常后优雅关闭；其 `completed` 表示进程正常退出和生命周期管理成功，不表示无限业务自动完成。Phase 6 已获实施授权，但尚未在本提交中实现。
+
 ## Phase 6 前的真实 smoke 门禁
 
 `diagnostics.adapter_smoke` 是用户手工触发的受限诊断入口，不是公开生产 run CLI，也不属于完整工作流。它在精确确认后使用正式配置加载器，仅校验并构造所选 Adapter，传入有限 Deadline 和取消令牌，再将安全字段投影原子写入 JSON。真实进程的启动与清理仍完全由现有 Adapter 和 ProcessSupervisor 负责。
 
-该门禁不编排 MuMu/ADB，不串联多个 Adapter，不记录本机路径、环境值、输出原文或 PID 数值。当前只完成工具与替身测试，尚无可接受的完整真实 smoke 验收证据。
+该门禁不编排 MuMu/ADB，不串联多个 Adapter，不记录本机路径、环境值、输出原文或 PID 数值。三个 Adapter 的脱敏真实 smoke 证据现已完成验收，详细记录见 `docs/acceptance/adapter-real-smoke.md`。
 
 `platform.windows_elevation` 提供可复用的入口级 Windows 自提权 API。它先用进程 Token 判断权限，再通过 `ShellExecuteExW` 的 `runas` 提升当前 Python 模块，等待子入口结束并转发退出码。普通父入口不构造 Adapter 或 ProcessSupervisor；提升后的入口继续走 ProcessSupervisor → CreateProcessW(CREATE_SUSPENDED) → Job Object → ResumeThread。UAC 取消和提权失败分别使用独立稳定结果，命令行只转发既有 CLI 参数和路径，不传递配置内容或环境敏感值。
 
@@ -12,11 +16,11 @@
 
 ## Phase 5——AALC Runtime Adapter
 
-Fake AALC 环境完成；真实 AALC smoke 待用户批准。AALCAdapter 通过 ProcessSupervisor 创建独立 Job Object 尝试，成功仅依据 exit 0，最多三次尝试。只有非零退出和单次尝试超时可重试；cleanup failure、取消、路径、配置和启动失败不重试。
+Fake AALC 环境和真实 AALC smoke 脱敏验收均已完成。AALCAdapter 通过 ProcessSupervisor 创建独立 Job Object 尝试，成功仅依据 exit 0，最多三次尝试。只有非零退出和单次尝试超时可重试；cleanup failure、取消、路径、配置和启动失败不重试。
 
 ## 当前状态
 
-Phase 5——AALC Runtime Adapter（Fake 环境完成，真实 smoke 待用户批准）。
+Phase 5——AALC Runtime Adapter（Fake 环境和真实 smoke 验收均已完成）。
 
 自动测试只启动仓库 Fake 子进程；未启动任何真实业务程序。
 

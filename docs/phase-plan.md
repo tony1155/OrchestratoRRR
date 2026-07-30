@@ -1,8 +1,10 @@
 # OrchestratoRRR 阶段规划
 
+Adapter 真实 smoke 门禁已于 2026-07-30 关闭，StarRail、MAA、AALC 的受控真实 smoke 均已通过。Phase 6 已获实施授权，但尚未在本提交中实现。
+
 ## Phase 5——AALC Runtime Adapter
 
-Fake AALC 环境完成；真实 AALC smoke 待批准。成功仅依据 exit 0，最多三次尝试，只有非零退出和单次尝试超时允许重试。未实现完整工作流、公开 run CLI，未替换旧 PowerShell。
+Fake AALC 环境和真实 AALC smoke 验收均已完成。成功仅依据 exit 0，最多三次尝试，只有非零退出和单次尝试超时允许重试。未实现完整工作流、公开 run CLI，未替换旧 PowerShell。
 
 本文档定义 Autogame Orchestrator 的阶段性路线。
 各阶段严格按顺序实施，每个阶段完成前必须通过所有测试。
@@ -19,7 +21,7 @@ Fake AALC 环境完成；真实 AALC smoke 待批准。成功仅依据 exit 0，
 | 3 | StarRail Adapter | 启动 StarRailCopilot、监控退出、捕获输出 |
 | 4 | MAA Adapter | 启动 MAA CLI |
 | 5 | AALC Adapter | 有界启动 AALC，最多三次尝试，仅非零退出和单次尝试超时允许重试 |
-| 门禁 | Phase 6 前的真实 smoke | 依次完成 StarRail、MAA、AALC 单 Adapter smoke 并人工评审；当前已准备工具，尚未完成最终真实 smoke 验收 |
+| 门禁 | Phase 6 前的真实 smoke | 已完成 StarRail、MAA、AALC 单 Adapter smoke 和人工评审；门禁已关闭，Phase 6 已获实施授权 |
 | 6 | 完整工作流 | 编排完整生命周期 |
 | 7 | 打包与默认入口 | PyInstaller EXE、无缝替换旧 PS1 入口点 |
 

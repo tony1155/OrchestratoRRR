@@ -1,5 +1,7 @@
 # Phase 5——AALC Runtime Adapter 验收
 
+> 后续状态（2026-07-30）：本文保留 Phase 5 当时的验收记录；真实 AALC smoke 已在 [最终验收记录](adapter-real-smoke.md) 中完成脱敏验收。AALC 无限工作负载由操作者确认运行正常后优雅关闭，不声明业务自然完成。
+
 建议状态：附注接受——Fake 环境完成，
 真实 AALC smoke 待用户批准。
 

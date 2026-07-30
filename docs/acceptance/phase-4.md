@@ -1,5 +1,7 @@
 # Phase 4——MAA CLI Runtime Adapter 验收
 
+> 后续状态（2026-07-30）：本文保留 Phase 4 当时的验收记录；真实 MAA smoke 已在 [最终验收记录](adapter-real-smoke.md) 中完成脱敏验收。
+
 建议状态：附注接受——Fake 环境完成，
 真实 MAA smoke 待用户批准。
 

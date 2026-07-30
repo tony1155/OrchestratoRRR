@@ -1,10 +1,12 @@
 # OrchestratoRRR
 
-当前正在准备 Phase 5 后、Phase 6 前的单 Adapter 真实 smoke 门禁。诊断入口要求精确确认、有限 Deadline、单 Adapter 选择和原子安全结果；自动测试已使用替身完成，尚未执行任何真实业务程序。用户手工流程见 [统一门禁手册](docs/manual/adapter-real-smoke-gate.md)。
+Adapter 真实 smoke 门禁已于 2026-07-30 正式关闭：StarRail、MAA、AALC 的受控真实 smoke 均已通过。AALC 使用无限工作负载，本次验收以操作者确认运行正常后优雅关闭作为终止条件，不声称无限业务自动完成。允许进入 Phase 6 完整工作流实施，但 Phase 6 尚未在本提交中实现。脱敏证据见 [最终验收记录](docs/acceptance/adapter-real-smoke.md)。
 
-AALC 可通过 `requires_administrator = true` 声明管理员权限要求。普通权限 smoke 入口会在 Adapter 构造前请求一次 UAC，提升整个 OrchestratoRRR/Python 入口；拒绝 UAC 时安全停止。不会用 `runas` 单独启动 AALC，提升后仍保留 ProcessSupervisor 与 Job Object 契约。该 bootstrap 不代表 Phase 6 已实现，也没有最终真实 AALC 成功 JSON。
+Phase 5 后、Phase 6 前的单 Adapter 真实 smoke 门禁已经完成。诊断入口要求精确确认、有限 Deadline、单 Adapter 选择和原子安全结果；后续复验流程见 [统一门禁手册](docs/manual/adapter-real-smoke-gate.md)。
 
-当前阶段：Phase 5——AALC Runtime Adapter。Fake AALC 环境已完成，真实 AALC smoke 待用户批准。成功只依据 exit 0；最多三次尝试，只有非零退出和单次尝试超时允许重试。
+AALC 可通过 `requires_administrator = true` 声明管理员权限要求。普通权限 smoke 入口会在 Adapter 构造前请求一次 UAC，提升整个 OrchestratoRRR/Python 入口；拒绝 UAC 时安全停止。不会用 `runas` 单独启动 AALC，提升后仍保留 ProcessSupervisor 与 Job Object 契约。该 bootstrap 已纳入真实 smoke 验收，但不代表 Phase 6 已实现。
+
+当前阶段：Phase 5——AALC Runtime Adapter。Fake 环境和三个 Adapter 的真实 smoke 验收均已完成，Phase 6 已获实施授权但尚未实现。成功只依据 exit 0；最多三次尝试，只有非零退出和单次尝试超时允许重试。
 
 OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进程编排器。
 
