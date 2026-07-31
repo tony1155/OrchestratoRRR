@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from autogame_orchestrator.config_model import AppConfig
+from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.models import RunReport
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
@@ -26,9 +27,8 @@ class WorkflowCoordinationResult:
 RunnerFactory = Callable[[ExecutionPlan], WorkflowRunnerContract]
 
 
-def _stable_error_code(value: object) -> str:
-    raw = getattr(value, "value", value)
-    return raw if isinstance(raw, str) else "ELEVATION_FAILED"
+def _stable_error_code(value: str) -> str:
+    return value
 
 
 class WorkflowCoordinator:
@@ -42,7 +42,7 @@ class WorkflowCoordinator:
         self,
         config: AppConfig,
         *,
-        relaunch_arguments: Sequence[str] = (),
+        relaunch_spec: ElevationLaunchSpec,
         elevation_marker_present: bool = False,
         deadline: Deadline | None = None,
         cancel: CancellationToken | None = None,
@@ -53,7 +53,7 @@ class WorkflowCoordinator:
         if plan.requires_administrator and not self._elevation_gateway.is_elevated():
             if elevation_marker_present:
                 return WorkflowCoordinationResult(None, "ELEVATION_FAILED", 10, False)
-            elevation = self._elevation_gateway.relaunch(tuple(relaunch_arguments))
+            elevation = self._elevation_gateway.relaunch(relaunch_spec)
             return WorkflowCoordinationResult(
                 None,
                 _stable_error_code(elevation.error_code),

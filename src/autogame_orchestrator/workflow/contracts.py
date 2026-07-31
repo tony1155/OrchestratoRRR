@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.models import JsonValue, RunReport, StageName, StageReport
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
@@ -44,7 +45,7 @@ class ElevationGatewayResult(Protocol):
     """与 Windows elevation 结果等价的最小只读投影。"""
 
     @property
-    def error_code(self) -> object: ...
+    def error_code(self) -> str: ...
 
     @property
     def exit_code(self) -> int: ...
@@ -55,7 +56,7 @@ class ElevationGateway(Protocol):
 
     def is_elevated(self) -> bool: ...
 
-    def relaunch(self, arguments: Sequence[str]) -> ElevationGatewayResult: ...
+    def relaunch(self, spec: ElevationLaunchSpec) -> ElevationGatewayResult: ...
 
 
 class WorkflowRunnerContract(Protocol):

@@ -5,7 +5,8 @@
 StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。Phase 6C2A、
 6C2B4C 和 6C2C 的修复后真实证据均已通过：冷连接恢复成功，external 11 阶段完整 workflow
 成功，RunReport 完整可读。maa-cli 自更新与 MuMu managed 实例化生命周期控制仍未完成；
-Phase 6 已按批准的 external-only 范围完成，Phase 7 尚未开始。
+Phase 6 已按批准的 external-only 范围完成，Phase 7A1 已完成入口契约实现与自动测试，
+Phase 7 尚未完成。
 
 ## Phase 6 前的真实 smoke 门禁
 
@@ -194,3 +195,24 @@ Production code (`src/`) must never import from `tests/`.
    No half-written final reports.
 
 5. **Synchronous JSONL** — no async queues or background threads at this stage.
+
+## Phase 7A1 Frozen Entry and UAC Re-entry
+
+Phase 7A1 introduces a single immutable EntryRuntime model with SOURCE and
+FROZEN kinds and a single runtime detection boundary. Detection uses only
+getattr(sys, "frozen", False) and captures the current executable and working
+directory when requested. It does not use packager-private extraction state or
+spread packager-specific logic through the workflow.
+
+Elevation now receives an immutable ElevationLaunchSpec containing the
+executable, argument tuple, and working directory. Source children use
+python.exe -m autogame_orchestrator run ...; frozen children use
+OrchestratoRRR.exe run .... The configuration path is made absolute during
+spec construction. The platform layer uses the supplied working directory and
+executable and does not reread process state.
+
+The elevation marker, UAC cancellation and failure mappings, handle cleanup,
+exit-code forwarding, and pre-Runner permission boundary remain unchanged.
+Phase 7A1 uses only Fake and automatic tests. Packaging resources, EXE
+generation, the default shortcut/working-directory policy, real frozen UAC,
+and legacy PowerShell replacement remain future work.

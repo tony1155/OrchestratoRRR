@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from autogame_orchestrator.entry_runtime import EntryRuntime, EntryRuntimeKind
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, RunStatus, StageName
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.run_application import RUN_CONFIRMATION, RunRequest, execute_run_request
@@ -193,6 +194,33 @@ def test_non_admin_relaunches_before_log_and_runtime(tmp_path: Path) -> None:
     assert counts == {}
     assert sink.reports == []
     assert logs == []
+
+
+def test_frozen_non_admin_relaunch_uses_frozen_entry_spec(tmp_path: Path) -> None:
+    config_path = write_run_config(tmp_path, aalc_requires_administrator=True)
+    dependencies, counts, *_ = fake_dependencies(elevated=False)
+    runtime = EntryRuntime(
+        EntryRuntimeKind.FROZEN,
+        tmp_path / "OrchestratoRRR.exe",
+        tmp_path / "working directory",
+    )
+    runtime.working_directory.mkdir()
+
+    result = execute_run_request(
+        _request(config_path),
+        dependencies=dependencies,
+        entry_runtime=runtime,
+    )
+
+    gateway = dependencies.elevation_gateway
+    assert (result.exit_code, result.status) == (0, "relaunched")
+    assert counts == {}
+    assert gateway.spec is not None  # type: ignore[attr-defined]
+    assert gateway.spec.executable == runtime.executable  # type: ignore[attr-defined]
+    assert gateway.spec.working_directory == runtime.working_directory  # type: ignore[attr-defined]
+    assert gateway.spec.arguments[0] == "run"  # type: ignore[attr-defined]
+    assert "-m" not in gateway.spec.arguments  # type: ignore[attr-defined]
+    assert "autogame_orchestrator" not in gateway.spec.arguments  # type: ignore[attr-defined]
 
 
 def test_uac_cancel_maps_exit_nine(tmp_path: Path) -> None:

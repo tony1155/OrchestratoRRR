@@ -15,13 +15,14 @@ from autogame_orchestrator.config_model import (
     MuMuConfig,
     MumuLifecycleMode,
 )
+from autogame_orchestrator.entry_runtime import EntryRuntime, EntryRuntimeKind
 from autogame_orchestrator.models import ErrorCode, RunReport, RunStatus, StageName
 from autogame_orchestrator.run_application import (
     ELEVATION_MARKER,
     EXTERNAL_RUN_STAGES,
     RUN_CONFIRMATION,
     RunRequest,
-    build_relaunch_arguments,
+    build_relaunch_spec,
     execute_run_request,
     map_run_exit_code,
     validate_external_plan,
@@ -141,30 +142,69 @@ def test_non_exact_external_plan_is_rejected(stages: tuple[StageName, ...]) -> N
     assert validate_external_plan(ExecutionPlan(stages, False)) == "external_plan_invalid"
 
 
-def test_relaunch_arguments_use_module_entrypoint() -> None:
-    arguments = build_relaunch_arguments(_request())
-    assert arguments[:3] == ("-m", "autogame_orchestrator", "run")
+def test_source_relaunch_spec_uses_module_entrypoint(tmp_path: Path) -> None:
+    runtime = EntryRuntime(EntryRuntimeKind.SOURCE, tmp_path / "python.exe", tmp_path)
+    spec = build_relaunch_spec(_request(), runtime)
+    assert spec.executable == tmp_path / "python.exe"
+    assert spec.working_directory == tmp_path
+    assert spec.arguments == (
+        "-m",
+        "autogame_orchestrator",
+        "run",
+        "--config",
+        str(Path("safe-reference.toml").resolve()),
+        "--deadline-seconds",
+        "30",
+        "--confirm-real-execution",
+        RUN_CONFIRMATION,
+        ELEVATION_MARKER,
+    )
 
 
-def test_relaunch_arguments_include_only_allowed_cli_fields() -> None:
-    arguments = build_relaunch_arguments(_request())
+def test_relaunch_spec_includes_only_allowed_cli_fields(tmp_path: Path) -> None:
+    runtime = EntryRuntime(EntryRuntimeKind.SOURCE, tmp_path / "python.exe", tmp_path)
+    arguments = build_relaunch_spec(_request(), runtime).arguments
     assert set(arguments[3::2]) >= {"--config", "--deadline-seconds", "--confirm-real-execution"}
     for forbidden in ("--stage", "--skip-stage", "--force", "--unsafe", "--mode"):
         assert forbidden not in arguments
 
 
-def test_relaunch_arguments_append_marker_once() -> None:
-    arguments = build_relaunch_arguments(_request())
-    assert arguments.count(ELEVATION_MARKER) == 1
+def test_source_relaunch_spec_appends_marker_once(tmp_path: Path) -> None:
+    runtime = EntryRuntime(EntryRuntimeKind.SOURCE, tmp_path / "python.exe", tmp_path)
+    assert build_relaunch_spec(_request(), runtime).arguments.count(ELEVATION_MARKER) == 1
 
 
-def test_elevation_child_does_not_append_marker_again() -> None:
-    arguments = build_relaunch_arguments(_request(elevation_child=True))
+def test_elevation_child_does_not_append_marker_again(tmp_path: Path) -> None:
+    runtime = EntryRuntime(EntryRuntimeKind.SOURCE, tmp_path / "python.exe", tmp_path)
+    arguments = build_relaunch_spec(_request(elevation_child=True), runtime).arguments
     assert ELEVATION_MARKER not in arguments
 
 
-def test_relaunch_arguments_preserve_confirmation_constant() -> None:
-    assert RUN_CONFIRMATION in build_relaunch_arguments(_request())
+def test_frozen_relaunch_spec_uses_executable_entrypoint(tmp_path: Path) -> None:
+    runtime = EntryRuntime(EntryRuntimeKind.FROZEN, tmp_path / "OrchestratoRRR.exe", tmp_path)
+    spec = build_relaunch_spec(_request(), runtime)
+    assert spec.executable == tmp_path / "OrchestratoRRR.exe"
+    assert spec.arguments == (
+        "run",
+        "--config",
+        str(Path("safe-reference.toml").resolve()),
+        "--deadline-seconds",
+        "30",
+        "--confirm-real-execution",
+        RUN_CONFIRMATION,
+        ELEVATION_MARKER,
+    )
+
+
+def test_relaunch_spec_keeps_unicode_config_path_as_one_argument(tmp_path: Path) -> None:
+    config_path = tmp_path / "配置 目录" / "配置.toml"
+    runtime = EntryRuntime(EntryRuntimeKind.SOURCE, tmp_path / "程序.exe", tmp_path / "工作 目录")
+    request = RunRequest(config_path, 30, RUN_CONFIRMATION)
+
+    spec = build_relaunch_spec(request, runtime)
+
+    assert spec.arguments[4] == str(config_path.resolve())
+    assert '"' not in spec.arguments[4]
 
 
 @pytest.mark.parametrize(

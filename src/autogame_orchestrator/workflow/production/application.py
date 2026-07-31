@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 from typing import Protocol, Self
 
 from autogame_orchestrator.config_model import AppConfig
+from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.log_writer import JsonlLogWriter
 from autogame_orchestrator.models import JsonValue, RunReport
 from autogame_orchestrator.process.cancellation import CancellationToken
@@ -114,7 +115,7 @@ def execute_production_workflow(
     deadline: Deadline,
     cancel: CancellationToken,
     run_id: str,
-    relaunch_arguments: Sequence[str],
+    relaunch_spec: ElevationLaunchSpec,
     elevation_marker_present: bool,
     dependencies: ProductionApplicationDependencies | None = None,
 ) -> WorkflowCoordinationResult:
@@ -127,7 +128,7 @@ def execute_production_workflow(
 
     return WorkflowCoordinator(selected.elevation_gateway, runner_factory).execute(
         config,
-        relaunch_arguments=relaunch_arguments,
+        relaunch_spec=relaunch_spec,
         elevation_marker_present=elevation_marker_present,
         deadline=deadline,
         cancel=cancel,

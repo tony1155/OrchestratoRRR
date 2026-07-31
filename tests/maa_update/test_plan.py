@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from autogame_orchestrator.config_model import AALCConfig, AppConfig, MAASyncConfig, MAAUpdateConfig
+from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.models import StageName
 from autogame_orchestrator.workflow.coordinator import WorkflowCoordinator
 from autogame_orchestrator.workflow.plan import build_execution_plan
@@ -65,6 +68,9 @@ def test_requirement_only_applies_when_stage_is_present(config: AppConfig, stage
 def test_new_requirements_relaunch_before_runner(config: AppConfig) -> None:
     gateway = FakeElevationGateway(elevated=False)
     factory = RecordingRunnerFactory()
-    result = WorkflowCoordinator(gateway, factory).execute(config)
+    result = WorkflowCoordinator(gateway, factory).execute(
+        config,
+        relaunch_spec=ElevationLaunchSpec(Path("python.exe"), ("run",), Path.cwd()),
+    )
     assert result.relaunched is True
     assert factory.calls == 0

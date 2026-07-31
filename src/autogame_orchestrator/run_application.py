@@ -9,6 +9,12 @@ from pathlib import Path
 
 from autogame_orchestrator.config_loader import load_config
 from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
+from autogame_orchestrator.entry_runtime import (
+    ElevationLaunchSpec,
+    EntryRuntime,
+    EntryRuntimeKind,
+    detect_entry_runtime,
+)
 from autogame_orchestrator.models import ErrorCode, RunReport, RunStatus, StageName
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
@@ -90,21 +96,27 @@ def validate_external_plan(plan: ExecutionPlan) -> str | None:
     return None
 
 
-def build_relaunch_arguments(request: RunRequest) -> tuple[str, ...]:
-    """构造固定模块入口参数，内部 marker 最多追加一次。"""
+def build_relaunch_spec(request: RunRequest, runtime: EntryRuntime) -> ElevationLaunchSpec:
+    """Build the source or frozen elevated-child entry specification."""
 
-    arguments = (
-        "-m",
-        "autogame_orchestrator",
+    common_arguments: tuple[str, ...] = (
         "run",
         "--config",
-        str(request.config_path),
+        str(request.config_path.resolve()),
         "--deadline-seconds",
         format(request.deadline_seconds, ".17g"),
         "--confirm-real-execution",
         RUN_CONFIRMATION,
     )
-    return arguments + (() if request.elevation_child else (ELEVATION_MARKER,))
+    if runtime.kind is EntryRuntimeKind.SOURCE:
+        arguments = ("-m", "autogame_orchestrator", *common_arguments)
+    else:
+        arguments = common_arguments
+    return ElevationLaunchSpec(
+        executable=runtime.executable,
+        arguments=arguments + (() if request.elevation_child else (ELEVATION_MARKER,)),
+        working_directory=runtime.working_directory,
+    )
 
 
 def map_run_exit_code(report: RunReport) -> int:
@@ -145,6 +157,7 @@ def execute_run_request(
     *,
     cancel: CancellationToken | None = None,
     dependencies: ProductionApplicationDependencies | None = None,
+    entry_runtime: EntryRuntime | None = None,
 ) -> RunCommandResult:
     """按固定顺序执行 run v1 preflight，并进入生产协调边界。"""
 
@@ -166,13 +179,14 @@ def execute_run_request(
     parent_deadline = Deadline.after(float(request.deadline_seconds))
     token = CancellationToken() if cancel is None else cancel
     run_id = str(uuid.uuid4())
+    runtime = detect_entry_runtime() if entry_runtime is None else entry_runtime
     try:
         coordination = execute_production_workflow(
             config,
             deadline=parent_deadline,
             cancel=token,
             run_id=run_id,
-            relaunch_arguments=build_relaunch_arguments(request),
+            relaunch_spec=build_relaunch_spec(request, runtime),
             elevation_marker_present=request.elevation_child,
             dependencies=dependencies,
         )

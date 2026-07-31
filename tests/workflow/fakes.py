@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 
+from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, RunReport, StageName, StageReport
 from autogame_orchestrator.workflow.contracts import StageExecutionContext
 
@@ -90,13 +91,15 @@ class FakeElevationGateway:
         self.result = result or FakeElevationResult(ElevationCode.OK, 0)
         self.check_calls = 0
         self.relaunch_calls = 0
+        self.spec: ElevationLaunchSpec | None = None
         self.arguments: tuple[str, ...] = ()
 
     def is_elevated(self) -> bool:
         self.check_calls += 1
         return self.elevated
 
-    def relaunch(self, arguments: tuple[str, ...]) -> FakeElevationResult:
+    def relaunch(self, spec: ElevationLaunchSpec) -> FakeElevationResult:
         self.relaunch_calls += 1
-        self.arguments = arguments
+        self.spec = spec
+        self.arguments = spec.arguments
         return self.result

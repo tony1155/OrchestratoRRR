@@ -1,6 +1,6 @@
 # OrchestratoRRR 阶段规划
 
-Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2A、6C2B（含真实冷连接恢复）和 6C2C 均已完成验收，6C3 已完成文档收口。6B2B2B 与 6B2B3C 仍未完成，Phase 6 按已批准的 external-only 范围完成；Phase 7 尚未开始。
+Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2A、6C2B（含真实冷连接恢复）和 6C2C 均已完成验收，6C3 已完成文档收口。6B2B2B 与 6B2B3C 仍未完成，Phase 6 按已批准的 external-only 范围完成；Phase 7A1 已完成入口契约实现与自动测试，Phase 7 尚未完成。
 
 ## Phase 5——AALC Runtime Adapter
 
@@ -51,4 +51,15 @@ Phase 6B1 已完成生产投影与安全绑定骨架。默认完整生产计划�
 
 Phase 6B2A 已完成旧流程静态契约调查，6B2B1 已完成安全 MAA 同步。Phase 6B2B2A 只实现固定 `maa update` 的 MaaCore/资源更新，默认关闭并要求显式网络授权；未执行真实更新。maa-cli 自更新与旧 hot-update 继续阻断于 6B2B2B。Phase 6B2B3A 的只读帮助证据仅确认 NemuShell RPC/Shell 调用形状，没有发现生命周期命令或安全实例选择器；`runtime_approved=false`。Phase 6B2B3B 提供 external 安全路径：用户预先启动正确实例，OrchestratoRRR 只验证 readiness，不调用 MuMu start/stop/restart；managed 模式仍保留静态 15 阶段，实例化控制继续阻断于 6B2B3C。
 
-Phase 6C1 已提供受控 external-only `run` v1：精确确认、有限 Deadline、MAA Sync/Update 关闭、AALC attempts 为 1，并在 Runner/Stage factory/Adapter 前统一完成 elevation 决策。完整 Fake 验收已通过。第一次真实 external smoke 曾因旧解析器拒绝合法空格分隔的 ADB devices 记录而安全停止；6C2A 修复了解析兼容和脱敏诊断，6C2B4A 增加了受控 local TCP connect，6C2B4C 已完成真实冷连接自动恢复，6C2C 已完成 11 阶段 external 真实完整工作流 smoke。Phase 6C3 现已固化脱敏证据并完成 external-only 收口；6B2B2B、6B2B3C 仍未完成，Phase 7 尚未开始，旧 PowerShell 尚不可替换。
+Phase 6C1 已提供受控 external-only `run` v1：精确确认、有限 Deadline、MAA Sync/Update 关闭、AALC attempts 为 1，并在 Runner/Stage factory/Adapter 前统一完成 elevation 决策。完整 Fake 验收已通过。第一次真实 external smoke 曾因旧解析器拒绝合法空格分隔的 ADB devices 记录而安全停止；6C2A 修复了解析兼容和脱敏诊断，6C2B4A 增加了受控 local TCP connect，6C2B4C 已完成真实冷连接自动恢复，6C2C 已完成 11 阶段 external 真实完整工作流 smoke。Phase 6C3 现已固化脱敏证据并完成 external-only 收口；6B2B2B、6B2B3C 仍未完成，Phase 7A1 已完成入口契约实现与自动测试，Phase 7 尚未完成，旧 PowerShell 尚不可替换。
+## Phase 7A1 status
+
+Phase 7A1 closes the source/frozen entry runtime and explicit UAC re-entry
+contract with Fake/automatic tests. Source mode uses the Python module
+entrypoint; frozen mode uses the executable directly. The launch specification
+also carries an absolute configuration path and an explicit working directory.
+
+Phase 7A2 still owns PyInstaller onedir configuration and RunReport schema
+resource collection. Phase 7D still owns the default user entry and working
+directory policy. No EXE has been built and the legacy PowerShell entry remains
+in place.

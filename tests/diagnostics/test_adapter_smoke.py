@@ -12,6 +12,7 @@ import pytest
 
 from autogame_orchestrator.config_model import AALCConfig, MAAConfig, StarRailConfig
 from autogame_orchestrator.diagnostics import adapter_smoke as smoke
+from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.platform.windows_elevation import ElevationErrorCode, ElevationResult
 
 NOW = datetime(2026, 7, 22, tzinfo=UTC)
@@ -261,18 +262,19 @@ def test_non_admin_relaunch_uses_module_original_arguments_and_marker(
 ) -> None:
     calls = _prepare(monkeypatch, tmp_path, "aalc")
     _require_admin(monkeypatch)
-    captured: list[str] = []
+    captured: list[ElevationLaunchSpec] = []
     monkeypatch.setattr(smoke, "is_process_elevated", lambda: False)
 
-    def relaunch(arguments: list[str]) -> ElevationResult:
-        captured.extend(arguments)
+    def relaunch(spec: ElevationLaunchSpec) -> ElevationResult:
+        captured.append(spec)
         return ElevationResult(ElevationErrorCode.OK, 0)
 
     monkeypatch.setattr(smoke, "relaunch_current_process_elevated", relaunch)
     assert smoke.main(calls["args"]) == 0
-    assert captured[:2] == ["-m", smoke.MODULE_NAME]
-    assert captured[2:-1] == calls["args"]
-    assert captured[-1] == smoke.ELEVATION_MARKER
+    assert len(captured) == 1
+    assert captured[0].arguments[:2] == ("-m", smoke.MODULE_NAME)
+    assert captured[0].arguments[2:-1] == tuple(calls["args"])
+    assert captured[0].arguments[-1] == smoke.ELEVATION_MARKER
 
 
 def test_elevation_detection_failure_maps_to_exit_ten(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

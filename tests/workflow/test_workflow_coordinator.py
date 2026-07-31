@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import cast
 
 from autogame_orchestrator.config_model import AALCConfig, AppConfig
+from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.models import RunReport
 from autogame_orchestrator.workflow.coordinator import WorkflowCoordinator
 from tests.workflow.fakes import ElevationCode, FakeElevationGateway, FakeElevationResult
@@ -33,10 +35,18 @@ def config(requires_administrator: bool) -> AppConfig:
     return AppConfig(aalc=AALCConfig(requires_administrator=requires_administrator))
 
 
+def launch_spec() -> ElevationLaunchSpec:
+    return ElevationLaunchSpec(Path("python.exe"), ("run", "--config", "safe-reference"), Path.cwd())
+
+
+def execute(coordinator: WorkflowCoordinator, app_config: AppConfig, **kwargs):
+    return coordinator.execute(app_config, relaunch_spec=launch_spec(), **kwargs)
+
+
 def test_non_admin_relaunches_before_runner_construction() -> None:
     gateway = FakeElevationGateway(elevated=False)
     factory = RecordingRunnerFactory()
-    result = WorkflowCoordinator(gateway, factory).execute(config(True))
+    result = execute(WorkflowCoordinator(gateway, factory), config(True))
     assert result.relaunched is True
     assert gateway.relaunch_calls == 1
     assert factory.calls == 0
@@ -45,14 +55,14 @@ def test_non_admin_relaunches_before_runner_construction() -> None:
 def test_non_admin_relaunches_before_executor_factory() -> None:
     gateway = FakeElevationGateway(elevated=False)
     factory = RecordingRunnerFactory()
-    WorkflowCoordinator(gateway, factory).execute(config(True))
+    execute(WorkflowCoordinator(gateway, factory), config(True))
     assert factory.runner.calls == 0
 
 
 def test_elevated_entry_does_not_relaunch() -> None:
     gateway = FakeElevationGateway(elevated=True)
     factory = RecordingRunnerFactory()
-    WorkflowCoordinator(gateway, factory).execute(config(True))
+    execute(WorkflowCoordinator(gateway, factory), config(True))
     assert gateway.relaunch_calls == 0
     assert factory.calls == 1
 
@@ -60,7 +70,7 @@ def test_elevated_entry_does_not_relaunch() -> None:
 def test_requirement_false_never_checks_elevation() -> None:
     gateway = FakeElevationGateway(elevated=False)
     factory = RecordingRunnerFactory()
-    WorkflowCoordinator(gateway, factory).execute(config(False))
+    execute(WorkflowCoordinator(gateway, factory), config(False))
     assert gateway.check_calls == 0
     assert gateway.relaunch_calls == 0
 
@@ -70,7 +80,7 @@ def test_elevation_cancelled_is_propagated() -> None:
         elevated=False,
         result=FakeElevationResult(ElevationCode.CANCELLED, 9),
     )
-    result = WorkflowCoordinator(gateway, RecordingRunnerFactory()).execute(config(True))
+    result = execute(WorkflowCoordinator(gateway, RecordingRunnerFactory()), config(True))
     assert result.elevation_error_code == "ELEVATION_CANCELLED"
     assert result.exit_code == 9
 
@@ -80,7 +90,7 @@ def test_elevation_failure_is_propagated() -> None:
         elevated=False,
         result=FakeElevationResult(ElevationCode.FAILED, 10),
     )
-    result = WorkflowCoordinator(gateway, RecordingRunnerFactory()).execute(config(True))
+    result = execute(WorkflowCoordinator(gateway, RecordingRunnerFactory()), config(True))
     assert result.elevation_error_code == "ELEVATION_FAILED"
     assert result.exit_code == 10
 
@@ -90,14 +100,15 @@ def test_elevated_child_exit_code_is_forwarded() -> None:
         elevated=False,
         result=FakeElevationResult(ElevationCode.OK, 37),
     )
-    result = WorkflowCoordinator(gateway, RecordingRunnerFactory()).execute(config(True))
+    result = execute(WorkflowCoordinator(gateway, RecordingRunnerFactory()), config(True))
     assert result.exit_code == 37
 
 
 def test_elevation_marker_prevents_recursive_relaunch() -> None:
     gateway = FakeElevationGateway(elevated=False)
     factory = RecordingRunnerFactory()
-    result = WorkflowCoordinator(gateway, factory).execute(
+    result = execute(
+        WorkflowCoordinator(gateway, factory),
         config(True),
         elevation_marker_present=True,
     )
@@ -106,17 +117,17 @@ def test_elevation_marker_prevents_recursive_relaunch() -> None:
     assert factory.calls == 0
 
 
-def test_relaunch_arguments_are_forwarded_without_config_contents() -> None:
+def test_relaunch_spec_is_forwarded_without_config_contents() -> None:
     gateway = FakeElevationGateway(elevated=False)
-    arguments = ("--config", "safe-reference", "--internal-elevated")
+    spec = ElevationLaunchSpec(Path("python.exe"), ("--config", "safe-reference", "--internal-elevated"), Path.cwd())
     WorkflowCoordinator(gateway, RecordingRunnerFactory()).execute(
         config(True),
-        relaunch_arguments=arguments,
+        relaunch_spec=spec,
     )
-    assert gateway.arguments == arguments
+    assert gateway.spec == spec
 
 
 def test_plan_is_built_before_permission_decision() -> None:
     gateway = FakeElevationGateway(elevated=False)
-    WorkflowCoordinator(gateway, RecordingRunnerFactory()).execute(config(True))
+    execute(WorkflowCoordinator(gateway, RecordingRunnerFactory()), config(True))
     assert gateway.check_calls == 1
