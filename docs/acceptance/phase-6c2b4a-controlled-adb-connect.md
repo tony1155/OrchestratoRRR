@@ -46,5 +46,7 @@ ProcessSupervisor 接线通过 Fake 程序验证。覆盖了 AdbClient 连接结
 超时、ensure 操作次数、精确设备选择、多 transport、生产 external dispatch、managed
 回归和安全投影。
 
-本轮尚未进行真实冷连接自动恢复验收，也没有执行真实 ADB、MuMu、StarRail、MAA、AALC、
-UAC 或完整 external workflow。Phase 6C2C 仍未获准，Phase 6 尚未完成。
+6C2B4A 的 Fake/自动测试已通过。本文件记录的真实冷连接验收见
+`docs/acceptance/phase-6c2b4c-cold-adb-recovery.md`；6C2C 完整真实 workflow 见
+`docs/acceptance/phase-6c2c-external-workflow-smoke.md`。本实现保持 status/probe/WAIT
+只读，connect 仅发生在显式 external ensure，且不管理 ADB server 生命周期。

@@ -2,7 +2,10 @@
 
 ## 当前验证状态
 
-StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。Phase 6C2 的第一次 external 真实工作流 smoke 已执行一次并在初始 MuMu readiness 安全停止；Phase 6C2A 已完成解析兼容修复，修复后的只读 readiness 和完整 smoke 尚未执行。maa-cli 自更新与 MuMu managed 实例化生命周期控制仍未完成，Phase 6 整体尚未完成。
+StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。Phase 6C2A、
+6C2B4C 和 6C2C 的修复后真实证据均已通过：冷连接恢复成功，external 11 阶段完整 workflow
+成功，RunReport 完整可读。maa-cli 自更新与 MuMu managed 实例化生命周期控制仍未完成；
+Phase 6 已按批准的 external-only 范围完成，Phase 7 尚未开始。
 
 ## Phase 6 前的真实 smoke 门禁
 
@@ -66,7 +69,7 @@ maa-cli 自更新属于安装生命周期，6B2B2B 继续阻断；旧 hot-update
 
 动态 `build_execution_plan(config)` 在未显式传入 stages 时为 external 精确移除 STOP_MUMU、VERIFY_MUMU_STOPPED、START_MUMU 和重启后的 readiness 阶段，保留初始 ENSURE/WAIT readiness，形成 11 阶段计划。显式 stages 不会被模式静默改写，公开 `plan` 仍使用静态 15 阶段。
 
-生产绑定向 external Stage 暴露只读 `status()` 和显式 `ensure_external_ready()` Port。ENSURE 未达 ready 时按现有 Stage 投影阻断或失败；仅该显式 ensure 可在严格条件下尝试一次配置目标 connect，WAIT 和普通 status 不调用 connect。不调用 start/stop/restart，也不扫描进程、读取 `.nemu` 或解析 RPC instance。external 不新增管理员权限要求；完整 Fake 流程已到达 MAA 与 AALC 并成功写入报告。该模式不等价于旧 PowerShell 的完整生命周期行为，managed 控制留待 6B2B3C 且尚未获授权。
+生产绑定向 external Stage 暴露只读 `status()` 和显式 `ensure_external_ready()` Port。ENSURE 未达 ready 时按现有 Stage 投影阻断或失败；仅该显式 ensure 可在严格条件下尝试一次配置目标 connect，WAIT 和普通 status 不调用 connect。不调用 start/stop/restart，也不扫描进程、读取 `.nemu` 或解析 RPC instance。external MuMu 路径不增加生命周期控制权限；完整 external workflow 因 AALC 的入口权限要求仍可在 Runner 前统一请求 UAC。该模式不等价于旧 PowerShell 的完整生命周期行为，managed 控制留待 6B2B3C 且尚未获授权。
 
 ## Phase 6C1 受控 external run 入口
 
@@ -96,8 +99,10 @@ adb disconnect；普通 ADB 客户端命令可能按 ADB 自身行为使用或�
 workflow 成功后 WAIT_MUMU_ADB_READY 仍会额外执行一次只读 readiness，不能把整个 workflow
 概括为最多两次 readiness。
 
-本轮仅完成 Fake/自动测试，尚未完成真实冷连接验收；Phase 6C2C 仍未获准，Phase 6
-整体尚未完成。
+Phase 6C2B4C 已完成真实冷连接自动恢复验收：精确目标由测试准备阶段一次性断开，生产
+ENSURE_MUMU_RUNNING 单次执行并由生产路径触发一次受控 connect，随后 readiness 复验通过。
+Phase 6C2C 已完成 external-only 11 阶段真实工作流 smoke；详细脱敏证据见对应 acceptance
+文档。Phase 6C3 已完成 external-only 范围收口，但不表示 MuMu managed 生命周期能力完成。
 
 ## Phase 5——AALC Runtime Adapter
 

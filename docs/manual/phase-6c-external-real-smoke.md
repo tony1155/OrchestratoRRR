@@ -4,12 +4,12 @@
 
 后续必须先在 6C2B 使用新提交和新批准基线完成只读 readiness 复验，再由操作者另行批准 6C2C 完整 smoke。两次操作均不是对旧代码基线的自动重试。Phase 6C2B4A 的实现边界见 docs/acceptance/phase-6c2b4a-controlled-adb-connect.md。
 
-当前 6C2B4A 只允许 external 的显式 ensure 在严格条件下执行一次本地 TCP connect，并最多
-复验一次 readiness；普通 status/probe 保持只读。OrchestratoRRR 不显式调用 adb
-start-server，不拥有 ADB server 生命周期，也不调用 adb kill-server 或 adb disconnect；
-普通 ADB 客户端命令仍可能按 ADB 自身行为使用或拉起默认 server。实现不扫描端口、不自动
-选择实例，且本轮只有 Fake/自动测试证据，不能作为真实冷连接自动恢复验收。Phase 6C2C
-仍未获准。
+6C2B4A 的生产边界仍然有效：只有 external 的显式 ensure 在严格条件下执行一次本地 TCP
+connect，并最多复验一次 readiness；普通 status/probe/WAIT 保持只读。OrchestratoRRR 不
+显式调用 adb start-server，不拥有 ADB server 生命周期，也不调用 adb kill-server 或 adb
+disconnect；普通 ADB 客户端命令仍可能按 ADB 自身行为使用或拉起默认 server。实现不扫描
+端口、不自动选择实例。6C2B4C 已通过真实冷连接自动恢复，6C2C 已通过 external 完整真实
+workflow；AALC 在线业务 UI 因网络原因未验证，但不阻断工作流/生命周期验收。
 
 ## 前置门禁
 
@@ -77,4 +77,6 @@ AALC 可能使用无限工作负载，不存在自然业务完成终点。验收
 
 只记录 Adapter/Stage 名称、稳定状态、稳定错误码、耗时、退出码以及清理、提升、取消等布尔结果。不得记录真实路径、ADB serial 或端口、PID、配置内容、完整命令、stdout/stderr、原始 JSONL 或原始 RunReport。
 
-修复后的真实 smoke 只有在操作者完成 6C2B readiness 复验、随后完成 6C2C、核验脱敏证据并单独批准后才能进入 Phase 6C3。Phase 6C1 的 Fake 结果和第一次失败的真实运行都不能替代该证据。
+6C2B4C 和 6C2C 的脱敏证据已经核验并完成 Phase 6C3 收口。未来复验仍须使用新的人工批准、
+明确的仓库外配置和一次性运行；一次 smoke 结果不保证后续环境永远不会失败。Phase 7 打包
+和默认入口完成前，旧 PowerShell 仍不可移除。
