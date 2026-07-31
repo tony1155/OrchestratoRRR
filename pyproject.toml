@@ -37,9 +37,15 @@ dev = [
     "mypy>=1.8",
     "check-jsonschema>=0.28",
 ]
+packaging = [
+    "pyinstaller==6.21.0",
+]
 
 [project.scripts]
 autogame-orch = "autogame_orchestrator.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/autogame_orchestrator"]
 
 [tool.ruff]
 target-version = "py311"

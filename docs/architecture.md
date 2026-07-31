@@ -216,3 +216,29 @@ exit-code forwarding, and pre-Runner permission boundary remain unchanged.
 Phase 7A1 uses only Fake and automatic tests. Packaging resources, EXE
 generation, the default shortcut/working-directory policy, real frozen UAC,
 and legacy PowerShell replacement remain future work.
+
+## Phase 7A2 PyInstaller resources
+
+Phase 7A2 defines a controlled PyInstaller 6.21.0 onedir console build.
+`packaging/entrypoint.py` delegates directly to the formal Typer app, while
+`packaging/OrchestratoRRR.spec` collects only the canonical RunReport schema
+as project data. It does not collect docs, tests, config, logs, run-results,
+real configuration, or business executables.
+
+`resource_paths.resolve_run_report_schema_path()` is the single schema lookup
+boundary. Source mode uses the repository-root `schemas/` location; frozen
+mode uses the fixed `_resources/` directory beside the bundled package. It
+does not use the current working directory, search parent directories, or
+`sys._MEIPASS`. A missing resource fails closed with a stable internal
+exception and never silently skips JSON Schema validation.
+
+The build script is cwd-independent and verifies the onedir EXE, its internal
+directory, and the bundled schema without executing the EXE. The first three
+historical attempts failed before a runnable onedir; the third left only a
+partial root-level EXE. Phase 7A2C removed the invalid splash reference and
+completed historical build attempt 4. Static audit confirmed the expected
+onedir layout, canonical schema hash, project-resource boundary, and privacy
+boundary. Packaged CLI behavior, frozen UAC, and a real workflow remain
+unvalidated. Phase 7B1 still owns packaged CLI smoke, Phase 7D still owns the
+default entry and working-directory policy, and the legacy PowerShell entry
+remains retained.

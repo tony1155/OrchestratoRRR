@@ -59,7 +59,23 @@ contract with Fake/automatic tests. Source mode uses the Python module
 entrypoint; frozen mode uses the executable directly. The launch specification
 also carries an absolute configuration path and an explicit working directory.
 
-Phase 7A2 still owns PyInstaller onedir configuration and RunReport schema
-resource collection. Phase 7D still owns the default user entry and working
-directory policy. No EXE has been built and the legacy PowerShell entry remains
+Phase 7A2 now owns the completed PyInstaller onedir configuration and
+RunReport schema resource collection. Phase 7D still owns the default user
+entry and working-directory policy. The generated EXE is retained for the
+future Phase 7B1 fixture-only smoke, and the legacy PowerShell entry remains
 in place.
+
+## Phase 7A2 status
+
+Phase 7A2 is complete within its approved packaging/resource scope. The
+version-controlled PyInstaller 6.21.0 onedir console spec and cwd-independent
+build script collect only the canonical schema into the package resource
+directory. Three historical attempts failed before a runnable onedir; the
+fourth attempt completed after removing the invalid splash reference. The
+artifact was audited statically only: no packaged CLI, UAC, ADB, or workflow
+claim is made.
+
+Phase 7B1 still owns packaged `version`, `--help`, fixture-only validate and
+fixture-only plan smoke. Phase 7D still owns the default user entry and final
+working-directory policy. The legacy PowerShell entry remains in place and
+cannot yet be removed. Phase 7 is not complete.

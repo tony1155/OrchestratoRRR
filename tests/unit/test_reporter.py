@@ -7,6 +7,9 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
+import autogame_orchestrator.reporter as reporter_module
 from autogame_orchestrator.models import (
     ErrorCode,
     OutcomeKind,
@@ -16,6 +19,7 @@ from autogame_orchestrator.models import (
     StageReport,
 )
 from autogame_orchestrator.reporter import validate_run_report_json, write_report_atomic
+from autogame_orchestrator.resource_paths import RunReportSchemaResourceError
 
 _NOW = datetime(2026, 7, 21, 12, 0, 0, tzinfo=UTC)
 _LATER = datetime(2026, 7, 21, 12, 0, 1, tzinfo=UTC)
@@ -293,3 +297,17 @@ def test_temp_file_cleaned_up(tmp_workdir: Path) -> None:
     # Verify no leftover .tmp- files
     leftovers = [f for f in tmp_workdir.iterdir() if f.name.startswith(".tmp-")]
     assert len(leftovers) == 0
+
+
+def test_missing_schema_fails_closed_with_stable_error(tmp_workdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def missing_schema() -> Path:
+        raise RunReportSchemaResourceError("RunReport schema resource is unavailable.")
+
+    monkeypatch.setattr(reporter_module, "resolve_run_report_schema_path", missing_schema)
+
+    with pytest.raises(RunReportSchemaResourceError, match="unavailable"):
+        validate_run_report_json(_make_sample_report().to_json_encodable())
+
+    path, errors = write_report_atomic(_make_sample_report(), tmp_workdir)
+    assert path is None
+    assert errors == [ErrorCode.RUN_REPORT_VALIDATION_ERROR]

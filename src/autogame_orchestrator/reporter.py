@@ -22,16 +22,26 @@ import jsonschema.validators
 from jsonschema import Draft7Validator, FormatChecker, ValidationError
 
 from autogame_orchestrator.models import ErrorCode, RunReport
+from autogame_orchestrator.resource_paths import (
+    RunReportSchemaResourceError,
+    resolve_run_report_schema_path,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-_SCHEMA_PATH = Path(__file__).resolve().parent.parent.parent / "schemas" / "run-report-v1.schema.json"
-
 
 def _load_schema() -> dict[str, object]:
-    raw = _SCHEMA_PATH.read_text(encoding="utf-8")
-    return json.loads(raw)  # type: ignore[no-any-return]
+    try:
+        raw = resolve_run_report_schema_path().read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+    except RunReportSchemaResourceError:
+        raise
+    except (OSError, json.JSONDecodeError):
+        raise RunReportSchemaResourceError("RunReport schema resource is invalid.") from None
+    if not isinstance(parsed, dict):
+        raise RunReportSchemaResourceError("RunReport schema resource is invalid.")
+    return parsed
 
 
 def _format_validator(
@@ -64,7 +74,9 @@ def _is_datetime(value: str) -> bool:
 _CHECKER = FormatChecker()
 _CHECKER.checkers["date-time"] = (_is_datetime, ValueError)
 
-_VALIDATOR = _AssertingFormatValidator(_load_schema(), format_checker=_CHECKER)
+
+def _build_validator() -> Draft7Validator:
+    return _AssertingFormatValidator(_load_schema(), format_checker=_CHECKER)
 
 
 def validate_run_report_json(data: object) -> tuple[bool, str]:
@@ -72,7 +84,7 @@ def validate_run_report_json(data: object) -> tuple[bool, str]:
 
     Returns ``(valid, error_message)``.
     """
-    errors = sorted(_VALIDATOR.iter_errors(data), key=lambda e: str(e.path))
+    errors = sorted(_build_validator().iter_errors(data), key=lambda e: str(e.path))
     if errors:
         return False, "; ".join(e.message for e in errors)
     return True, ""
@@ -106,7 +118,11 @@ def write_report_atomic(
         errors.append(ErrorCode.RUN_REPORT_SERIALIZATION_ERROR)
         return None, errors
 
-    valid, msg = validate_run_report_json(parsed)
+    try:
+        valid, msg = validate_run_report_json(parsed)
+    except RunReportSchemaResourceError:
+        errors.append(ErrorCode.RUN_REPORT_VALIDATION_ERROR)
+        return None, errors
     if not valid:
         errors.append(ErrorCode.RUN_REPORT_VALIDATION_ERROR)
         return None, errors
