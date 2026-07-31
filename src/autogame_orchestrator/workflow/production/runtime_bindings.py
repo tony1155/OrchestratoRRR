@@ -34,6 +34,13 @@ class _ExternalMumuStatusPort:
     ) -> MumuRuntimeResult:
         return self._adapter.status(deadline, cancel)
 
+    def ensure_external_ready(
+        self,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> MumuRuntimeResult:
+        return self._adapter.ensure_external_ready(deadline, cancel)
+
 
 def parse_local_adb_serial(serial: str) -> tuple[str, int]:
     """仅接受 ``127.0.0.1:<1-65535>``。"""

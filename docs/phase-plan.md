@@ -1,6 +1,6 @@
 # OrchestratoRRR 阶段规划
 
-Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2 的第一次 external 真实工作流 smoke 已执行一次并在 MuMu readiness 安全停止；6C2A 已完成 ADB devices 空白分隔兼容修复。6C2B、6C2C、6C3、6B2B2B 和 6B2B3C 尚未完成，Phase 6 整体尚未完成。
+Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2 的第一次 external 真实工作流 smoke 已执行一次并在 MuMu readiness 安全停止；6C2A 已完成 ADB devices 空白分隔兼容修复；6C2B4A 已完成受控本地 TCP connect 的 Fake/自动测试实现，但真实冷连接尚未验收。6C2C、6C3、6B2B2B 和 6B2B3C 尚未完成，Phase 6 整体尚未完成。
 
 ## Phase 5——AALC Runtime Adapter
 
@@ -33,7 +33,7 @@ Fake AALC 环境和真实 AALC smoke 验收均已完成。成功仅依据 exit 0
 | 6B2B3C | managed 实例化生命周期控制 | start/stop 语法、实例选择和长期进程所有权尚未闭合；继续阻断 |
 | 6C1 | 受控 external run CLI 与完整 Fake 验收 | 公开 external-only `run` v1、精确确认、有限 Deadline、入口提权接线与完整 Fake 验收；已完成 |
 | 6C2A | ADB devices 空白分隔兼容修复 | 第一次真实 smoke 在 MuMu readiness 安全停止；修复空格、Tab 与混合分隔并增强安全诊断；本轮 |
-| 6C2B | 修复后只读 readiness 复验 | 基于新提交和新批准基线验证解析与 readiness；尚未执行 |
+| 6C2B | 修复后 readiness 与受控连接恢复 | 6C2B3 人工 connect 后 readiness 已验证；6C2B4A 完成显式 local TCP connect 的 Fake/自动测试；ensure 内最多两次 readiness，workflow 的 WAIT 阶段仍额外只读；真实冷连接尚未验收 |
 | 6C2C | 修复后 external 真实完整工作流 smoke | 基于新提交和新批准基线由操作者执行；尚未执行 |
 | 6C3 | Phase 6 最终验收、文档收口与合并准备 | 汇总真实证据并判断旧入口替换条件；尚未执行 |
 | 7 | 打包与默认入口 | PyInstaller EXE、无缝替换旧 PS1 入口点 |

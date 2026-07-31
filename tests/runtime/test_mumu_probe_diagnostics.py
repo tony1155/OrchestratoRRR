@@ -21,6 +21,14 @@ class _FixedProbe:
         return self.result
 
 
+class _FixedEnsureProbe:
+    def __init__(self, result: ProbeResult) -> None:
+        self.result = result
+
+    def ensure_ready(self, *_args: object, **_kwargs: object) -> ProbeResult:
+        return self.result
+
+
 def _adapter() -> MumuAdapter:
     return MumuAdapter(
         Path("manager-placeholder"),
@@ -105,3 +113,37 @@ def test_unknown_probe_step_is_replaced_with_none() -> None:
         runtime = adapter.status(Deadline.after(5))
     assert runtime.diagnostics["probe_step"] == "none"
     assert "serial" not in runtime.diagnostics
+
+
+def test_external_ensure_projects_only_fixed_connect_fields() -> None:
+    result = ProbeResult.from_monotonic(
+        "mumu_readiness",
+        ProbeStatus.NOT_READY,
+        ProbeErrorCode.ADB_CONNECT_FAILED,
+        0.0,
+        {
+            "step": "adb_connect",
+            "serial": "private-value",
+            "host": "private-host",
+            "port": 16384,
+            "stdout_trimmed": "private-output",
+            "adb_connect_attempted": True,
+            "adb_connect_status": "failed",
+            "adb_connect_error": "ADB_CONNECT_FAILED",
+            "readiness_rechecked_after_connect": False,
+        },
+    )
+    adapter = _adapter()
+    with patch.object(adapter, "_create_probe", return_value=_FixedEnsureProbe(result)):
+        runtime = adapter.ensure_external_ready(Deadline.after(5))
+    assert runtime.status == MumuRuntimeStatus.NOT_READY
+    assert runtime.error_code == MumuRuntimeErrorCode.READINESS_FAILED
+    assert runtime.diagnostics == {
+        "probe_status": "not_ready",
+        "probe_error": "ADB_CONNECT_FAILED",
+        "probe_step": "adb_connect",
+        "adb_connect_attempted": True,
+        "adb_connect_status": "failed",
+        "adb_connect_error": "ADB_CONNECT_FAILED",
+        "readiness_rechecked_after_connect": False,
+    }

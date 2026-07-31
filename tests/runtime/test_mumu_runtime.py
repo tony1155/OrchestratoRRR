@@ -337,6 +337,22 @@ def test_status_timeout() -> None:
         assert result.error_code == MumuRuntimeErrorCode.READINESS_FAILED
 
 
+def test_external_ensure_ready_preserves_ready_result() -> None:
+    adapter = _make_adapter()
+    with patch.object(adapter, "_create_probe", return_value=_FakeProbe(ready=True)):
+        result = adapter.ensure_external_ready(Deadline.after(5.0))
+    assert result.status == MumuRuntimeStatus.READY
+    assert result.error_code == MumuRuntimeErrorCode.OK
+
+
+def test_external_ensure_does_not_map_missing_target_to_stopped() -> None:
+    adapter = _make_adapter()
+    with patch.object(adapter, "_create_probe", return_value=_FakeProbe(refused=True)):
+        result = adapter.ensure_external_ready(Deadline.after(5.0))
+    assert result.status == MumuRuntimeStatus.NOT_READY
+    assert result.error_code == MumuRuntimeErrorCode.READINESS_FAILED
+
+
 def test_start_already_ready() -> None:
     adapter = _make_adapter()
     with patch.object(adapter, "_create_probe", return_value=_FakeProbe(ready=True)):
@@ -410,6 +426,11 @@ class _FakeProbe:
         if self._timed_out:
             return ProbeResult.from_monotonic("test", ProbeStatus.TIMEOUT, ProbeErrorCode.TCP_TIMEOUT, time.monotonic())
         return ProbeResult.ready("test")
+
+    def ensure_ready(
+        self, host: str, port: int, serial: str | None, deadline: Deadline, cancel: CancellationToken | None = None
+    ) -> ProbeResult:
+        return self.probe(host, port, serial, deadline, cancel)
 
 
 # ════════════════════════════════════════════════════════════════════

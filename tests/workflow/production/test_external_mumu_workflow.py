@@ -52,10 +52,15 @@ class RecordingMumuPort(FakeMumuPort):
         self.deadlines: list[Deadline] = []
         self.tokens: list[CancellationToken | None] = []
 
-    def status(self, deadline: Deadline, cancel=None) -> MumuRuntimeResult:
+    def status(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
         self.deadlines.append(deadline)
         self.tokens.append(cancel)
         return super().status(deadline, cancel)
+
+    def ensure_external_ready(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
+        self.deadlines.append(deadline)
+        self.tokens.append(cancel)
+        return super().ensure_external_ready(deadline, cancel)
 
 
 def _external_config(root: Path) -> AppConfig:
@@ -116,6 +121,20 @@ def _run(
     return report, factory
 
 
+def test_plan_and_validate_do_not_call_mumu_ensure(tmp_path: Path) -> None:
+    config = _external_config(tmp_path)
+    runtime_factories, _, mumu, *_ = _factories()
+    plan = build_execution_plan(config)
+    factory = build_production_executor_factory(config, runtime_factories=runtime_factories)
+    report = factory(StageName.VALIDATE_CONFIG).execute(
+        StageExecutionContext("validate-test", StageName.VALIDATE_CONFIG, Deadline.after(30), CancellationToken())
+    )
+
+    assert len(plan.stages) == 11
+    assert report.outcome == OutcomeKind.SUCCESS
+    assert (mumu.calls, mumu.ensure_calls) == (0, 0)
+
+
 def test_external_complete_fake_workflow_succeeds(tmp_path: Path) -> None:
     config = _external_config(tmp_path)
     runtime_factories, counts, mumu, starrail, maa, aalc = _factories()
@@ -127,6 +146,7 @@ def test_external_complete_fake_workflow_succeeds(tmp_path: Path) -> None:
     assert all(stage.outcome == OutcomeKind.SUCCESS for stage in report.stages)
     assert counts == Counter({"mumu": 1, "starrail": 1, "maa": 1, "aalc": 1})
     assert (mumu.calls, starrail.calls, maa.calls, aalc.calls) == (2, 1, 1, 1)
+    assert (mumu.ensure_calls, mumu.status_calls) == (1, 1)
 
 
 @pytest.mark.parametrize(
@@ -164,6 +184,7 @@ def test_external_success_never_exposes_lifecycle_methods(tmp_path: Path) -> Non
 def test_default_external_runtime_port_only_exposes_status(tmp_path: Path) -> None:
     port = build_default_runtime_factories(_external_config(tmp_path)).mumu()
     assert callable(port.status)
+    assert callable(port.ensure_external_ready)
     assert not hasattr(port, "start")
     assert not hasattr(port, "stop")
     assert not hasattr(port, "restart")
@@ -176,6 +197,7 @@ def test_external_stopped_is_blocked_without_repair(tmp_path: Path) -> None:
     assert (ensure.outcome, ensure.error_code) == (OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_BLOCKED)
     assert ensure.diagnostics["blocker"] == "mumu_external_not_ready"
     assert mumu.calls == 1
+    assert mumu.ensure_calls == 1
     assert (starrail.calls, maa.calls, aalc.calls) == (0, 0, 0)
     assert counts == Counter({"mumu": 1})
     assert all(stage.outcome == OutcomeKind.SKIPPED for stage in report.stages[4:-1])
@@ -256,7 +278,7 @@ def test_external_mode_does_not_add_mumu_elevation(tmp_path: Path) -> None:
 
 def test_managed_stopped_blocker_remains_unchanged(tmp_path: Path) -> None:
     config = valid_config(tmp_path)
-    runtime_factories, *_ = _factories(mumu_status=MumuRuntimeStatus.STOPPED)
+    runtime_factories, _, mumu, *_ = _factories(mumu_status=MumuRuntimeStatus.STOPPED)
     factory = build_production_executor_factory(config, runtime_factories=runtime_factories)
     stage = StageName.ENSURE_MUMU_RUNNING
     report = factory(stage).execute(
@@ -265,6 +287,7 @@ def test_managed_stopped_blocker_remains_unchanged(tmp_path: Path) -> None:
     assert report.error_code == ErrorCode.WORKFLOW_STAGE_BLOCKED
     assert report.diagnostics["blocker"] == "mumu_start_not_approved"
     assert report.diagnostics["lifecycle_mode"] == "managed"
+    assert (mumu.ensure_calls, mumu.status_calls) == (0, 1)
 
 
 def test_production_external_code_contains_no_control_or_scan_implementation() -> None:

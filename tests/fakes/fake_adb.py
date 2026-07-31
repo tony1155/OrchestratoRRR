@@ -12,8 +12,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
+from pathlib import Path
 
 
 def _cmd_version() -> None:
@@ -66,6 +68,33 @@ def _cmd_boot_completed(mode: str) -> None:
         print("1")
 
 
+def _cmd_connect(mode: str) -> None:
+    if mode == "connect_success":
+        print("connected to target")
+    elif mode == "connect_already":
+        print("already connected to target")
+    elif mode == "connect_failed":
+        print("failed to connect to target")
+    elif mode == "connect_not_connected":
+        print("not connected to target")
+    elif mode == "connect_conflict":
+        print("connected to target")
+        print("failed to connect to target", file=sys.stderr)
+    elif mode == "connect_empty":
+        return
+    elif mode == "connect_invalid_utf8":
+        sys.stdout.buffer.write(b"\xff connected to target\n")
+        sys.stdout.buffer.flush()
+        return
+    elif mode == "connect_unknown":
+        print("connection attempt completed")
+    elif mode == "connect_nonzero":
+        print("cannot connect to target", file=sys.stderr)
+        sys.exit(1)
+    else:
+        print("connected to target")
+
+
 def _generate_large_stdout() -> None:
     """生成约 2 MiB 的 stdout 输出。"""
     chunk = b"X" * 65536
@@ -101,9 +130,12 @@ def main() -> None:
     parser.add_argument("-s", type=str, default="", help="目标设备 serial")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="ADB 命令")
 
+    parser.add_argument("--args-file", type=str, default="")
     args = parser.parse_args()
     mode = args.mode
     _serial = args.s
+    if args.args_file:
+        Path(args.args_file).write_text(json.dumps(args.command), encoding="utf-8")
 
     cmd = " ".join(args.command) if args.command else ""
 
@@ -135,6 +167,8 @@ def main() -> None:
         _cmd_get_state(mode)
     elif "getprop sys.boot_completed" in cmd:
         _cmd_boot_completed(mode)
+    elif cmd.startswith("connect "):
+        _cmd_connect(mode)
     elif cmd == "devices -l":
         _cmd_devices(mode)
     else:

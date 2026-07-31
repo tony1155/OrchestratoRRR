@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 from autogame_orchestrator.probes.adb_client import AdbClient
 from autogame_orchestrator.probes.adb_parser import AdbParseError, select_adb_device
@@ -43,6 +44,8 @@ class MumuReadinessProbe:
             return ProbeResult.from_monotonic(
                 "mumu_readiness", ProbeStatus.FAILED, ProbeErrorCode.ADB_CANCELLED, started_at
             )
+        if deadline.expired:
+            return _deadline_result(started_at, "tcp_probe", ProbeErrorCode.TCP_TIMEOUT)
 
         # 2. TCP 端口探测
         tcp_result = probe_tcp_endpoint(host, port, deadline)
@@ -60,6 +63,8 @@ class MumuReadinessProbe:
             return ProbeResult.from_monotonic(
                 "mumu_readiness", ProbeStatus.FAILED, ProbeErrorCode.ADB_CANCELLED, started_at
             )
+        if deadline.expired:
+            return _deadline_result(started_at, "adb_devices")
 
         # 4. adb devices -l
         devices_result = self._adb.list_devices(deadline, cancel)
@@ -71,6 +76,12 @@ class MumuReadinessProbe:
                 started_at,
                 {"step": "adb_devices"},
             )
+        if cancel is not None and cancel.is_cancelled:
+            return ProbeResult.from_monotonic(
+                "mumu_readiness", ProbeStatus.FAILED, ProbeErrorCode.ADB_CANCELLED, started_at
+            )
+        if deadline.expired:
+            return _deadline_result(started_at, "adb_devices")
 
         # 5. 选择设备
         try:
@@ -89,6 +100,8 @@ class MumuReadinessProbe:
             return ProbeResult.from_monotonic(
                 "mumu_readiness", ProbeStatus.FAILED, ProbeErrorCode.ADB_CANCELLED, started_at
             )
+        if deadline.expired:
+            return _deadline_result(started_at, "adb_get_state")
 
         # 7. adb get-state
         state_result = self._adb.get_state(device.serial, deadline, cancel)
@@ -117,6 +130,8 @@ class MumuReadinessProbe:
             return ProbeResult.from_monotonic(
                 "mumu_readiness", ProbeStatus.FAILED, ProbeErrorCode.ADB_CANCELLED, started_at
             )
+        if deadline.expired:
+            return _deadline_result(started_at, "adb_boot_completed")
 
         # 9. adb shell getprop sys.boot_completed
         boot_result = self._adb.get_boot_completed(device.serial, deadline, cancel)
@@ -149,6 +164,70 @@ class MumuReadinessProbe:
             {"serial": device.serial},
         )
 
+    def ensure_ready(
+        self,
+        host: str,
+        port: int,
+        expected_serial: str | None,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        """Explicitly recover one eligible local TCP ADB endpoint.
+
+        The ordinary probe remains readonly. This method allows at most one
+        connect between an initial readonly probe and one readonly recheck.
+        """
+        initial = self.probe(host, port, expected_serial, deadline, cancel)
+        initial = _with_connect_metadata(
+            initial,
+            attempted=False,
+            status="not_attempted",
+            error="none",
+            rechecked=False,
+        )
+        if initial.status == ProbeStatus.READY:
+            return initial
+        if not _connect_is_allowed(initial, host, port, expected_serial, deadline, cancel):
+            return initial
+
+        connect_result = self._adb.connect(host, port, deadline, cancel)
+        connect_status = connect_result.diagnostics.get("connect_status")
+        if connect_status not in ("connected", "already_connected"):
+            connect_status = "failed"
+        if connect_result.status != ProbeStatus.READY:
+            return _with_connect_metadata(
+                replace(connect_result, probe_name="mumu_readiness"),
+                attempted=True,
+                status=connect_status,
+                error=connect_result.error_code.value,
+                rechecked=False,
+                step="adb_connect",
+            )
+
+        if cancel is not None and cancel.is_cancelled:
+            return _control_result(
+                ProbeStatus.FAILED,
+                ProbeErrorCode.ADB_CANCELLED,
+                connect_status,
+                connect_result.error_code.value,
+            )
+        if deadline.expired:
+            return _control_result(
+                ProbeStatus.TIMEOUT,
+                ProbeErrorCode.ADB_TIMEOUT,
+                connect_status,
+                connect_result.error_code.value,
+            )
+
+        rechecked = self.probe(host, port, expected_serial, deadline, cancel)
+        return _with_connect_metadata(
+            rechecked,
+            attempted=True,
+            status=connect_status,
+            error=connect_result.error_code.value,
+            rechecked=True,
+        )
+
 
 def _status_for_code(code: ProbeErrorCode) -> ProbeStatus:
     """将 ProbeErrorCode 映射到默认 ProbeStatus。"""
@@ -159,3 +238,82 @@ def _status_for_code(code: ProbeErrorCode) -> ProbeStatus:
     if code in (ProbeErrorCode.TCP_TIMEOUT, ProbeErrorCode.ADB_TIMEOUT):
         return ProbeStatus.TIMEOUT
     return ProbeStatus.FAILED
+
+
+def _deadline_result(
+    started_at: float,
+    step: str,
+    error_code: ProbeErrorCode = ProbeErrorCode.ADB_TIMEOUT,
+) -> ProbeResult:
+    return ProbeResult.from_monotonic(
+        "mumu_readiness",
+        ProbeStatus.TIMEOUT,
+        error_code,
+        started_at,
+        {"step": step},
+    )
+
+
+def _connect_is_allowed(
+    initial: ProbeResult,
+    host: str,
+    port: int,
+    expected_serial: str | None,
+    deadline: Deadline,
+    cancel: CancellationToken | None,
+) -> bool:
+    return (
+        initial.error_code == ProbeErrorCode.DEVICE_NOT_FOUND
+        and initial.diagnostics.get("step") == "select_device"
+        and host == "127.0.0.1"
+        and isinstance(port, int)
+        and not isinstance(port, bool)
+        and 1 <= port <= 65_535
+        and expected_serial == f"{host}:{port}"
+        and not deadline.expired
+        and not (cancel is not None and cancel.is_cancelled)
+    )
+
+
+def _with_connect_metadata(
+    result: ProbeResult,
+    *,
+    attempted: bool,
+    status: str,
+    error: str,
+    rechecked: bool,
+    step: str | None = None,
+) -> ProbeResult:
+    diagnostics = dict(result.diagnostics)
+    if step is not None:
+        diagnostics["step"] = step
+    diagnostics.update(
+        {
+            "adb_connect_attempted": attempted,
+            "adb_connect_status": status,
+            "adb_connect_error": error,
+            "readiness_rechecked_after_connect": rechecked,
+        }
+    )
+    return replace(result, diagnostics=diagnostics)
+
+
+def _control_result(
+    status: ProbeStatus,
+    error_code: ProbeErrorCode,
+    connect_status: str,
+    connect_error: str,
+) -> ProbeResult:
+    return ProbeResult.from_monotonic(
+        "mumu_readiness",
+        status,
+        error_code,
+        time.monotonic(),
+        {
+            "step": "adb_connect",
+            "adb_connect_attempted": True,
+            "adb_connect_status": connect_status,
+            "adb_connect_error": connect_error,
+            "readiness_rechecked_after_connect": False,
+        },
+    )

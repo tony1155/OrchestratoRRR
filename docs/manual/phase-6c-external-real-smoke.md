@@ -2,7 +2,14 @@
 
 第一次 Phase 6C2 external 真实工作流 smoke 已按批准执行一次，并在 MuMu readiness 安全停止。StarRail、MAA、AALC 和 MuMu 生命周期命令均未启动；根因是旧解析器拒绝了合法的空格分隔 ADB devices 记录。Phase 6C2A 只完成解析兼容和安全诊断修复，没有执行修复后复验。
 
-后续必须先在 6C2B 使用新提交和新批准基线完成只读 readiness 复验，再由操作者另行批准 6C2C 完整 smoke。两次操作均不是对旧代码基线的自动重试。
+后续必须先在 6C2B 使用新提交和新批准基线完成只读 readiness 复验，再由操作者另行批准 6C2C 完整 smoke。两次操作均不是对旧代码基线的自动重试。Phase 6C2B4A 的实现边界见 docs/acceptance/phase-6c2b4a-controlled-adb-connect.md。
+
+当前 6C2B4A 只允许 external 的显式 ensure 在严格条件下执行一次本地 TCP connect，并最多
+复验一次 readiness；普通 status/probe 保持只读。OrchestratoRRR 不显式调用 adb
+start-server，不拥有 ADB server 生命周期，也不调用 adb kill-server 或 adb disconnect；
+普通 ADB 客户端命令仍可能按 ADB 自身行为使用或拉起默认 server。实现不扫描端口、不自动
+选择实例，且本轮只有 Fake/自动测试证据，不能作为真实冷连接自动恢复验收。Phase 6C2C
+仍未获准。
 
 ## 前置门禁
 
@@ -50,7 +57,10 @@ AALC
 报告写入
 ```
 
-external 模式不会停止、启动或重启 MuMu，也不会尝试修复未 ready 状态。MuMu 必须在业务阶段开始前由外部正确管理。
+external 模式不会停止、启动或重启 MuMu；ENSURE_MUMU_RUNNING 仅在受控条件下尝试一次
+配置目标 connect，WAIT_MUMU_ADB_READY 随后只执行独立的只读 readiness。ensure 内部最多
+两次 readiness，完整 workflow 在发生 connect 时最多三次 readiness；MuMu 实例仍必须由
+外部正确管理。
 
 ## AALC 终止语义
 

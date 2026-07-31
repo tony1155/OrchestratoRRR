@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from autogame_orchestrator.config_model import AppConfig
+from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
 from autogame_orchestrator.maa_sync.models import MAASyncStatus
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, StageName, StageReport
 from autogame_orchestrator.workflow.contracts import StageExecutionContext
@@ -216,7 +216,14 @@ class ProductionStageExecutor:
                 OutcomeKind.FAILURE,
                 ErrorCode.WORKFLOW_DEADLINE_REQUIRED,
             )
-        result = self._mumu().status(context.deadline, context.cancel)
+        mumu = self._mumu()
+        if (
+            self._stage == StageName.ENSURE_MUMU_RUNNING
+            and self._config.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL
+        ):
+            result = mumu.ensure_external_ready(context.deadline, context.cancel)
+        else:
+            result = mumu.status(context.deadline, context.cancel)
         return project_mumu(
             self._stage,
             result,

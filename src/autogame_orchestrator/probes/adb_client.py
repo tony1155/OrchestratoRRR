@@ -30,6 +30,10 @@ from autogame_orchestrator.process.errors import (
 
 _STDOUT_MAX = 1_048_576  # 1 MiB
 _STDERR_MAX = 65_536  # 64 KiB
+_LOCAL_ADB_HOST = "127.0.0.1"
+_CONNECT_SUCCESS_ALREADY = "already connected to"
+_CONNECT_SUCCESS = "connected to"
+_CONNECT_FAILURE_MARKERS = ("not connected to", "failed", "cannot", "refused", "unable")
 _DIAG_MAX = 1_024  # diagnostics 摘要最大字符数
 
 
@@ -49,7 +53,7 @@ def _read_limited_text(path: Path, limit: int) -> tuple[str, bool]:
     if exceeded:
         data = data[:limit]
 
-    return data.decode("utf-8", errors="replace"), exceeded
+    return data.decode("utf-8"), exceeded
 
 
 @dataclass(frozen=True)
@@ -140,6 +144,100 @@ class AdbClient:
             arguments=("-s", serial, "shell", "getprop", "sys.boot_completed"),
             deadline=deadline,
             cancel=cancel,
+        )
+
+    def connect(
+        self,
+        host: str,
+        port: int,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        """Connect only to the configured local TCP ADB endpoint.
+
+        The underlying command output is deliberately consumed here and never
+        exposed through the returned diagnostics.
+        """
+        started_at = time.monotonic()
+        if host != _LOCAL_ADB_HOST:
+            return ProbeResult.from_monotonic(
+                "adb_connect",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.NON_LOCAL_ADDRESS_REJECTED,
+                started_at,
+            )
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
+            return ProbeResult.from_monotonic(
+                "adb_connect",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.INVALID_CONFIGURATION,
+                started_at,
+            )
+        if cancel is not None and cancel.is_cancelled:
+            return ProbeResult.from_monotonic(
+                "adb_connect",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.ADB_CANCELLED,
+                started_at,
+            )
+        if deadline.expired:
+            return ProbeResult.from_monotonic(
+                "adb_connect",
+                ProbeStatus.TIMEOUT,
+                ProbeErrorCode.ADB_TIMEOUT,
+                started_at,
+            )
+
+        probe = self._run_adb_command(
+            probe_name="adb_connect",
+            arguments=("connect", f"{host}:{port}"),
+            deadline=deadline,
+            cancel=cancel,
+        )
+        if probe.status != ProbeStatus.READY:
+            return ProbeResult.from_monotonic(
+                "adb_connect",
+                probe.status,
+                probe.error_code,
+                started_at,
+                {"connect_status": "failed"},
+            )
+
+        output = " ".join(
+            value.casefold()
+            for key in ("stdout_trimmed", "stderr_trimmed")
+            if isinstance(value := probe.diagnostics.get(key), str)
+        )
+        if any(marker in output for marker in _CONNECT_FAILURE_MARKERS):
+            return ProbeResult.from_monotonic(
+                "adb_connect",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.ADB_CONNECT_FAILED,
+                started_at,
+                {"connect_status": "failed"},
+            )
+        if _CONNECT_SUCCESS_ALREADY in output:
+            return ProbeResult.from_monotonic(
+                "adb_connect",
+                ProbeStatus.READY,
+                ProbeErrorCode.OK,
+                started_at,
+                {"connect_status": "already_connected"},
+            )
+        if _CONNECT_SUCCESS in output:
+            return ProbeResult.from_monotonic(
+                "adb_connect",
+                ProbeStatus.READY,
+                ProbeErrorCode.OK,
+                started_at,
+                {"connect_status": "connected"},
+            )
+        return ProbeResult.from_monotonic(
+            "adb_connect",
+            ProbeStatus.FAILED,
+            ProbeErrorCode.ADB_CONNECT_FAILED,
+            started_at,
+            {"connect_status": "failed"},
         )
 
     # ── 内部 ──────────────────────────────────────────────────
@@ -241,7 +339,7 @@ class AdbClient:
         # stdout
         try:
             stdout_text, stdout_exceeded = _read_limited_text(stdout_path, _STDOUT_MAX)
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             if fallback_code:
                 return ProbeResult.from_monotonic(
                     probe_name, fallback_status or ProbeStatus.FAILED, fallback_code, started_at
@@ -262,6 +360,10 @@ class AdbClient:
         # stderr
         try:
             stderr_text, stderr_exceeded = _read_limited_text(stderr_path, _STDERR_MAX)
+        except UnicodeDecodeError:
+            return ProbeResult.from_monotonic(
+                probe_name, ProbeStatus.FAILED, ProbeErrorCode.ADB_OUTPUT_INVALID, started_at
+            )
         except OSError:
             stderr_text = ""
             stderr_exceeded = False

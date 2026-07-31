@@ -46,6 +46,12 @@ class MumuRuntimePort(Protocol):
         cancel: CancellationToken | None = None,
     ) -> MumuRuntimeResult: ...
 
+    def ensure_external_ready(
+        self,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> MumuRuntimeResult: ...
+
 
 class MAASyncPort(Protocol):
     def run(

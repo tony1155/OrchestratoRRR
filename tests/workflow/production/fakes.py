@@ -196,14 +196,25 @@ class FakeRunPort:
 
 
 class FakeMumuPort:
-    def __init__(self, result: MumuRuntimeResult) -> None:
+    def __init__(self, result: MumuRuntimeResult, ensure_result: MumuRuntimeResult | None = None) -> None:
         self.result = result
+        self.ensure_result = ensure_result
         self.calls = 0
+        self.status_calls = 0
+        self.ensure_calls = 0
         self.deadline: Deadline | None = None
         self.cancel: CancellationToken | None = None
 
-    def status(self, deadline: Deadline, cancel=None) -> MumuRuntimeResult:
+    def status(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
         self.calls += 1
+        self.status_calls += 1
         self.deadline = deadline
         self.cancel = cancel
         return self.result
+
+    def ensure_external_ready(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
+        self.calls += 1
+        self.ensure_calls += 1
+        self.deadline = deadline
+        self.cancel = cancel
+        return self.ensure_result if self.ensure_result is not None else self.result

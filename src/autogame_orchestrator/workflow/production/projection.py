@@ -18,10 +18,12 @@ _PROBE_STEP_ALLOWLIST = {
     "select_device",
     "adb_get_state",
     "adb_boot_completed",
+    "adb_connect",
     "none",
 }
 _PROBE_STATUS_ALLOWLIST = {item.value for item in ProbeStatus}
 _PROBE_ERROR_ALLOWLIST = {item.value for item in ProbeErrorCode}
+_ADB_CONNECT_STATUS_ALLOWLIST = {"not_attempted", "connected", "already_connected", "failed"}
 
 
 def _outcome(
@@ -129,6 +131,18 @@ def project_mumu(
         diagnostics["probe_error"] = probe_error
     if isinstance(probe_step, str) and probe_step in _PROBE_STEP_ALLOWLIST:
         diagnostics["probe_step"] = probe_step
+    connect_attempted = result.diagnostics.get("adb_connect_attempted")
+    if isinstance(connect_attempted, bool):
+        diagnostics["adb_connect_attempted"] = connect_attempted
+    connect_status = result.diagnostics.get("adb_connect_status")
+    if isinstance(connect_status, str) and connect_status in _ADB_CONNECT_STATUS_ALLOWLIST:
+        diagnostics["adb_connect_status"] = connect_status
+    connect_error = result.diagnostics.get("adb_connect_error")
+    if isinstance(connect_error, str) and (connect_error == "none" or connect_error in _PROBE_ERROR_ALLOWLIST):
+        diagnostics["adb_connect_error"] = connect_error
+    rechecked = result.diagnostics.get("readiness_rechecked_after_connect")
+    if isinstance(rechecked, bool):
+        diagnostics["readiness_rechecked_after_connect"] = rechecked
     if result.status == MumuRuntimeStatus.TIMEOUT:
         outcome, code = OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT
     elif result.status == MumuRuntimeStatus.CANCELLED:
