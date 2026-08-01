@@ -79,3 +79,16 @@ Phase 7B1 still owns packaged `version`, `--help`, fixture-only validate and
 fixture-only plan smoke. Phase 7D still owns the default user entry and final
 working-directory policy. The legacy PowerShell entry remains in place and
 cannot yet be removed. Phase 7 is not complete.
+## Phase 7B1 packaged CLI smoke
+
+Phase 7B1 is complete for the approved packaged CLI smoke scope. The existing
+onedir artifact passed source and packaged fixture-only `validate` and
+`plan` from an external temporary working directory. The prior packaged
+`version` and plain help results remain cumulative evidence from the same
+committed artifact; neither was rerun in the diagnostic closure.
+
+The packaged plan is the existing static 15-stage dry plan, with lowercase
+stage values and a bundled-schema-valid RunReport. It must not be confused with
+the production external 11-stage run contract. No packaged `run`, real UAC,
+ADB, or business program was executed. Phase 7D remains the next blocker for
+the default entry and final working-directory policy; Phase 7 is not complete.

@@ -242,3 +242,18 @@ boundary. Packaged CLI behavior, frozen UAC, and a real workflow remain
 unvalidated. Phase 7B1 still owns packaged CLI smoke, Phase 7D still owns the
 default entry and working-directory policy, and the legacy PowerShell entry
 remains retained.
+## Phase 7B1 packaged CLI smoke status
+
+Phase 7B1 is complete within its fixture-only packaged CLI scope. The retained
+onedir artifact passed source and packaged `validate -> plan` comparison from a
+repository-external temporary working directory. Packaged `version` and plain
+root help evidence was accumulated from the same committed artifact; the
+current diagnostic did not rerun either command.
+
+The public `plan` command remains a static 15-stage dry plan and uses the
+lowercase `StageName.value` representation in both console output and
+RunReport. The production external run contract remains a separate controlled
+11-stage plan. Validate and plan reports were independently checked with the
+bundled RunReport schema. No packaged `run`, real UAC, ADB, or business program
+was executed. Phase 7D still owns the default entry and final working-directory
+policy, and the legacy PowerShell entry remains retained.
