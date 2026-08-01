@@ -1,5 +1,26 @@
 # OrchestratoRRR
 
+## Native default entry setup
+
+The packaged default-entry layout is:
+
+- install: %LOCALAPPDATA%\Programs\OrchestratoRRR
+- config: %LOCALAPPDATA%\OrchestratoRRR\config\orchestrator.toml
+- runtime cwd: %LOCALAPPDATA%\OrchestratoRRR\runtime
+- logs: %LOCALAPPDATA%\OrchestratoRRR\logs
+- reports: %LOCALAPPDATA%\OrchestratoRRR\run-results
+
+All configured business executable and working-directory paths must be
+absolute. The configured log and report directories must exactly match the
+canonical paths above. The Start Menu shortcut invokes only
+OrchestratoRRR.exe start; every real run requires the operator to type the
+real-execution confirmation interactively. Never store that confirmation in a
+shortcut or configuration file.
+
+The legacy PowerShell entry remains available during the parallel-validation
+period. scripts/install-default-entry.ps1 defines the future first-install
+layout, but Phase 7D1 does not execute it or create a real shortcut.
+
 Adapter 真实 smoke 门禁已于 2026-07-30 正式关闭。Phase 6C2 的第一次 external 真实工作流 smoke 已按批准执行一次，但在 `ENSURE_MUMU_RUNNING` 安全停止，StarRail、MAA 和 AALC 均未启动。Phase 6C2A 已修复合法空白分隔 ADB devices 输出的兼容性并增强安全诊断；修复后的 readiness 和完整 smoke 尚未执行。maa-cli 自更新与 MuMu managed 实例化生命周期控制仍被阻断，因此 Phase 6 整体尚未完成。脱敏 Adapter 证据见 [最终验收记录](docs/acceptance/adapter-real-smoke.md)。
 
 Phase 5 后、Phase 6 前的单 Adapter 真实 smoke 门禁已经完成。诊断入口要求精确确认、有限 Deadline、单 Adapter 选择和原子安全结果；后续复验流程见 [统一门禁手册](docs/manual/adapter-real-smoke-gate.md)。

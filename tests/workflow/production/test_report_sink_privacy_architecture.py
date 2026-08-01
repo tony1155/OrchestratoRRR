@@ -95,7 +95,7 @@ def test_projected_result_does_not_expose_raw_runtime_values(projection, secret:
 
 def test_public_cli_commands_include_controlled_run() -> None:
     names = {command.name or command.callback.__name__ for command in app.registered_commands if not command.hidden}
-    assert names == {"version", "validate", "plan", "run"}
+    assert names == {"version", "validate", "plan", "run", "start"}
 
 
 def test_core_files_have_no_concrete_runtime_imports() -> None:

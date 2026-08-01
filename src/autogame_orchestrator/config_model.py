@@ -21,6 +21,13 @@ if TYPE_CHECKING:
 _VALID_PATH_CHARS_RE = re.compile(r'^[^\x00-\x1f\x7f"*:<>?|]+$')
 
 
+@dataclass(frozen=True)
+class DefaultEntryPathIssue:
+    """A stable field-only diagnostic for the strict default-entry policy."""
+
+    field: str
+
+
 def _validate_path_shape(value: str, label: str) -> list[ErrorCode]:
     errors: list[ErrorCode] = []
     if not value.strip():
@@ -481,3 +488,60 @@ class AppConfig:
         errors.extend(self.maa_sync.check_paths())
         errors.extend(self.aalc.check_paths())
         return errors
+
+    def check_default_entry_paths(
+        self,
+        *,
+        canonical_log_directory: Path,
+        canonical_report_directory: Path,
+    ) -> tuple[DefaultEntryPathIssue, ...]:
+        """Require deterministic absolute paths for the interactive default entry."""
+        from pathlib import Path
+
+        issues: list[DefaultEntryPathIssue] = []
+
+        def require_absolute(field_name: str, value: str, *, allow_empty: bool = False) -> None:
+            if allow_empty and not value:
+                return
+            try:
+                absolute = bool(value) and Path(value).is_absolute()
+            except (OSError, ValueError):
+                absolute = False
+            if not absolute:
+                issues.append(DefaultEntryPathIssue(field_name))
+
+        def require_canonical(field_name: str, value: str, expected: Path) -> None:
+            require_absolute(field_name, value)
+            if issues and issues[-1].field == field_name:
+                return
+            try:
+                matches = Path(value).resolve(strict=False) == expected.resolve(strict=False)
+            except (OSError, ValueError):
+                matches = False
+            if not matches:
+                issues.append(DefaultEntryPathIssue(field_name))
+
+        require_canonical("orchestrator.log_dir", self.orchestrator.log_dir, canonical_log_directory)
+        require_canonical("orchestrator.report_dir", self.orchestrator.report_dir, canonical_report_directory)
+        require_absolute(
+            "mumu.executable",
+            self.mumu.executable,
+            allow_empty=self.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL,
+        )
+        require_absolute("mumu.adb_executable", self.mumu.adb_executable)
+        require_absolute("starrail.executable", self.starrail.executable)
+        require_absolute("starrail.working_directory", self.starrail.working_directory)
+        require_absolute("starrail.log_path_template", self.starrail.log_path_template.replace("{date}", "2000-01-01"))
+        require_absolute("maa.executable", self.maa.executable)
+        require_absolute("maa.working_directory", self.maa.working_directory)
+        require_absolute("aalc.executable", self.aalc.executable)
+        require_absolute("aalc.working_directory", self.aalc.working_directory)
+        sync_paths = (
+            ("maa_sync.gui_settings_source", self.maa_sync.gui_settings_source),
+            ("maa_sync.gui_tasks_source", self.maa_sync.gui_tasks_source),
+            ("maa_sync.cli_profile_destination", self.maa_sync.cli_profile_destination),
+            ("maa_sync.cli_tasks_destination", self.maa_sync.cli_tasks_destination),
+        )
+        for field_name, value in sync_paths:
+            require_absolute(field_name, value, allow_empty=not self.maa_sync.enabled)
+        return tuple(issues)

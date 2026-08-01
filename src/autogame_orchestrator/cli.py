@@ -21,6 +21,7 @@ import typer
 
 from autogame_orchestrator import __version__
 from autogame_orchestrator.config_loader import load_config
+from autogame_orchestrator.default_entry import DEFAULT_START_DEADLINE_SECONDS, execute_default_entry
 from autogame_orchestrator.diagnostics.packaged_isolated_workflow import (
     ISOLATED_WORKFLOW_CONFIRMATION,
     IsolatedWorkflowError,
@@ -83,6 +84,20 @@ def _make_stage_report(
 def version() -> None:
     """输出版本号并退出。"""
     typer.echo(f"OrchestratoRRR {__version__}")
+
+
+@app.command()
+def start(
+    deadline_seconds: float = typer.Option(  # noqa: B008
+        DEFAULT_START_DEADLINE_SECONDS,
+        "--deadline-seconds",
+        help="Finite default-entry workflow deadline.",
+    ),
+) -> None:
+    """Interactively preview and start the canonical external workflow."""
+    result = execute_default_entry(deadline_seconds)
+    if result.exit_code != 0:
+        raise typer.Exit(code=result.exit_code)
 
 
 @app.command("_isolated-workflow-smoke", hidden=True)

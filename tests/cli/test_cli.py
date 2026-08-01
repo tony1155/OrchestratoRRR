@@ -107,7 +107,7 @@ def test_cli_has_controlled_run_command() -> None:
         command.name or command.callback.__name__ for command in app.registered_commands if not command.hidden
     }
     hidden_names = {command.name or command.callback.__name__ for command in app.registered_commands if command.hidden}
-    assert public_names == {"version", "validate", "plan", "run"}
+    assert public_names == {"version", "validate", "plan", "run", "start"}
     assert hidden_names == {"_isolated-workflow-smoke"}
 
 

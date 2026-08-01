@@ -132,3 +132,17 @@ business programs. Phase 7C requires separate authorization for any real
 packaged external validation. Phase 7D remains responsible for the default
 entry and final working-directory policy. The legacy PowerShell entry remains
 retained and Phase 7 is not complete.
+
+## Phase 7D1 default-entry implementation
+
+Phase 7D1 is complete at the source implementation and automatic-test boundary.
+The new public start command implements the Phase 7D0 shortcut-to-native-EXE
+decision, canonical LOCALAPPDATA paths, interactive confirmation, report-free
+external 11-stage preflight, and a single formal run request under the
+canonical runtime cwd. Existing public CLI contracts remain unchanged.
+
+The canonical installer and shortcut script was added but not executed. No
+real shortcut, packaged execution, rebuild, UAC, ADB, TCP probe, or business
+workflow occurred. Phase 7D2 is next and owns rebuilding plus packaged
+non-business entry tests. Phase 7C remains a separate real-execution approval;
+Phase 7E owns legacy replacement. Phase 7 and Phase 7D are not complete.

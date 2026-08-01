@@ -299,3 +299,24 @@ removed. Phase 7B2 is complete, but Phase 7C remains a separately authorized
 real packaged external validation scope. Phase 7D still owns the default entry
 and final working-directory policy, the legacy PowerShell entry remains
 retained, and Phase 7 is not complete.
+
+## Phase 7D1 native default entry
+
+The public start command is the native interactive default-entry boundary.
+It accepts only a bounded deadline and discovers the single canonical config
+at %LOCALAPPDATA%\OrchestratoRRR\config\orchestrator.toml. It requires an
+interactive console before path resolution, applies a start-only absolute-path
+policy, performs report-free run-v1 and exact external 11-stage preflight, and
+requires the existing real-execution confirmation on every invocation.
+
+During the single execute_run_request call, process cwd is the canonical
+%LOCALAPPDATA%\OrchestratoRRR\runtime directory; the prior cwd is restored
+afterward. Logs and reports are constrained to their canonical product
+directories. Public validate, plan, and run contracts are unchanged.
+
+The installer script is a fail-closed, first-install-only layout definition.
+It copies an approved onedir to %LOCALAPPDATA%\Programs\OrchestratoRRR and
+defines a Start Menu shortcut with argument start and the canonical runtime
+working directory. Phase 7D1 did not execute that script, create a shortcut,
+rebuild, or run a packaged EXE. Phase 7D2 owns those next non-business checks;
+the legacy PowerShell entry remains retained.

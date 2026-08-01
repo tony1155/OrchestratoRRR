@@ -30,12 +30,12 @@ def test_workflow_core_has_no_process_launch_primitives() -> None:
 
 def test_public_cli_command_set_includes_controlled_run() -> None:
     names = {command.name or command.callback.__name__ for command in app.registered_commands if not command.hidden}
-    assert names == {"version", "validate", "plan", "run"}
+    assert names == {"version", "validate", "plan", "run", "start"}
 
 
 def test_no_other_execution_cli_is_added() -> None:
     names = {command.name or command.callback.__name__ for command in app.registered_commands}
-    assert names.isdisjoint({"all", "execute", "workflow", "start"})
+    assert names.isdisjoint({"all", "execute", "workflow"})
 
 
 def test_plan_module_has_no_external_execution_dependency() -> None:
