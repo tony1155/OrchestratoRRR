@@ -103,8 +103,12 @@ def test_plan_invalid_config(invalid_toml: Path) -> None:
 
 
 def test_cli_has_controlled_run_command() -> None:
-    names = {command.name or command.callback.__name__ for command in app.registered_commands}
-    assert names == {"version", "validate", "plan", "run"}
+    public_names = {
+        command.name or command.callback.__name__ for command in app.registered_commands if not command.hidden
+    }
+    hidden_names = {command.name or command.callback.__name__ for command in app.registered_commands if command.hidden}
+    assert public_names == {"version", "validate", "plan", "run"}
+    assert hidden_names == {"_isolated-workflow-smoke"}
 
 
 def test_cli_has_no_all_command() -> None:

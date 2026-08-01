@@ -91,6 +91,14 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class WorkflowMode(StrEnum):
+    """Closed set of report modes produced by the workflow runner."""
+
+    FAKE = "workflow_fake"
+    EXTERNAL = "workflow_external"
+    ISOLATED = "workflow_isolated"
+
+
 class StageName(StrEnum):
     """Every stage the orchestrator knows about.
 

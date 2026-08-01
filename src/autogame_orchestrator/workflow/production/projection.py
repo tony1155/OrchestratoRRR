@@ -93,7 +93,7 @@ def project_aalc(stage: StageName, result: AALCRunResult) -> StageReport:
         AALCRunStatus.CANCELLED,
     )
     last = result.attempt_results[-1] if result.attempt_results else None
-    diagnostics: Mapping[str, JsonValue] = {
+    diagnostics: dict[str, JsonValue] = {
         "source_error_code": result.error_code.value,
         "completion_mode": result.completion_mode.value,
         "configured_attempts": result.configured_attempts,
@@ -102,6 +102,10 @@ def project_aalc(stage: StageName, result: AALCRunResult) -> StageReport:
         "owned_process_cleaned": last.owned_process_cleaned if last else False,
         "last_exit_code": last.exit_code if last else None,
     }
+    for key in ("attempts_executed", "successful_attempt"):
+        value = result.diagnostics.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            diagnostics[key] = value
     duration_ms = max(0, int(result.duration_seconds * 1000))
     return StageReport(
         stage, outcome, code, result.started_at, result.finished_at, duration_ms, diagnostics=diagnostics
@@ -125,6 +129,9 @@ def project_mumu(
     probe_status = result.diagnostics.get("probe_status")
     probe_error = result.diagnostics.get("probe_error")
     probe_step = result.diagnostics.get("probe_step")
+    source_status = result.diagnostics.get("source_status")
+    if isinstance(source_status, str) and source_status in {item.value for item in MumuRuntimeStatus}:
+        diagnostics["source_status"] = source_status
     if isinstance(probe_status, str) and probe_status in _PROBE_STATUS_ALLOWLIST:
         diagnostics["probe_status"] = probe_status
     if isinstance(probe_error, str) and probe_error in _PROBE_ERROR_ALLOWLIST:

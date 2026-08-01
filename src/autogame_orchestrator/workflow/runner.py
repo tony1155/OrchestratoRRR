@@ -15,6 +15,7 @@ from autogame_orchestrator.models import (
     RunStatus,
     StageName,
     StageReport,
+    WorkflowMode,
     is_json_serializable,
 )
 from autogame_orchestrator.process.cancellation import CancellationToken
@@ -72,15 +73,15 @@ class WorkflowRunner:
         report_sink: ReportSink,
         *,
         event_sink: WorkflowEventSink | None = None,
-        mode: str = "workflow_fake",
+        mode: WorkflowMode | str = WorkflowMode.FAKE,
     ) -> None:
-        if mode not in {"workflow_fake", "workflow_external"}:
+        if mode not in {item.value for item in WorkflowMode}:
             raise ValueError("工作流报告 mode 不受支持")
         self._plan = plan
         self._executor_factory = executor_factory
         self._report_sink = report_sink
         self._event_sink = event_sink
-        self._mode = mode
+        self._mode = WorkflowMode(mode)
 
     def _emit(self, report: StageReport, index: int) -> None:
         if self._event_sink is None:

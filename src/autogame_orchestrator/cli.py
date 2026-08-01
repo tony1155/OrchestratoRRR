@@ -21,6 +21,12 @@ import typer
 
 from autogame_orchestrator import __version__
 from autogame_orchestrator.config_loader import load_config
+from autogame_orchestrator.diagnostics.packaged_isolated_workflow import (
+    ISOLATED_WORKFLOW_CONFIRMATION,
+    IsolatedWorkflowError,
+    execute_isolated_workflow,
+    validate_isolated_deadline,
+)
 from autogame_orchestrator.log_writer import JsonlLogWriter
 from autogame_orchestrator.models import (
     ErrorCode,
@@ -77,6 +83,43 @@ def _make_stage_report(
 def version() -> None:
     """输出版本号并退出。"""
     typer.echo(f"OrchestratoRRR {__version__}")
+
+
+@app.command("_isolated-workflow-smoke", hidden=True)
+def isolated_workflow_smoke(
+    workspace: str = typer.Option(..., "--workspace", help="Empty workspace for synthetic evidence."),  # noqa: B008
+    deadline_seconds: float = typer.Option(..., "--deadline-seconds", help="Bounded synthetic workflow deadline."),  # noqa: B008
+    confirm_isolated_execution: str = typer.Option(  # noqa: B008
+        ...,
+        "--confirm-isolated-execution",
+        help="Exact acknowledgement for the synthetic isolated workflow.",
+    ),
+) -> None:
+    """Internal synthetic workflow smoke; hidden from the public CLI help."""
+
+    if confirm_isolated_execution != ISOLATED_WORKFLOW_CONFIRMATION:
+        typer.echo("ISOLATED_CONFIRMATION_REQUIRED", err=True)
+        raise typer.Exit(code=2)
+    if validate_isolated_deadline(deadline_seconds) is not None:
+        typer.echo("ISOLATED_DEADLINE_INVALID", err=True)
+        raise typer.Exit(code=2)
+    try:
+        result = execute_isolated_workflow(Path(workspace), deadline_seconds)
+    except IsolatedWorkflowError as exc:
+        typer.echo(exc.code, err=True)
+        raise typer.Exit(code=2) from None
+    except Exception:
+        typer.echo("ISOLATED_INTERNAL_ERROR", err=True)
+        raise typer.Exit(code=8) from None
+
+    typer.echo(
+        "Isolated workflow completed: "
+        f"status={result.report.status.value} "
+        f"error_code={result.report.error_code.value} "
+        f"mode={result.report.mode} "
+        f"stages={len(result.report.stages)} "
+        f"forbidden_calls={result.ledger.forbidden_calls}"
+    )
 
 
 @app.command("run")

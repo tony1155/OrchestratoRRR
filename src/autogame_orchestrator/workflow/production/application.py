@@ -11,7 +11,7 @@ from typing import Protocol, Self
 from autogame_orchestrator.config_model import AppConfig
 from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.log_writer import JsonlLogWriter
-from autogame_orchestrator.models import JsonValue, RunReport
+from autogame_orchestrator.models import JsonValue, RunReport, WorkflowMode
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.workflow.contracts import ElevationGateway, ReportSink
@@ -53,6 +53,7 @@ class ProductionApplicationDependencies:
     runtime_factories: RuntimeFactories | None = None
     report_sink_factory: ReportSinkFactory = _production_report_sink
     log_factory: LogFactory = JsonlLogWriter
+    workflow_mode: WorkflowMode = WorkflowMode.EXTERNAL
 
 
 def default_production_dependencies() -> ProductionApplicationDependencies:
@@ -85,10 +86,15 @@ class _LoggedProductionRunner:
             raise ValueError("生产工作流要求父 Deadline 和 run_id")
         log_path = Path(self._config.orchestrator.log_dir) / f"run-{run_id}.jsonl"
         with self._dependencies.log_factory(log_path, run_id) as log:
+            workflow_message = (
+                "Isolated workflow started"
+                if self._dependencies.workflow_mode is WorkflowMode.ISOLATED
+                else "External workflow started"
+            )
             log.info(
                 "workflow.start",
-                "External workflow started",
-                {"mode": "workflow_external", "stage_count": len(self._plan.stages)},
+                workflow_message,
+                {"mode": self._dependencies.workflow_mode.value, "stage_count": len(self._plan.stages)},
             )
             executor_factory = build_production_executor_factory(
                 self._config,
@@ -104,7 +110,7 @@ class _LoggedProductionRunner:
                 executor_factory,
                 report_sink,
                 event_sink=emit,
-                mode="workflow_external",
+                mode=self._dependencies.workflow_mode,
             )
             return runner.run(deadline=deadline, cancel=cancel, run_id=run_id)
 

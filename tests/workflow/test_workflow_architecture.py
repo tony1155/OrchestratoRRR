@@ -29,7 +29,7 @@ def test_workflow_core_has_no_process_launch_primitives() -> None:
 
 
 def test_public_cli_command_set_includes_controlled_run() -> None:
-    names = {command.name or command.callback.__name__ for command in app.registered_commands}
+    names = {command.name or command.callback.__name__ for command in app.registered_commands if not command.hidden}
     assert names == {"version", "validate", "plan", "run"}
 
 

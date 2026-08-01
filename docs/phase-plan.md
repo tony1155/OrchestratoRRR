@@ -92,3 +92,23 @@ stage values and a bundled-schema-valid RunReport. It must not be confused with
 the production external 11-stage run contract. No packaged `run`, real UAC,
 ADB, or business program was executed. Phase 7D remains the next blocker for
 the default entry and final working-directory policy; Phase 7 is not complete.
+
+## Phase 7B2A isolated workflow entry and build
+
+Phase 7B2A is complete within its implementation and static-audit scope. The
+hidden `_isolated-workflow-smoke` entry reuses `execute_run_request` and injects
+strictly in-process synthetic Runtime factories. Its workspace must be an
+existing empty directory outside the current entry/bundle boundaries, and its
+generated configuration contains only inert workspace-local placeholder files.
+
+The isolated report mode is `workflow_isolated`; the default production mode
+remains `workflow_external`. Source tests and one source-only isolated smoke
+covered the exact external 11-stage order, report/log privacy, and fail-closed
+boundaries for default Runtime, process, TCP/ADB, and UAC paths.
+
+The changed source was rebuilt once as a PyInstaller 6.21.0 onedir console
+artifact. Static inspection confirmed the EXE, bundled canonical schema, and
+isolated diagnostic module in the build analysis. The generated EXE was not
+executed. Phase 7B2B owns that packaged isolated-workflow smoke; Phase 7D still
+owns the default entry and final working-directory policy. The legacy
+PowerShell entry remains retained and Phase 7 is not complete.

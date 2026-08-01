@@ -257,3 +257,23 @@ RunReport. The production external run contract remains a separate controlled
 bundled RunReport schema. No packaged `run`, real UAC, ADB, or business program
 was executed. Phase 7D still owns the default entry and final working-directory
 policy, and the legacy PowerShell entry remains retained.
+
+## Phase 7B2A isolated workflow entry
+
+Phase 7B2A adds the hidden `_isolated-workflow-smoke` command for diagnostic
+coverage of the packaged workflow entry. It accepts only an existing empty
+workspace, a bounded deadline, and the exact synthetic-execution confirmation.
+It generates its own inert configuration and reuses `execute_run_request` with
+the formal production composition boundary.
+
+The command injects only in-process synthetic Runtime implementations. It does
+not use the default Runtime factory, concrete business adapters,
+ProcessSupervisor, TCP/ADB probes, or Windows elevation. The resulting report
+uses the strict `workflow_isolated` mode and the same controlled external
+11-stage plan; the default production mode remains `workflow_external`.
+
+Phase 7B2A source tests and one source-only hidden smoke passed. A new PyInstaller
+6.21.0 onedir console artifact was built once and statically audited; the EXE
+was not executed. Phase 7B2B owns the packaged isolated-workflow execution.
+Phase 7D still owns the default entry and final working-directory policy, the
+legacy PowerShell entry remains retained, and Phase 7 is not complete.
