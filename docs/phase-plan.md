@@ -112,3 +112,23 @@ isolated diagnostic module in the build analysis. The generated EXE was not
 executed. Phase 7B2B owns that packaged isolated-workflow smoke; Phase 7D still
 owns the default entry and final working-directory policy. The legacy
 PowerShell entry remains retained and Phase 7 is not complete.
+
+## Phase 7B2B packaged isolated workflow execution
+
+Phase 7B2B is complete. The retained Phase 7B2A onedir artifact was not
+rebuilt and its hidden `_isolated-workflow-smoke` command was started exactly
+once from a separate system-temporary runner directory. The synthetic
+workspace began empty and remained outside repository, build, and dist paths.
+
+The packaged command exited zero with `workflow_isolated`, 11 successful
+synthetic stages, and `forbidden_calls=0`. Its single log contained one start
+event and 11 ordered stage events. Its single RunReport passed independent
+validation with the bundled canonical schema. Artifact hashes and dist file
+count were unchanged, and all temporary evidence and harness files were
+removed.
+
+Phase 7B2 is now complete without executing public `run`, UAC, ADB, TCP, or
+business programs. Phase 7C requires separate authorization for any real
+packaged external validation. Phase 7D remains responsible for the default
+entry and final working-directory policy. The legacy PowerShell entry remains
+retained and Phase 7 is not complete.

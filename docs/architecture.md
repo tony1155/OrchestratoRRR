@@ -277,3 +277,25 @@ Phase 7B2A source tests and one source-only hidden smoke passed. A new PyInstall
 was not executed. Phase 7B2B owns the packaged isolated-workflow execution.
 Phase 7D still owns the default entry and final working-directory policy, the
 legacy PowerShell entry remains retained, and Phase 7 is not complete.
+
+## Phase 7B2B packaged isolated workflow
+
+Phase 7B2B completes the packaged isolated-workflow acceptance scope. The
+Phase 7B2A onedir EXE was reused without rebuilding and launched exactly once
+with the hidden `_isolated-workflow-smoke` command. Its process working
+directory and its empty isolated workspace were separate system-temporary
+directories outside the repository, build, and dist trees.
+
+The frozen command returned success/OK in `workflow_isolated` mode with 11
+stages and `forbidden_calls=0`. The unique JSONL log contained one
+`workflow.start` and 11 ordered `workflow.stage.finished` events. The unique
+RunReport contained the same 11 successful synthetic stages and passed an
+independent validation using the bundled schema. No public `run`, real UAC,
+ADB, TCP probe, or business program was executed.
+
+The EXE hash, bundled-schema hash, schema equivalence, and dist file count were
+unchanged after execution. Temporary evidence and the ignored harness were
+removed. Phase 7B2 is complete, but Phase 7C remains a separately authorized
+real packaged external validation scope. Phase 7D still owns the default entry
+and final working-directory policy, the legacy PowerShell entry remains
+retained, and Phase 7 is not complete.
