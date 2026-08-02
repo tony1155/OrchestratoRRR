@@ -279,3 +279,41 @@ rebuild; statically audit the new artifact; separately authorize install
 update; statically audit the installed artifact; and separately authorize the
 real workflow retry. Phase 7E may begin only after Phase 7C succeeds. The
 legacy PowerShell entry remains retained.
+
+## Phase 7C rebuild retry and static artifact audit
+
+The first formal build attempt was left unproven because its wrapper promoted
+native stderr to a terminating error before capturing the child exit code and
+completion marker. A separately authorized single retry used a foreground
+System.Diagnostics.Process wrapper with separate asynchronous stdout/stderr
+capture. It returned exit code zero and the formal completion marker, and its
+static onedir artifact audit passed. The artifact is not installed and its EXE
+was not executed.
+
+Current state:
+
+phase_7c_product_data_forensics_completed=true
+phase_7c_product_data_recovery_completed=true
+phase_7c_install_update_implementation_completed=true
+phase_7c_product_data_backup_completed=true
+phase_7c_product_data_backup_bundle_ready=true
+phase_7c_rebuild_retry_completed=true
+phase_7c_rebuild_completed=true
+phase_7c_dist_artifact_audit_completed=true
+phase_7c_updated_artifact_ready=true
+phase_7c_reinstall_completed=false
+phase_7c_installed_artifact_audit_completed=false
+phase_7c_real_workflow_retry_completed=false
+phase_7c_completed=false
+phase_7e_completed=false
+phase_7_completed=false
+legacy_powershell_replacement_ready=false
+
+The next phase is PHASE_7C_REBUILD_ARTIFACT_AUDIT_COMMIT. Its blockers are
+PHASE_7C_REBUILD_ARTIFACT_AUDIT_COMMIT_REQUIRED,
+PHASE_7C_INSTALL_UPDATE_AUTHORIZATION, and
+PHASE_7C_REAL_WORKFLOW_RETRY_AUTHORIZATION. The required order is: commit
+the audited documentation, separately authorize install update, statically
+audit the installed artifact, separately authorize the real workflow retry,
+and enter Phase 7E only after Phase 7C succeeds. The legacy PowerShell entry
+remains retained.

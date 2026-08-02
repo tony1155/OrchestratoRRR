@@ -486,3 +486,26 @@ installed artifact and shortcut were unchanged; no runtime was created. This
 phase performed no build, install update, packaged execution, or real
 workflow, and the next artifact and execution stages remain independently
 authorized.
+
+## Phase 7C rebuild retry and static artifact audit
+
+The first formal rebuild produced a complete-looking candidate but remained
+unproven because its outer PowerShell wrapper treated native stderr as a
+terminating error before preserving the child exit code and completion marker.
+The separately authorized retry used `System.Diagnostics.Process` with
+independent asynchronous stdout/stderr capture and direct `Process.ExitCode`
+observation. It completed with exit code zero and the committed build marker;
+native stderr was retained as ordinary diagnostic text.
+
+Build, product-data backup, and install update remain separate operations. The
+retry artifact passed full onedir manifest, schema, TOC, module-collection,
+warning, privacy, and project-resource audits. The StarRail dynamic-log fix was
+present in the retry's Analysis and PYZ collections. The artifact is the
+immutable source for a later updater, while the installed artifact remains the
+old version and the updater has not run.
+
+The canonical product data and independent backup bundle were read-only gates
+and remained unchanged; the canonical runtime remains absent. No packaged EXE,
+installer, updater, UAC, ADB, TCP probe, business program, or real workflow was
+executed. The legacy PowerShell entry remains retained. Install update and the
+real workflow retry are independent authorization boundaries.
