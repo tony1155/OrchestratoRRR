@@ -432,3 +432,32 @@ rotation, bounded-read, failure-first, case-sensitive marker, process cleanup,
 and exit-zero-without-success contracts are unchanged. The installed artifact
 does not yet contain this source fix; rebuilding and parallel reinstallation
 belong to the next separately authorized phase.
+
+## Phase 7C maintenance transaction boundary
+
+Build, product-data backup, and install update are now separate operations.
+The formal build script remains independent. A successful product-data backup
+is a mandatory updater input and carries a versioned manifest of directory
+presence plus sorted relative paths, sizes, and SHA-256 values. The bundle is
+staged and atomically finalized; its manifest contains neither absolute source
+paths nor configuration contents.
+
+The updater manages only the canonical install directory. Canonical product
+data is read repeatedly as a fail-closed consistency gate against the backup
+manifest and is never created, changed, deleted, or restored by the updater.
+Source, current install, and staging are compared using complete deterministic
+file manifests. The source EXE hash must differ from the current EXE hash, so
+an old or unchanged dist cannot be accepted as an update.
+
+Staging, true rollback backup, and failed-install isolation are unique siblings
+under the install parent. Activation uses directory renames. A failed
+post-check restores the actual transaction backup and verifies its complete
+manifest; reconstruction from dist is prohibited. Cleanup accepts only exact
+paths owned by the current GUID. Residue from an interrupted transaction fails
+closed for manual review, and an outer timeout never triggers product-data
+cleanup.
+
+The maintenance behavior is covered with synthetic Windows filesystem and
+shortcut tests. The real installation has not used these scripts, no packaged
+EXE was run, and the real workflow was not retried. The legacy PowerShell entry
+continues in parallel pending Phase 7C success and a later Phase 7E decision.
