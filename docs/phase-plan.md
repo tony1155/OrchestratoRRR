@@ -165,3 +165,22 @@ Phase 7D3 is next and owns packaged default-entry synthetic preflight and
 confirmation cancellation. Phase 7C remains separately authorized real
 execution; Phase 7E owns legacy replacement. Phase 7D and Phase 7 remain
 incomplete.
+
+## Phase 7D3 composed-evidence closure
+
+Phase 7D3 is complete through
+`COMPOSED_EVIDENCE_NO_INTERACTIVE_PACKAGED_EXECUTION`. Source automatic tests
+cover the synthetic preflight, exact external 11-stage preview, confirmation
+cancellation, zero run-executor calls, pause, directory preparation, and
+write-probe cleanup. Phase 7D2 proves inclusion of that committed control flow
+in the formal packaged artifact and verifies its packaged CLI and
+non-interactive boundaries. The attempted Phase 7D3 synthetic fixture also
+passed all source-only pre-confirmation gates.
+
+The interactive packaged run was waived after the computer-control backend
+was unavailable and the transcript probe failed before any packaged launch.
+No direct packaged confirmation-cancel evidence is claimed, and no product
+defect was found. Phase 7D4 is next:
+`PHASE_7D4_PARALLEL_DEPLOYMENT_AND_MANUAL_OPERATIONS`. Phase 7C remains the
+separately authorized real packaged external workflow boundary, and Phase 7E
+continues to own legacy replacement. Phase 7D and Phase 7 remain incomplete.

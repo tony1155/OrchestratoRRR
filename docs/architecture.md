@@ -340,3 +340,28 @@ confirmation, elevation, adapter, or business boundary was entered.
 Phase 7D3 owns the separately authorized packaged synthetic preflight and
 confirmation-cancel scope. Phase 7C remains separate real execution, and the
 legacy PowerShell entry remains retained until a Phase 7E decision.
+
+## Phase 7D3 composed-evidence closure
+
+Phase 7D3 is complete using composed evidence rather than a direct packaged
+interactive execution. Source control-flow and automatic tests cover the
+full synthetic preflight, exact external 11-stage preview, confirmation
+boundary, incorrect-confirmation cancellation, zero run-executor calls,
+terminal pause, canonical directory preparation, and write-probe cleanup.
+
+Phase 7D2 independently proves that the same committed `start` and
+`default_entry` implementation is included in the formal onedir, that its
+packaged command and option contracts load correctly, and that its
+non-interactive gate fails closed without changing the artifact. The aborted
+Phase 7D3 attempt additionally established, through source-only checks, that
+its synthetic configuration passed the default-entry path policy, run-v1,
+path-existence, and exact external-plan gates.
+
+Direct packaged interactive execution did not occur: the available
+computer-control backend was unavailable and the transcript probe produced no
+usable evidence, so the fail-closed gate stopped before launching the EXE.
+This is recorded as an acceptance-environment limitation, not an observed
+product defect. No packaged confirmation cancellation, UAC, or real workflow
+is claimed. Phase 7C retains the correctly confirmed real-execution boundary;
+Phase 7D4 owns parallel deployment and manual operation; Phase 7E owns any
+legacy-entry replacement decision.
