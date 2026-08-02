@@ -200,3 +200,24 @@ in parallel. The next phase is
 `PHASE_7D4C_MANUAL_SHORTCUT_PREFLIGHT_CANCELLATION`. Phase 7C continues to own
 correctly confirmed real packaged execution, while Phase 7E owns any legacy
 replacement decision. Phase 7D and Phase 7 remain incomplete.
+
+## Phase 7D4C manual shortcut preflight cancellation
+
+Phase 7D4C is complete from user direct observation plus a read-only static
+post-audit. The installed shortcut launched packaged `start` exactly once,
+displayed the ordered external 11-stage preview and warning, rejected the
+fixed incorrect confirmation, displayed the close pause, and closed normally
+after Enter. No automated transcript or computer capture is claimed.
+
+The run executor was not reached. No UAC, ADB, TCP probe, real workflow, or
+business program was executed, and canonical runtime, log, and report
+directories remained empty. Phase 7D3 retains its composed-evidence basis;
+this later observation adds direct packaged confirmation-cancel evidence.
+
+`phase_7d4c_completed=true`, `phase_7d4_completed=true`, and
+`phase_7d_completed=true`. Phase 7C and Phase 7E remain incomplete, so Phase 7
+is not complete. The next phase is
+`PHASE_7C_AUTHORIZED_REAL_PACKAGED_EXTERNAL_WORKFLOW`, gated by
+`PHASE_7C_REAL_WORKFLOW_AUTHORIZATION`. It must not begin without separate
+explicit authorization. Phase 7E must wait for the Phase 7C result, and the
+legacy PowerShell entry cannot yet be removed.

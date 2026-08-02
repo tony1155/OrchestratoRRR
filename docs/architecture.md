@@ -387,3 +387,25 @@ separately authorized manual shortcut preflight with cancellation before real
 execution. Phase 7C retains the correctly confirmed real packaged workflow,
 and Phase 7E owns any legacy-entry replacement decision. Phase 7D and Phase 7
 remain incomplete.
+
+## Phase 7D4C installed shortcut cancellation boundary
+
+The installed Start Menu shortcut was launched once by the user and directly
+entered the packaged interactive `start` command. User direct observation,
+without an automated transcript or computer capture, confirmed the exact
+external 11-stage preview, real-program warning, confirmation prompt,
+incorrect-confirmation rejection, close pause, and normal window closure.
+
+The committed control flow places the run executor strictly after an exact
+confirmation match. The incorrect value therefore did not reach
+`execute_run_request()`, elevation, ADB, TCP, or any business program. A
+read-only post-run audit found the canonical runtime, log, and report
+directories empty and confirmed that installed artifact, configuration, and
+shortcut properties were unchanged.
+
+Phase 7D3 keeps its original composed-evidence basis; Phase 7D4C supplies later
+direct installed-packaged evidence for the cancellation boundary without
+validating real execution. Phase 7D4 and Phase 7D are complete. Phase 7C owns
+the separately authorized correctly confirmed real packaged external
+workflow. The legacy PowerShell entry remains available in parallel, and
+Phase 7E owns any replacement decision. Phase 7 remains incomplete.
