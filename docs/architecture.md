@@ -365,3 +365,25 @@ product defect. No packaged confirmation cancellation, UAC, or real workflow
 is claimed. Phase 7C retains the correctly confirmed real-execution boundary;
 Phase 7D4 owns parallel deployment and manual operation; Phase 7E owns any
 legacy-entry replacement decision.
+
+## Phase 7D4B canonical parallel installation
+
+The committed first-install-only installer was invoked exactly once with the
+retained Phase 7D2 onedir. Before installation, the ignored machine-local
+configuration passed all source-only default-entry gates and was copied
+byte-for-byte to the canonical configuration location by an atomic rename.
+The installed EXE and bundled schema match the source hashes, and both trees
+contain 106 files.
+
+The installer created the canonical runtime, log, and report directories and
+the Start Menu shortcut. Those directories remained empty. Static shortcut
+inspection confirmed the installed EXE target, the exact `start` argument,
+the canonical runtime working directory, and the product description. The
+shortcut and both packaged executables were not run; no UAC, ADB, TCP, or
+business boundary was entered.
+
+The legacy PowerShell entry remains available in parallel. Phase 7D4C owns a
+separately authorized manual shortcut preflight with cancellation before real
+execution. Phase 7C retains the correctly confirmed real packaged workflow,
+and Phase 7E owns any legacy-entry replacement decision. Phase 7D and Phase 7
+remain incomplete.

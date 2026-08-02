@@ -184,3 +184,19 @@ defect was found. Phase 7D4 is next:
 `PHASE_7D4_PARALLEL_DEPLOYMENT_AND_MANUAL_OPERATIONS`. Phase 7C remains the
 separately authorized real packaged external workflow boundary, and Phase 7E
 continues to own legacy replacement. Phase 7D and Phase 7 remain incomplete.
+
+## Phase 7D4B authorized canonical installation
+
+Phase 7D4B is complete. The ignored local configuration was atomically copied
+to the canonical location after passing all six source-only gates. The
+committed installer ran exactly once, installed the retained Phase 7D2 onedir,
+and created the canonical Start Menu shortcut. Installed EXE/schema hashes and
+the 106-file count match the source artifact; runtime, log, and report
+directories remain empty.
+
+No packaged executable or shortcut was run, and no UAC, ADB, TCP probe, or
+business program was invoked. The legacy PowerShell entry remains available
+in parallel. The next phase is
+`PHASE_7D4C_MANUAL_SHORTCUT_PREFLIGHT_CANCELLATION`. Phase 7C continues to own
+correctly confirmed real packaged execution, while Phase 7E owns any legacy
+replacement decision. Phase 7D and Phase 7 remain incomplete.
