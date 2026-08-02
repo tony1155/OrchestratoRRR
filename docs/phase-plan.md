@@ -146,3 +146,22 @@ real shortcut, packaged execution, rebuild, UAC, ADB, TCP probe, or business
 workflow occurred. Phase 7D2 is next and owns rebuilding plus packaged
 non-business entry tests. Phase 7C remains a separate real-execution approval;
 Phase 7E owns legacy replacement. Phase 7 and Phase 7D are not complete.
+
+## Phase 7D2 rebuild and packaged non-business entry tests
+
+Phase 7D2 is complete. The committed native start entry was rebuilt exactly
+once with the formal onedir script and passed static Analysis, warning,
+schema, resource, and privacy audits. The new packaged executable passed
+version, root help, start help, and a non-interactive start rejection in four
+total launches.
+
+The rejection occurred before canonical path resolution or writes:
+the temporary runner remained empty and synthetic LOCALAPPDATA and APPDATA
+were never created. No correct confirmation, public run, validate, plan,
+isolated workflow, installer, shortcut, UAC, ADB, TCP probe, or business
+program was used.
+
+Phase 7D3 is next and owns packaged default-entry synthetic preflight and
+confirmation cancellation. Phase 7C remains separately authorized real
+execution; Phase 7E owns legacy replacement. Phase 7D and Phase 7 remain
+incomplete.

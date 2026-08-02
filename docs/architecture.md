@@ -320,3 +320,23 @@ defines a Start Menu shortcut with argument start and the canonical runtime
 working directory. Phase 7D1 did not execute that script, create a shortcut,
 rebuild, or run a packaged EXE. Phase 7D2 owns those next non-business checks;
 the legacy PowerShell entry remains retained.
+
+## Phase 7D2 rebuilt packaged default entry
+
+The committed Phase 7D1 source was rebuilt once through the formal onedir
+script. Static Analysis confirms inclusion of default_entry and all required
+CLI, config, run, entry-runtime, isolated-diagnostic, Typer, Click, and JSON
+Schema dependencies. The canonical schema remains the only project data
+resource; no installer, legacy entry, config, logs, reports, tests, or docs are
+bundled.
+
+Four packaged non-business invocations passed: version, root help, start help,
+and non-interactive start. Root help exposes the five public commands, and
+start help exposes only its bounded deadline option. With DEVNULL stdin,
+start returns START_INTERACTIVE_CONSOLE_REQUIRED before resolving canonical
+paths or creating synthetic application-data directories. No workflow,
+confirmation, elevation, adapter, or business boundary was entered.
+
+Phase 7D3 owns the separately authorized packaged synthetic preflight and
+confirmation-cancel scope. Phase 7C remains separate real execution, and the
+legacy PowerShell entry remains retained until a Phase 7E decision.
