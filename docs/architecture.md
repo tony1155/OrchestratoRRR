@@ -458,6 +458,31 @@ closed for manual review, and an outer timeout never triggers product-data
 cleanup.
 
 The maintenance behavior is covered with synthetic Windows filesystem and
-shortcut tests. The real installation has not used these scripts, no packaged
-EXE was run, and the real workflow was not retried. The legacy PowerShell entry
-continues in parallel pending Phase 7C success and a later Phase 7E decision.
+shortcut tests. The real install update has not used the updater, no packaged
+EXE was run, and the real workflow was not retried. A separate authorized
+product-data backup has now completed successfully; the legacy PowerShell
+entry continues in parallel pending Phase 7C success and a later Phase 7E
+decision.
+
+## Phase 7C authorized product-data backup
+
+A separately authorized invocation of the committed product-data backup
+script completed exactly once. The destination is the `LOCALAPPDATA_SIBLING`
+backup root `OrchestratoRRR-Backups`, outside both canonical product data and
+the installed program. The bundle was written to a unique staging sibling,
+fully verified, and atomically finalized.
+
+The versioned manifest records directory presence plus deterministic relative
+paths, sizes, and SHA-256 values. The verified result contains three files and
+11,238 bytes: canonical configuration, the recovered first-failure JSONL, and
+the recovered RunReport. `config`, `logs`, and `run-results` are present while
+`runtime` remains absent. The manifest contains no absolute paths or
+configuration contents.
+
+The source product data was a read-only input and its complete manifest,
+hashes, sizes, and directory states were unchanged after backup. The backup
+bundle remains available as the later updater's mandatory read-only gate. The
+installed artifact and shortcut were unchanged; no runtime was created. This
+phase performed no build, install update, packaged execution, or real
+workflow, and the next artifact and execution stages remain independently
+authorized.

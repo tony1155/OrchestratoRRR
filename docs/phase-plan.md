@@ -259,23 +259,23 @@ only, rejects unchanged source EXE hashes, validates complete source/current/
 staging manifests, uses same-parent directory exchange, restores only a true
 transaction backup, and fails closed on transaction residue.
 
-No real backup, build, reinstall, packaged execution, or workflow retry was
-performed. Therefore `phase_7c_product_data_backup_completed=false`,
-`phase_7c_rebuild_completed=false`, `phase_7c_reinstall_completed=false`,
-`phase_7c_updated_artifact_ready=false`,
-`phase_7c_real_workflow_retry_completed=false`, `phase_7c_completed=false`,
-`phase_7e_completed=false`, and `phase_7_completed=false`.
+A separately authorized real product-data backup has completed exactly once.
+The finalized bundle passed independent manifest, hash, privacy, source
+consistency, and post-backup preservation checks. `config`, `logs`, and
+`run-results` are present; `runtime` remains absent and was not created.
+`phase_7c_product_data_backup_completed=true` and
+`phase_7c_product_data_backup_bundle_ready=true`.
 
-The implementation review and focused revalidation are complete. The next
-phase is `PHASE_7C_INSTALL_UPDATE_IMPLEMENTATION_COMMIT`. Remaining blockers
-are `PHASE_7C_INSTALL_UPDATE_IMPLEMENTATION_COMMIT_REQUIRED`,
-`PHASE_7C_PRODUCT_DATA_BACKUP_REQUIRED`,
+The implementation remains complete, while rebuild, reinstall, updated-artifact
+readiness, real workflow retry, Phase 7C, Phase 7E, and Phase 7 remain
+incomplete. The next phase is
+`PHASE_7C_PRODUCT_DATA_BACKUP_COMMIT`. Remaining blockers are
+`PHASE_7C_PRODUCT_DATA_BACKUP_COMMIT_REQUIRED`,
 `PHASE_7C_UPDATED_ARTIFACT_REQUIRED`, and
 `PHASE_7C_REAL_WORKFLOW_RETRY_AUTHORIZATION`.
 
-Required order after commit: push the tested maintenance scripts; separately
-authorize a real product-data backup; separately run the formal rebuild;
-statically audit the artifact; separately authorize install update; statically
-audit the installed artifact; and separately authorize the real workflow
-retry. Phase 7E may begin only after Phase 7C succeeds. The legacy PowerShell
-entry remains retained.
+Required order after the backup commit: separately authorize the formal
+rebuild; statically audit the new artifact; separately authorize install
+update; statically audit the installed artifact; and separately authorize the
+real workflow retry. Phase 7E may begin only after Phase 7C succeeds. The
+legacy PowerShell entry remains retained.
