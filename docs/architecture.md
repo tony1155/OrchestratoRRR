@@ -409,3 +409,26 @@ validating real execution. Phase 7D4 and Phase 7D are complete. Phase 7C owns
 the separately authorized correctly confirmed real packaged external
 workflow. The legacy PowerShell entry remains available in parallel, and
 Phase 7E owns any replacement decision. Phase 7 remains incomplete.
+
+## Phase 7C StarRail dynamic log selection
+
+The first real packaged external attempt exposed a StarRail log-contract
+mismatch: the configured date-rendered path remained absent while the external
+tool created a matching same-directory file with a nonempty time component.
+The configured completion marker had independent historical support, so the
+fix changes log discovery rather than keyword semantics.
+
+StarRail log monitoring now uses a pre-launch snapshot and one active
+candidate. Dynamic discovery is enabled only when a single `{date}` token is
+in the template's final filename component. Matching is bounded by the fixed
+prefix, rendered date, nonempty inserted component, and fixed suffix. Scanning
+is nonrecursive, remains in the configured parent, accepts only ordinary
+non-reparse files, and never selects by newest mtime.
+
+Pre-existing candidates start at snapshot EOF, while new, replaced, or
+truncated candidates are read from new content. Exactly one changed candidate
+is pinned for the run; competing candidates fail closed. Fixed-path cursor,
+rotation, bounded-read, failure-first, case-sensitive marker, process cleanup,
+and exit-zero-without-success contracts are unchanged. The installed artifact
+does not yet contain this source fix; rebuilding and parallel reinstallation
+belong to the next separately authorized phase.

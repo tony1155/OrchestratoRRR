@@ -25,7 +25,7 @@ from autogame_orchestrator.process import (
 from autogame_orchestrator.process.errors import TerminationReason
 from autogame_orchestrator.runtime.starrail_log import (
     MAX_LOG_READ_BYTES,
-    capture_log_cursor,
+    capture_starrail_log_snapshot,
     match_starrail_keyword,
     read_log_update,
     resolve_starrail_log_path,
@@ -137,8 +137,10 @@ class StarRailAdapter:
             effective_deadline = Deadline.after(min(config_seconds, deadline.remaining_seconds))
 
         try:
-            log_cursor = capture_log_cursor(log_path)
+            log_tracker = capture_starrail_log_snapshot(self._config)
         except OSError as exc:
+            primary_error = getattr(exc, "primary_error", "LOG_DISCOVERY_FAILED")
+            candidate_count = getattr(exc, "candidate_count", 0)
             return StarRailRunResult.from_monotonic(
                 status=StarRailRunStatus.FAILED,
                 error_code=StarRailErrorCode.LOG_READ_FAILED,
@@ -148,7 +150,11 @@ class StarRailAdapter:
                 pid=None,
                 log_path=str(log_path),
                 owned_process_cleaned=True,
-                diagnostics={"exception_type": type(exc).__name__},
+                diagnostics={
+                    "primary_error": primary_error,
+                    "candidate_count": candidate_count,
+                    "exception_type": type(exc).__name__,
+                },
             )
 
         try:
@@ -211,7 +217,7 @@ class StarRailAdapter:
                         started_at_monotonic=started_at_mono,
                         pid=pid,
                         exit_code=ec,
-                        log_path=str(log_path),
+                        log_path=str(log_tracker.log_path),
                         owned_process_cleaned=out.cleaned,
                         stdout_excerpt=out.stdout_excerpt,
                         stderr_excerpt=out.stderr_excerpt,
@@ -231,7 +237,7 @@ class StarRailAdapter:
                         started_at_monotonic=started_at_mono,
                         pid=pid,
                         exit_code=ec,
-                        log_path=str(log_path),
+                        log_path=str(log_tracker.log_path),
                         owned_process_cleaned=out.cleaned,
                         stdout_excerpt=out.stdout_excerpt,
                         stderr_excerpt=out.stderr_excerpt,
@@ -240,10 +246,15 @@ class StarRailAdapter:
                     )
 
                 try:
-                    update = read_log_update(log_cursor, max_bytes=MAX_LOG_READ_BYTES)
+                    log_cursor = log_tracker.discover()
+                    update = (
+                        read_log_update(log_cursor, max_bytes=MAX_LOG_READ_BYTES) if log_cursor is not None else None
+                    )
                 except OSError as exc:
                     out = self._stop_and_collect(supervisor, managed, stdout_path, stderr_path)
                     code = StarRailErrorCode.LOG_READ_FAILED if out.cleaned else StarRailErrorCode.CLEANUP_FAILED
+                    primary_error = getattr(exc, "primary_error", "LOG_READ_FAILED")
+                    candidate_count = getattr(exc, "candidate_count", 0)
                     return StarRailRunResult.from_monotonic(
                         status=StarRailRunStatus.FAILED,
                         error_code=code,
@@ -251,16 +262,20 @@ class StarRailAdapter:
                         started_at=started_at,
                         started_at_monotonic=started_at_mono,
                         pid=pid,
-                        log_path=str(log_path),
+                        log_path=str(log_tracker.log_path),
                         owned_process_cleaned=out.cleaned,
                         stdout_excerpt=out.stdout_excerpt,
                         stderr_excerpt=out.stderr_excerpt,
                         stdout_truncated=out.stdout_truncated,
                         stderr_truncated=out.stderr_truncated,
-                        diagnostics={"primary_error": "LOG_READ_FAILED", "exception_type": type(exc).__name__},
+                        diagnostics={
+                            "primary_error": primary_error,
+                            "candidate_count": candidate_count,
+                            "exception_type": type(exc).__name__,
+                        },
                     )
 
-                if update.overflow:
+                if update is not None and update.overflow:
                     out = self._stop_and_collect(supervisor, managed, stdout_path, stderr_path)
                     code = StarRailErrorCode.LOG_OUTPUT_LIMIT if out.cleaned else StarRailErrorCode.CLEANUP_FAILED
                     return StarRailRunResult.from_monotonic(
@@ -270,7 +285,7 @@ class StarRailAdapter:
                         started_at=started_at,
                         started_at_monotonic=started_at_mono,
                         pid=pid,
-                        log_path=str(log_path),
+                        log_path=str(log_tracker.log_path),
                         owned_process_cleaned=out.cleaned,
                         stdout_excerpt=out.stdout_excerpt,
                         stderr_excerpt=out.stderr_excerpt,
@@ -280,7 +295,7 @@ class StarRailAdapter:
                     )
 
                 match = match_starrail_keyword(
-                    log_cursor.rolling_text,
+                    log_cursor.rolling_text if log_cursor is not None else "",
                     success_keywords=self._config.success_keywords,
                     failure_keywords=self._config.failure_keywords,
                 )
@@ -295,7 +310,7 @@ class StarRailAdapter:
                             started_at_monotonic=started_at_mono,
                             pid=pid,
                             matched_keyword=match.keyword,
-                            log_path=str(log_path),
+                            log_path=str(log_tracker.log_path),
                             owned_process_cleaned=True,
                             stdout_excerpt=out.stdout_excerpt,
                             stderr_excerpt=out.stderr_excerpt,
@@ -311,7 +326,7 @@ class StarRailAdapter:
                         started_at_monotonic=started_at_mono,
                         pid=pid,
                         matched_keyword=match.keyword,
-                        log_path=str(log_path),
+                        log_path=str(log_tracker.log_path),
                         owned_process_cleaned=False,
                         stdout_excerpt=out.stdout_excerpt,
                         stderr_excerpt=out.stderr_excerpt,
@@ -331,7 +346,7 @@ class StarRailAdapter:
                             started_at_monotonic=started_at_mono,
                             pid=pid,
                             matched_keyword=match.keyword,
-                            log_path=str(log_path),
+                            log_path=str(log_tracker.log_path),
                             owned_process_cleaned=True,
                             stdout_excerpt=out.stdout_excerpt,
                             stderr_excerpt=out.stderr_excerpt,
@@ -346,7 +361,7 @@ class StarRailAdapter:
                         started_at_monotonic=started_at_mono,
                         pid=pid,
                         matched_keyword=match.keyword,
-                        log_path=str(log_path),
+                        log_path=str(log_tracker.log_path),
                         owned_process_cleaned=False,
                         stdout_excerpt=out.stdout_excerpt,
                         stderr_excerpt=out.stderr_excerpt,
@@ -369,7 +384,7 @@ class StarRailAdapter:
                                 started_at_monotonic=started_at_mono,
                                 pid=pid,
                                 exit_code=ec,
-                                log_path=str(log_path),
+                                log_path=str(log_tracker.log_path),
                                 owned_process_cleaned=True,
                                 stdout_excerpt=out.stdout_excerpt,
                                 stderr_excerpt=out.stderr_excerpt,
@@ -384,7 +399,7 @@ class StarRailAdapter:
                             started_at_monotonic=started_at_mono,
                             pid=pid,
                             exit_code=ec,
-                            log_path=str(log_path),
+                            log_path=str(log_tracker.log_path),
                             owned_process_cleaned=True,
                             stdout_excerpt=out.stdout_excerpt,
                             stderr_excerpt=out.stderr_excerpt,
@@ -400,7 +415,7 @@ class StarRailAdapter:
                         started_at_monotonic=started_at_mono,
                         pid=pid,
                         exit_code=ec,
-                        log_path=str(log_path),
+                        log_path=str(log_tracker.log_path),
                         owned_process_cleaned=False,
                         stdout_excerpt=out.stdout_excerpt,
                         stderr_excerpt=out.stderr_excerpt,
@@ -436,7 +451,7 @@ class StarRailAdapter:
                 started_at=started_at,
                 started_at_monotonic=started_at_mono,
                 pid=managed.pid if managed else None,
-                log_path=str(log_path) if managed else "",
+                log_path=str(log_tracker.log_path) if managed else "",
                 owned_process_cleaned=collected.cleaned if collected else False,
                 diagnostics={"exception_type": type(exc).__name__},
             )

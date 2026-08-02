@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import locale
+import os
+import stat as stat_module
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +16,9 @@ from autogame_orchestrator.config_model import StarRailConfig
 
 MAX_LOG_READ_BYTES = 64 * 1024
 MAX_LOG_ROLLING_CHARS = 64 * 1024
+MAX_LOG_CANDIDATES = 128
+LOG_CANDIDATE_AMBIGUOUS = "LOG_CANDIDATE_AMBIGUOUS"
+LOG_DISCOVERY_FAILED = "LOG_DISCOVERY_FAILED"
 
 
 @dataclass
@@ -37,6 +42,101 @@ class StarRailKeywordMatch:
     keyword: str
 
 
+@dataclass(frozen=True)
+class StarRailLogCandidateSnapshot:
+    path: Path
+    file_identity: tuple[int, int]
+    size: int
+    is_exact: bool
+
+
+@dataclass(frozen=True)
+class StarRailLogTemplateSpec:
+    exact_path: Path
+    dynamic_discovery_enabled: bool
+    filename_prefix: str
+    filename_suffix: str
+
+    def matches_name(self, name: str) -> bool:
+        if name == self.exact_path.name:
+            return True
+        if not self.dynamic_discovery_enabled:
+            return False
+        if not name.startswith(self.filename_prefix) or not name.endswith(self.filename_suffix):
+            return False
+        insertion_end = len(name) - len(self.filename_suffix) if self.filename_suffix else len(name)
+        return insertion_end > len(self.filename_prefix)
+
+
+class StarRailLogDiscoveryError(OSError):
+    """Fail-closed bounded log candidate discovery error."""
+
+    def __init__(self, primary_error: str, candidate_count: int) -> None:
+        super().__init__(primary_error)
+        self.primary_error = primary_error
+        self.candidate_count = candidate_count
+
+
+class StarRailLogTracker:
+    """Track one bounded log candidate from a pre-launch directory snapshot."""
+
+    def __init__(
+        self,
+        spec: StarRailLogTemplateSpec,
+        snapshot: tuple[StarRailLogCandidateSnapshot, ...],
+    ) -> None:
+        self.spec = spec
+        self.snapshot = snapshot
+        self.active_cursor: StarRailLogCursor | None = None
+        self._snapshot_by_path = {_path_key(item.path): item for item in snapshot}
+
+    @property
+    def log_path(self) -> Path:
+        if self.active_cursor is not None:
+            return self.active_cursor.path
+        return self.spec.exact_path
+
+    def discover(self) -> StarRailLogCursor | None:
+        """Activate exactly one candidate changed since the pre-launch snapshot."""
+        current = _scan_log_candidates(self.spec)
+        changed = [item for item in current if self._changed_since_snapshot(item)]
+
+        if self.active_cursor is not None:
+            active_key = _path_key(self.active_cursor.path)
+            competing = [item for item in changed if _path_key(item.path) != active_key]
+            if competing:
+                raise StarRailLogDiscoveryError(LOG_CANDIDATE_AMBIGUOUS, 1 + len(competing))
+            return self.active_cursor
+
+        if not changed:
+            return None
+        if len(changed) > 1:
+            raise StarRailLogDiscoveryError(LOG_CANDIDATE_AMBIGUOUS, len(changed))
+
+        candidate = changed[0]
+        previous = self._snapshot_by_path.get(_path_key(candidate.path))
+        offset = 0
+        if (
+            previous is not None
+            and previous.file_identity == candidate.file_identity
+            and candidate.size >= previous.size
+        ):
+            offset = previous.size
+        self.active_cursor = StarRailLogCursor(
+            path=candidate.path,
+            offset=offset,
+            file_identity=candidate.file_identity,
+            rolling_text="",
+        )
+        return self.active_cursor
+
+    def _changed_since_snapshot(self, candidate: StarRailLogCandidateSnapshot) -> bool:
+        previous = self._snapshot_by_path.get(_path_key(candidate.path))
+        if previous is None:
+            return True
+        return previous.file_identity != candidate.file_identity or previous.size != candidate.size
+
+
 def resolve_starrail_log_path(config: StarRailConfig, *, now: datetime | None = None) -> Path:
     """解析日志路径，替换 {date} 占位符为当前本地日期。"""
     effective_now = now or datetime.now()
@@ -52,6 +152,73 @@ def resolve_starrail_log_path(config: StarRailConfig, *, now: datetime | None = 
         path = Path(config.working_directory) / rendered
 
     return path.resolve(strict=False)
+
+
+def capture_starrail_log_snapshot(
+    config: StarRailConfig, *, now: datetime | None = None
+) -> StarRailLogTracker:
+    """Capture all bounded matching candidates before the managed process starts."""
+    spec = _build_log_template_spec(config, now=now)
+    return StarRailLogTracker(spec, _scan_log_candidates(spec))
+
+
+def _build_log_template_spec(config: StarRailConfig, *, now: datetime | None = None) -> StarRailLogTemplateSpec:
+    effective_now = now or datetime.now()
+    date_str = effective_now.strftime("%Y-%m-%d")
+    exact_path = resolve_starrail_log_path(config, now=effective_now)
+    template_path = Path(config.log_path_template)
+    filename = template_path.name
+    dynamic_enabled = filename.count("{date}") == 1 and "{date}" not in str(template_path.parent)
+    prefix = exact_path.name
+    suffix = ""
+    if dynamic_enabled:
+        before, after = filename.split("{date}", 1)
+        prefix = before + date_str
+        suffix = after
+    return StarRailLogTemplateSpec(
+        exact_path=exact_path,
+        dynamic_discovery_enabled=dynamic_enabled,
+        filename_prefix=prefix,
+        filename_suffix=suffix,
+    )
+
+
+def _scan_log_candidates(spec: StarRailLogTemplateSpec) -> tuple[StarRailLogCandidateSnapshot, ...]:
+    paths: list[Path]
+    if spec.dynamic_discovery_enabled:
+        paths = [path for path in spec.exact_path.parent.iterdir() if spec.matches_name(path.name)]
+    else:
+        paths = [spec.exact_path] if spec.exact_path.exists() else []
+
+    if len(paths) > MAX_LOG_CANDIDATES:
+        raise StarRailLogDiscoveryError(LOG_DISCOVERY_FAILED, len(paths))
+
+    candidates: list[StarRailLogCandidateSnapshot] = []
+    for path in paths:
+        try:
+            item_stat = path.lstat()
+        except FileNotFoundError:
+            continue
+        attributes = getattr(item_stat, "st_file_attributes", 0)
+        reparse_flag = getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        if path.is_symlink() or (reparse_flag and attributes & reparse_flag):
+            raise StarRailLogDiscoveryError(LOG_DISCOVERY_FAILED, len(paths))
+        if not stat_module.S_ISREG(item_stat.st_mode):
+            continue
+        resolved = path.resolve(strict=False)
+        candidates.append(
+            StarRailLogCandidateSnapshot(
+                path=resolved,
+                file_identity=(item_stat.st_dev, item_stat.st_ino),
+                size=item_stat.st_size,
+                is_exact=_path_key(resolved) == _path_key(spec.exact_path),
+            )
+        )
+    return tuple(candidates)
+
+
+def _path_key(path: Path) -> str:
+    return os.path.normcase(str(path.resolve(strict=False)))
 
 
 def capture_log_cursor(path: Path) -> StarRailLogCursor:

@@ -5,15 +5,21 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
+
+import pytest
 
 from autogame_orchestrator.config_model import StarRailConfig
 from autogame_orchestrator.process import CancellationToken, Deadline, ManagedProcess, ProcessSupervisor
 from autogame_orchestrator.runtime.starrail import StarRailAdapter
 from autogame_orchestrator.runtime.starrail_log import (
+    LOG_CANDIDATE_AMBIGUOUS,
     MAX_LOG_READ_BYTES,
+    StarRailLogDiscoveryError,
     capture_log_cursor,
+    capture_starrail_log_snapshot,
     match_starrail_keyword,
     read_log_update,
     resolve_starrail_log_path,
@@ -54,17 +60,34 @@ def _make_config(
     executable: Path = _PYTHON,
     working_directory: str | None = None,
     log_file: str | None = None,
+    configured_log_file: str | None = None,
+    emitted_log_file: str | None = None,
     child_pid_file: str | None = None,
+    delay_seconds: float = 0.0,
     timeout_seconds: int = 120,
 ) -> tuple[StarRailConfig, str, str]:
     import tempfile
 
     tmp_dir = tempfile.mkdtemp(prefix="sr-test-")
     wd = working_directory or tmp_dir
-    lg = log_file or os.path.join(tmp_dir, "log", f"{time.strftime('%Y-%m-%d')}_src.txt")
-    os.makedirs(Path(lg).parent, exist_ok=True)
+    configured_log = configured_log_file or log_file or os.path.join(
+        tmp_dir, "log", f"{time.strftime('%Y-%m-%d')}_src.txt"
+    )
+    emitted_log = emitted_log_file or log_file or configured_log
+    os.makedirs(Path(configured_log).parent, exist_ok=True)
+    os.makedirs(Path(emitted_log).parent, exist_ok=True)
 
-    args = [_FAKE_SR, "--mode", mode, "--log-file", lg, "--pid-file", os.path.join(tmp_dir, "pid.txt")]
+    args = [
+        _FAKE_SR,
+        "--mode",
+        mode,
+        "--log-file",
+        emitted_log,
+        "--pid-file",
+        os.path.join(tmp_dir, "pid.txt"),
+        "--delay-seconds",
+        str(delay_seconds),
+    ]
     if child_pid_file:
         args.extend(["--child-pid-file", child_pid_file])
 
@@ -72,13 +95,13 @@ def _make_config(
         executable=str(executable),
         working_directory=wd,
         arguments=tuple(args),
-        log_path_template=lg,
+        log_path_template=configured_log,
         success_keywords=("No task pending", "for task `Restart`"),
         failure_keywords=("ScriptError:", "Request human takeover", "Retry screenshot() failed", "NemuIpcError"),
         task_timeout_seconds=timeout_seconds,
         stop_timeout_seconds=2,
     )
-    return cfg, lg, tmp_dir
+    return cfg, emitted_log, tmp_dir
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -209,6 +232,45 @@ def test_replaced_log_after_first_creation_is_rotated(tmp_path: Path) -> None:
     assert cursor.file_identity != first_identity
 
 
+def test_dynamic_log_tracker_rejects_multiple_changed_candidates(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    template = log_dir / "{date}_src.txt"
+    cfg, _, _ = _make_config(mode="hang", configured_log_file=str(template))
+    tracker = capture_starrail_log_snapshot(cfg)
+    date = time.strftime("%Y-%m-%d")
+    (log_dir / f"{date}_18-09-24_src.txt").write_text("one", encoding="utf-8")
+    (log_dir / f"{date}-18.09.25_src.txt").write_text("two", encoding="utf-8")
+
+    with pytest.raises(StarRailLogDiscoveryError) as exc_info:
+        tracker.discover()
+
+    assert exc_info.value.primary_error == LOG_CANDIDATE_AMBIGUOUS
+    assert exc_info.value.candidate_count == 2
+
+
+def test_dynamic_log_tracker_ignores_nonmatching_siblings(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    template = log_dir / "{date}_src.txt"
+    cfg, _, _ = _make_config(mode="hang", configured_log_file=str(template))
+    tracker = capture_starrail_log_snapshot(cfg)
+    date = time.strftime("%Y-%m-%d")
+    expected = log_dir / f"{date}_18-09-24_src.txt"
+    expected.write_text("new", encoding="utf-8")
+    (log_dir / f"{date}_wrong.txt").write_text("wrong suffix", encoding="utf-8")
+    (log_dir / "1999-01-01_18-09-24_src.txt").write_text("wrong date", encoding="utf-8")
+    nested = log_dir / "nested"
+    nested.mkdir()
+    (nested / f"{date}_18-09-25_src.txt").write_text("nested", encoding="utf-8")
+
+    cursor = tracker.discover()
+
+    assert cursor is not None
+    assert cursor.path == expected.resolve()
+    assert cursor.offset == 0
+
+
 # ════════════════════════════════════════════════════════════════════
 # Adapter 集成测试
 # ════════════════════════════════════════════════════════════════════
@@ -225,6 +287,118 @@ def test_success_keyword_completes_and_cleans_process(tmp_path: Path) -> None:
     assert result.owned_process_cleaned is True
     assert result.pid is not None
     _check_pid_exited(result.pid, "success父进程")
+
+
+def test_dynamic_time_log_is_discovered_and_completes(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log"
+    configured = log_dir / "{date}_src.txt"
+    emitted = log_dir / f"{time.strftime('%Y-%m-%d')}_18-09-24_src.txt"
+    cfg, _, _ = _make_config(
+        mode="success_log",
+        configured_log_file=str(configured),
+        emitted_log_file=str(emitted),
+    )
+    result = StarRailAdapter(cfg, poll_interval_seconds=0.05).run(Deadline.after(10.0))
+
+    assert result.status == StarRailRunStatus.COMPLETED
+    assert result.error_code == StarRailErrorCode.OK
+    assert result.completion_mode == StarRailCompletionMode.LOG_SUCCESS
+    assert result.matched_keyword == "No task pending"
+    assert result.log_path == str(emitted.resolve())
+    assert result.owned_process_cleaned is True
+    assert result.pid is not None
+    _check_pid_exited(result.pid, "dynamic log parent")
+
+
+def test_prelaunch_dynamic_log_success_is_ignored(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    configured = log_dir / "{date}_src.txt"
+    emitted = log_dir / f"{time.strftime('%Y-%m-%d')}_18-09-24_src.txt"
+    emitted.write_text("No task pending", encoding="utf-8")
+    cfg, _, _ = _make_config(
+        mode="hang",
+        configured_log_file=str(configured),
+        emitted_log_file=str(emitted),
+    )
+
+    result = StarRailAdapter(cfg, poll_interval_seconds=0.05).run(Deadline.after(0.4))
+
+    assert result.status == StarRailRunStatus.TIMEOUT
+    assert result.matched_keyword == ""
+
+
+def test_prelaunch_dynamic_log_reads_only_new_append(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    configured = log_dir / "{date}_src.txt"
+    emitted = log_dir / f"{time.strftime('%Y-%m-%d')}-18.09.24_src.txt"
+    emitted.write_text("No task pending\nold session\n", encoding="utf-8")
+    cfg, _, _ = _make_config(
+        mode="success_log",
+        configured_log_file=str(configured),
+        emitted_log_file=str(emitted),
+        delay_seconds=0.2,
+    )
+    started = time.monotonic()
+
+    result = StarRailAdapter(cfg, poll_interval_seconds=0.05).run(Deadline.after(10.0))
+
+    assert time.monotonic() - started >= 0.15
+    assert result.status == StarRailRunStatus.COMPLETED
+    assert result.matched_keyword == "No task pending"
+    assert result.log_path == str(emitted.resolve())
+
+
+def test_new_dynamic_log_without_keyword_exit_zero_fails(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    configured = log_dir / "{date}_src.txt"
+    emitted = log_dir / f"{time.strftime('%Y-%m-%d')}_18-09-24_src.txt"
+    cfg, _, _ = _make_config(
+        mode="exit_zero",
+        configured_log_file=str(configured),
+        emitted_log_file=str(emitted),
+        delay_seconds=0.3,
+    )
+
+    def create_empty_candidate() -> None:
+        time.sleep(0.1)
+        emitted.write_text("", encoding="utf-8")
+
+    writer = threading.Thread(target=create_empty_candidate, daemon=True)
+    writer.start()
+    result = StarRailAdapter(cfg, poll_interval_seconds=0.05).run(Deadline.after(5.0))
+    writer.join(timeout=1.0)
+
+    assert result.status == StarRailRunStatus.FAILED
+    assert result.error_code == StarRailErrorCode.PROCESS_EXIT_BEFORE_SUCCESS
+    assert result.exit_code == 0
+    assert result.log_path == str(emitted.resolve())
+
+
+def test_multiple_runtime_dynamic_candidates_fail_closed(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    configured = log_dir / "{date}_src.txt"
+    cfg, _, _ = _make_config(mode="hang", configured_log_file=str(configured))
+    date = time.strftime("%Y-%m-%d")
+
+    def create_candidates() -> None:
+        time.sleep(0.1)
+        (log_dir / f"{date}_18-09-24_src.txt").write_text("one", encoding="utf-8")
+        (log_dir / f"{date}_18-09-25_src.txt").write_text("two", encoding="utf-8")
+
+    writer = threading.Thread(target=create_candidates, daemon=True)
+    writer.start()
+    result = StarRailAdapter(cfg, poll_interval_seconds=0.05).run(Deadline.after(5.0))
+    writer.join(timeout=1.0)
+
+    assert result.status == StarRailRunStatus.FAILED
+    assert result.error_code == StarRailErrorCode.LOG_READ_FAILED
+    assert result.completion_mode == StarRailCompletionMode.LOG_ERROR
+    assert result.diagnostics["primary_error"] == LOG_CANDIDATE_AMBIGUOUS
+    assert result.diagnostics["candidate_count"] == 2
 
 
 def test_restart_success_keyword_completes(tmp_path: Path) -> None:

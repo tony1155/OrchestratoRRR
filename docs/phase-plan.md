@@ -221,3 +221,24 @@ is not complete. The next phase is
 `PHASE_7C_REAL_WORKFLOW_AUTHORIZATION`. It must not begin without separate
 explicit authorization. Phase 7E must wait for the Phase 7C result, and the
 legacy PowerShell entry cannot yet be removed.
+
+## Phase 7C StarRail log-contract correction
+
+The failure review and source correction are complete:
+`phase_7c_starrail_failure_review_completed=true` and
+`phase_7c_starrail_log_contract_fix_completed=true`. The first real attempt
+failed at `run_starrail` because the fixed rendered log path did not discover
+the external tool's same-directory dynamic time-component log.
+
+The corrected runtime uses bounded pre-launch candidate snapshots, excludes
+historical content by EOF, starts new candidates at zero, pins one active
+candidate, and fails closed on ambiguity. Focused automatic tests and
+file-scoped static checks passed. No package was rebuilt or installed, and no
+real workflow was rerun.
+
+`phase_7c_completed=false`, `phase_7e_completed=false`, and
+`phase_7_completed=false`. The next phase is
+`PHASE_7C_REBUILD_REINSTALL_FOR_RETRY`. Remaining blockers are
+`PHASE_7C_UPDATED_ARTIFACT_REQUIRED` and
+`PHASE_7C_REAL_WORKFLOW_RETRY_AUTHORIZATION`. The legacy PowerShell entry
+remains retained.
