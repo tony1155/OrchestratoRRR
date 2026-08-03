@@ -37,6 +37,10 @@ from autogame_orchestrator.runtime.starrail_models import (
     StarRailRunResult,
     StarRailRunStatus,
 )
+from autogame_orchestrator.runtime.starrail_port import (
+    PortAllocationError,
+    resolve_launch_arguments,
+)
 
 DEFAULT_POLL_INTERVAL_SECONDS = 0.05
 MAX_STDOUT_BYTES = 64 * 1024
@@ -175,10 +179,28 @@ class StarRailAdapter:
         stderr_path = td / "stderr.bin"
         env_overrides = dict(self._config.environment_overrides)
 
+        try:
+            resolved_arguments = resolve_launch_arguments(self._config.arguments)
+        except PortAllocationError:
+            try:
+                tmp_dir.cleanup()
+            except Exception:
+                pass
+            return StarRailRunResult.from_monotonic(
+                status=StarRailRunStatus.FAILED,
+                error_code=StarRailErrorCode.PORT_ALLOCATION_FAILED,
+                completion_mode=StarRailCompletionMode.START_FAILURE,
+                started_at=started_at,
+                started_at_monotonic=started_at_mono,
+                pid=None,
+                owned_process_cleaned=True,
+                diagnostics={"primary_error": "PORT_ALLOCATION_FAILED"},
+            )
+
         spec = ProcessSpec(
             name="starrail_copilot",
             executable=executable,
-            arguments=self._config.arguments,
+            arguments=resolved_arguments,
             working_directory=wd,
             environment_overrides=env_overrides,
             stdout_path=stdout_path,
