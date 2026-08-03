@@ -528,16 +528,22 @@ was removed only after the installed manifest, hashes, shortcut, and product
 data post-checks passed; `true_backup_rollback=false` records the normal
 success path, not a reconstructed rollback.
 
-The installed manifest exactly matches the source: 106 files, 28,633,496
+The installed manifest exactly matches the source: 106 files, 28,636,334
 bytes, EXE SHA-256
-`3080F16D772449AD4C455D9A8CFA37FFE238D4C4DEEA77AEC309C2EF2F07B22D`, schema
+`9EEDF9FC4720BA6209439EA96F39BBE21C2E765A7386403D829707DA091A9C7C`, schema
 SHA-256
 `1994EB5915DA0079FD270412D48EA4562FA5EB4172F8BA7E8E98B9A17791F2CD`, and
 fingerprint
-`D240028EE8920159890ABE27AFA68A640118D49CA420416A460208E4B0480D6E`.
+`D00498B3E01938AD55DF01F89BC32EF6F5911B2B0C17825CF6D46D373E805A78`.
+The most recent install update promoted the rebuilt PROGRAM_PORT onedir over
+the earlier installed EXE
+`3080F16D772449AD4C455D9A8CFA37FFE238D4C4DEEA77AEC309C2EF2F07B22D`; the
+PROGRAM_PORT fix code is present in the installed artifact while its real
+runtime effect remains unverified.
 The artifact privacy and project-resource audits passed. The source dist,
-product data, backup bundle, and shortcut were unchanged; runtime remains
-absent; and all install transaction residue counts are zero.
+product data, backup bundles, and shortcut were unchanged; runtime is present
+in the current product data; and all install transaction residue counts are
+zero.
 
 No source or installed EXE was executed, and no workflow, UAC, ADB, TCP, or
 business program was invoked. The installed artifact audit is complete, but

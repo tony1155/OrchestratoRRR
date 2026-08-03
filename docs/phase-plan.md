@@ -352,3 +352,56 @@ commit this install-update audit documentation; separately authorize the
 repaired real packaged external workflow retry; audit its RunReport, JSONL,
 all 11 stages, and business-program cleanup; then enter Phase 7E only after
 Phase 7C succeeds. The legacy PowerShell entry remains retained.
+
+## Phase 7C PROGRAM_PORT install update and installed-artifact audit
+
+A separately authorized real install update promoted the rebuilt PROGRAM_PORT
+onedir into the canonical installed location at baseline
+`c8ea36103f8015dac194de1a334906df9386efc6`. An independent read-only precheck
+passed first. The first foreground wrapper attempt failed during construction
+because Windows PowerShell 5.1 does not expose
+`ProcessStartInfo.ArgumentList`; that `PRE_INVOCATION_WRAPPER_ERROR` created no
+child process, made no filesystem change, and was not an updater retry. After
+the wrapper was corrected, the committed updater was invoked exactly once,
+returned exit code zero with its success JSON and empty stderr, and performed
+no rollback and no retry.
+
+The installed artifact now matches the approved new dist exactly: 106 files,
+28,636,334 bytes, EXE SHA-256
+`9EEDF9FC4720BA6209439EA96F39BBE21C2E765A7386403D829707DA091A9C7C`, schema
+SHA-256
+`1994EB5915DA0079FD270412D48EA4562FA5EB4172F8BA7E8E98B9A17791F2CD`, and
+fingerprint
+`D00498B3E01938AD55DF01F89BC32EF6F5911B2B0C17825CF6D46D373E805A78`. The
+PROGRAM_PORT fix code is present in the installed artifact, but its real
+runtime effect remains unverified. Current product data stayed five files and
+20,144 bytes with runtime present, unchanged file-by-file. The old and new
+backup bundles each remained individually unchanged and are distinct bundles.
+The shortcut and all transaction-residue checks were unchanged. No packaged
+EXE, workflow, or business program was executed.
+
+phase_7c_product_data_forensics_completed=true
+phase_7c_product_data_recovery_completed=true
+phase_7c_install_update_implementation_completed=true
+phase_7c_product_data_backup_completed=true
+phase_7c_product_data_backup_bundle_ready=true
+phase_7c_rebuild_retry_completed=true
+phase_7c_rebuild_completed=true
+phase_7c_dist_artifact_audit_completed=true
+phase_7c_updated_artifact_ready=true
+phase_7c_reinstall_completed=true
+phase_7c_installed_artifact_audit_completed=true
+phase_7c_program_port_reinstall_completed=true
+phase_7c_program_port_installed_artifact_audit_completed=true
+phase_7c_real_workflow_retry_completed=false
+phase_7c_completed=false
+phase_7e_completed=false
+phase_7_completed=false
+legacy_powershell_replacement_ready=false
+
+The next phase is PHASE_7C_AUTHORIZED_REAL_PACKAGED_EXTERNAL_WORKFLOW, gated by
+PHASE_7C_REAL_WORKFLOW_RETRY_AUTHORIZATION. It must not begin without separate
+explicit authorization. The required order is: separately authorize the
+repaired real packaged external workflow retry; audit its RunReport, JSONL,
+all 11 stages, and business-program cleanup; then enter Phase 7E only after
+Phase 7C succeeds. The legacy PowerShell entry remains retained.
