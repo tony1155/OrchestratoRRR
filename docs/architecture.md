@@ -458,11 +458,12 @@ closed for manual review, and an outer timeout never triggers product-data
 cleanup.
 
 The maintenance behavior is covered with synthetic Windows filesystem and
-shortcut tests. The real install update has not used the updater, no packaged
-EXE was run, and the real workflow was not retried. A separate authorized
-product-data backup has now completed successfully; the legacy PowerShell
-entry continues in parallel pending Phase 7C success and a later Phase 7E
-decision.
+shortcut tests. At implementation completion the real install update had not
+yet used the updater; the later authorized transaction is recorded below. No
+packaged EXE was run and the real workflow was not retried. A separate
+authorized product-data backup has completed successfully; the legacy
+PowerShell entry continues in parallel pending Phase 7C success and a later
+Phase 7E decision.
 
 ## Phase 7C authorized product-data backup
 
@@ -500,12 +501,46 @@ native stderr was retained as ordinary diagnostic text.
 Build, product-data backup, and install update remain separate operations. The
 retry artifact passed full onedir manifest, schema, TOC, module-collection,
 warning, privacy, and project-resource audits. The StarRail dynamic-log fix was
-present in the retry's Analysis and PYZ collections. The artifact is the
-immutable source for a later updater, while the installed artifact remains the
-old version and the updater has not run.
+present in the retry's Analysis and PYZ collections. Before the separately
+authorized install update, the artifact was the immutable source for the
+updater and the installed artifact remained the old version. The install
+result is recorded below.
 
 The canonical product data and independent backup bundle were read-only gates
 and remained unchanged; the canonical runtime remains absent. No packaged EXE,
 installer, updater, UAC, ADB, TCP probe, business program, or real workflow was
 executed. The legacy PowerShell entry remains retained. Install update and the
 real workflow retry are independent authorization boundaries.
+
+## Phase 7C real install update and installed-artifact audit
+
+The separately authorized install update used the audited onedir source and
+the verified product-data backup exactly once. A foreground
+`System.Diagnostics.Process` wrapper captured stdout and stderr separately,
+waited for child completion, and used the exact process exit code. The updater
+returned zero with its success JSON; stderr was empty and no retry occurred.
+
+The updater treated product data as a read-only consistency gate. The source,
+current install, staging, and installed result were checked with complete
+relative-path, size, and SHA-256 manifests. Same-parent staging and true
+transaction-backup renames replaced the old install. The transaction backup
+was removed only after the installed manifest, hashes, shortcut, and product
+data post-checks passed; `true_backup_rollback=false` records the normal
+success path, not a reconstructed rollback.
+
+The installed manifest exactly matches the source: 106 files, 28,633,496
+bytes, EXE SHA-256
+`3080F16D772449AD4C455D9A8CFA37FFE238D4C4DEEA77AEC309C2EF2F07B22D`, schema
+SHA-256
+`1994EB5915DA0079FD270412D48EA4562FA5EB4172F8BA7E8E98B9A17791F2CD`, and
+fingerprint
+`D240028EE8920159890ABE27AFA68A640118D49CA420416A460208E4B0480D6E`.
+The artifact privacy and project-resource audits passed. The source dist,
+product data, backup bundle, and shortcut were unchanged; runtime remains
+absent; and all install transaction residue counts are zero.
+
+No source or installed EXE was executed, and no workflow, UAC, ADB, TCP, or
+business program was invoked. The installed artifact audit is complete, but
+Phase 7C remains incomplete until a separate real workflow-retry authorization
+and its RunReport, JSONL, stage, and business-program audit are complete. The
+legacy PowerShell entry remains retained.

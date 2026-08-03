@@ -317,3 +317,38 @@ the audited documentation, separately authorize install update, statically
 audit the installed artifact, separately authorize the real workflow retry,
 and enter Phase 7E only after Phase 7C succeeds. The legacy PowerShell entry
 remains retained.
+
+## Phase 7C real install update and installed-artifact audit
+
+The separately authorized real install update completed successfully with
+the committed updater invoked exactly once. The audited source onedir and
+verified product-data backup were used; the updater returned exit code zero,
+reported success, and performed no retry. The installed artifact and its
+complete manifest now match the source, while product data, the backup bundle,
+the source dist, and the shortcut remain unchanged. The canonical runtime
+directory remains absent and no transaction residue remains.
+
+phase_7c_product_data_forensics_completed=true
+phase_7c_product_data_recovery_completed=true
+phase_7c_install_update_implementation_completed=true
+phase_7c_product_data_backup_completed=true
+phase_7c_product_data_backup_bundle_ready=true
+phase_7c_rebuild_retry_completed=true
+phase_7c_rebuild_completed=true
+phase_7c_dist_artifact_audit_completed=true
+phase_7c_updated_artifact_ready=true
+phase_7c_reinstall_completed=true
+phase_7c_installed_artifact_audit_completed=true
+phase_7c_real_workflow_retry_completed=false
+phase_7c_completed=false
+phase_7e_completed=false
+phase_7_completed=false
+legacy_powershell_replacement_ready=false
+
+The next phase is PHASE_7C_INSTALL_UPDATE_AUDIT_COMMIT. Its blockers are
+PHASE_7C_INSTALL_UPDATE_AUDIT_COMMIT_REQUIRED and
+PHASE_7C_REAL_WORKFLOW_RETRY_AUTHORIZATION. The required order is: review and
+commit this install-update audit documentation; separately authorize the
+repaired real packaged external workflow retry; audit its RunReport, JSONL,
+all 11 stages, and business-program cleanup; then enter Phase 7E only after
+Phase 7C succeeds. The legacy PowerShell entry remains retained.
