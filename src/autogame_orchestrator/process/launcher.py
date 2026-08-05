@@ -67,13 +67,16 @@ def launch(spec: ProcessSpec) -> ManagedProcess:
     1. 校验可执行文件和工作目录。
     2. 打开 stdout/stderr 输出文件。
     3. ``CreateProcessW(CREATE_SUSPENDED)``。
-    4. 创建并配置 Job Object (KILL_ON_JOB_CLOSE)。
+    4. 创建 Job Object；除 ``spec.descendants_survive_close`` 为真外配置 KILL_ON_JOB_CLOSE。
     5. ``AssignProcessToJobObject``（此时进程仍挂起）。
     6. ``ResumeThread``。
     7. 关闭线程句柄。
     8. 返回 ``ManagedProcess``。
 
     任何步骤失败都会清理已创建的资源。
+
+    无论 ``descendants_survive_close`` 取值，进程始终被加入 Job，因此超时或取消时
+    仍可通过 ``terminate_job()`` 终止整棵进程树。该标志只影响句柄正常关闭时的默认行为。
     """
     started_at_monotonic = time.monotonic()
 
@@ -153,7 +156,8 @@ def launch(spec: ProcessSpec) -> ManagedProcess:
             raise LaunchError(str(exc), ProcessLaunchErrorCode.JOB_CREATE_FAILED) from exc
 
         try:
-            win32_job.configure_job_kill_on_close(job_handle_value)
+            if not spec.descendants_survive_close:
+                win32_job.configure_job_kill_on_close(job_handle_value)
         except Exception as exc:
             _cleanup_on_launch_failure(process_handle, thread_handle, job_handle_value, stdout_fd, stderr_fd)
             raise LaunchError(str(exc), ProcessLaunchErrorCode.JOB_CONFIGURE_FAILED) from exc

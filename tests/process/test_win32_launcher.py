@@ -475,3 +475,100 @@ def test_parent_exit_child_survives_then_job_kills(tmp_workdir: Path) -> None:
         _check_pid_exited(child_pid, "孤儿测试-子进程")
     finally:
         managed.close_handles()
+
+
+def test_descendants_survive_close_keeps_child_alive(tmp_workdir: Path) -> None:
+    """``descendants_survive_close=True`` 时，Job 句柄关闭不得终止存活的后代。
+
+    与 ``test_parent_exit_child_survives_then_job_kills`` 构成对照：同样的引信型父进程
+    （派生子进程后立即退出），仅该标志不同，后代结局相反。此行为是 MuMu 等
+    “短命令启动长期进程” 场景的前提。
+    """
+    child_pid_file = _pid_file_for_test(tmp_workdir, "survive_child")
+    spec = ProcessSpec(
+        name="后代存活测试",
+        executable=Path(_PYTHON),
+        arguments=(
+            str(_fake_stage()),
+            "--spawn-child-then-exit",
+            "--child-pid-file",
+            str(child_pid_file),
+            "--exit-code",
+            "0",
+        ),
+        descendants_survive_close=True,
+    )
+    managed = launch(spec)
+
+    child_pid: int | None = None
+    try:
+        for _ in range(30):
+            if child_pid_file.exists():
+                break
+            time.sleep(0.1)
+        assert child_pid_file.exists(), "子进程 PID 文件应存在"
+        child_pid = int(child_pid_file.read_text().strip())
+
+        _wait_exit(managed)
+        assert managed.poll() is not None, "引信型父进程应已自行退出"
+
+        managed.close_handles()
+        time.sleep(0.5)
+
+        import ctypes
+
+        SYNCHRONIZE = 0x00100000
+        handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, child_pid)
+        assert handle != 0, f"子进程 PID {child_pid} 应在 Job 句柄关闭后继续存活"
+        ctypes.windll.kernel32.CloseHandle(handle)
+    finally:
+        managed.close_handles()
+        if child_pid is not None:
+            import subprocess
+
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(child_pid)],
+                capture_output=True,
+                check=False,
+            )
+
+
+def test_descendants_survive_close_still_allows_terminate_job(tmp_workdir: Path) -> None:
+    """标志为真时仍保留显式清理能力：``terminate_job()`` 必须能终止整棵进程树。
+
+    这是选择 “不设 KILL_ON_JOB_CLOSE” 而非 “不装箱” 的理由——超时或取消时
+    仍可一次性清干净，不会退化成 MAS #337 式的后代逃逸。
+    """
+    child_pid_file = _pid_file_for_test(tmp_workdir, "survive_terminate_child")
+    spec = ProcessSpec(
+        name="后代存活但可显式终止测试",
+        executable=Path(_PYTHON),
+        arguments=(
+            str(_fake_stage()),
+            "--spawn-child",
+            "--child-pid-file",
+            str(child_pid_file),
+            "--sleep-forever",
+        ),
+        descendants_survive_close=True,
+    )
+    managed = launch(spec)
+    parent_pid = managed.pid
+
+    try:
+        for _ in range(30):
+            if child_pid_file.exists():
+                break
+            time.sleep(0.1)
+        assert child_pid_file.exists(), "子进程 PID 文件应存在"
+        child_pid = int(child_pid_file.read_text().strip())
+
+        managed.terminate_job()
+        time.sleep(0.5)
+        managed.close_handles()
+        time.sleep(0.2)
+
+        _check_pid_exited(parent_pid, "显式终止-父进程")
+        _check_pid_exited(child_pid, "显式终止-子进程")
+    finally:
+        managed.close_handles()

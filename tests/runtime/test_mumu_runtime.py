@@ -584,3 +584,80 @@ def test_restart_refused_no_start_args() -> None:
         assert result.error_code == MumuRuntimeErrorCode.INVALID_CONFIGURATION
         assert result.changed is False
         mock_cmd.assert_not_called()
+
+
+# ════════════════════════════════════════════════════════════════════
+# 启动等待必须执行受控 adb connect
+# ════════════════════════════════════════════════════════════════════
+
+
+class _ConnectRequiredProbe:
+    """模拟真实情况：新启动的模拟器只有经 ``ensure_ready`` 的 adb connect 后才可见。
+
+    只读 ``probe()`` 永远返回 DEVICE_NOT_FOUND，``ensure_ready()`` 才返回 ready。
+    """
+
+    def __init__(self) -> None:
+        self.probe_calls = 0
+        self.ensure_calls = 0
+
+    def probe(
+        self, host: str, port: int, serial: str | None, deadline: Deadline, cancel: CancellationToken | None = None
+    ) -> ProbeResult:
+        self.probe_calls += 1
+        return ProbeResult.from_monotonic(
+            "test", ProbeStatus.NOT_READY, ProbeErrorCode.DEVICE_NOT_FOUND, time.monotonic()
+        )
+
+    def ensure_ready(
+        self, host: str, port: int, serial: str | None, deadline: Deadline, cancel: CancellationToken | None = None
+    ) -> ProbeResult:
+        self.ensure_calls += 1
+        return ProbeResult.ready("test")
+
+
+def test_start_readiness_wait_uses_controlled_connect(tmp_path: Path) -> None:
+    """``start()`` 的 readiness 等待必须走 ``ensure_ready``，否则新启动的模拟器永不就绪。
+
+    回归保护：曾因 ``_wait_readiness`` 只调只读 ``probe()`` 而不执行 adb connect，
+    导致管理命令报告成功但 readiness 永远等不到，最终 START_TIMEOUT。
+    """
+    manager = tmp_path / "manager.exe"
+    manager.write_text("fake", encoding="utf-8")
+    adb = tmp_path / "adb.exe"
+    adb.write_text("fake", encoding="utf-8")
+    adapter = MumuAdapter(
+        executable=manager,
+        start_arguments=("control", "-v", "0", "launch"),
+        stop_arguments=("control", "-v", "0", "shutdown"),
+        adb_executable=adb,
+        adb_serial="127.0.0.1:16384",
+    )
+    probe = _ConnectRequiredProbe()
+    stopped_then_probe = _FakeProbe(refused=True)
+
+    call_count = {"n": 0}
+
+    def fake_create_probe() -> object:
+        # 首次用于 start() 的前置 status 检查（须报告未就绪），其后用于 readiness 等待。
+        call_count["n"] += 1
+        return stopped_then_probe if call_count["n"] == 1 else probe
+
+    with (
+        patch.object(adapter, "_create_probe", side_effect=fake_create_probe),
+        patch.object(
+            adapter,
+            "_run_manager_command",
+            return_value={
+                "ok": True,
+                "status": MumuRuntimeStatus.STARTED,
+                "error_code": MumuRuntimeErrorCode.OK,
+                "diag": {},
+            },
+        ),
+    ):
+        result = adapter.start(Deadline.after(5.0))
+
+    assert result.status == MumuRuntimeStatus.STARTED
+    assert result.error_code == MumuRuntimeErrorCode.OK
+    assert probe.ensure_calls >= 1, "readiness 等待必须调用 ensure_ready 以执行受控 adb connect"

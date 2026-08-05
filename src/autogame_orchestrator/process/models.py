@@ -48,6 +48,20 @@ class ProcessSpec:
     create_new_process_group: bool = False
     """是否创建新进程组（用于后续 CTRL_BREAK_EVENT）。"""
 
+    descendants_survive_close: bool = False
+    """后代进程是否在 Job 句柄正常关闭后继续存活。
+
+    默认 ``False``：Job 设 ``KILL_ON_JOB_CLOSE``，句柄关闭时系统终止箱内全部进程。
+    适用于绝大多数命令：进程树应与命令同生共死。
+
+    置 ``True`` 仅适用于“短命令派生长期进程”的引信型场景（如模拟器启动器）：
+    命令本身触发后立即退出，但其派生的进程必须活过命令本身。
+
+    注意：为 ``True`` 时仍然创建 Job 并将进程加入，因此超时或取消时仍可通过
+    ``terminate_job()`` 一次性终止整棵进程树；仅取消“句柄关闭即自动杀”这一默认行为。
+    不装箱会彻底丢失对后代的控制能力，因此不采用那种做法。
+    """
+
     def __post_init__(self) -> None:
         if not self.name.strip():
             msg = "ProcessSpec.name 不能为空"

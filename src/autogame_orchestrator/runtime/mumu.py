@@ -5,6 +5,11 @@
 
 管理命令由 ProcessSupervisor 执行（短生命周期），
 实际模拟器进程不由阶段 2B 的 Job Object 长期持有。
+
+管理命令使用 ``descendants_survive_close=True``：``MuMuManager.exe`` 是引信型短命令，
+触发后立即退出，但其派生的模拟器进程必须活过命令本身。若沛用默认的
+``KILL_ON_JOB_CLOSE``，命令退出并关闭 Job 句柄时会连带终止刚启动的模拟器，
+表现为命令报告成功但 readiness 永不到达。
 """
 
 from __future__ import annotations
@@ -407,6 +412,7 @@ class MumuAdapter:
                     arguments=arguments,
                     stdout_path=td / "stdout.log",
                     stderr_path=td / "stderr.log",
+                    descendants_survive_close=True,
                 )
 
                 with ProcessSupervisor() as supervisor:
@@ -470,7 +476,11 @@ class MumuAdapter:
         deadline: Deadline,
         cancel: CancellationToken | None,
     ) -> MumuRuntimeResult:
-        """轮询直到 readiness 或 deadline 到期。"""
+        """轮询直到 readiness 或 deadline 到期。
+
+        使用 ``ensure_ready()`` 而非只读 ``probe()``：新启动的模拟器尚未被 adb 登记，
+        必须经一次受控 ``adb connect`` 才能出现在设备列表中；仅靠只读探测会永远等不到就绪。
+        """
         while not deadline.expired:
             if cancel is not None and cancel.is_cancelled:
                 return MumuRuntimeResult.from_monotonic(
@@ -478,7 +488,7 @@ class MumuAdapter:
                 )
 
             probe = self._create_probe()
-            result = probe.probe(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
+            result = probe.ensure_ready(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
 
             if result.status == ProbeStatus.READY:
                 return MumuRuntimeResult.from_monotonic(
