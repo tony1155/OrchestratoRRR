@@ -321,3 +321,27 @@ def test_invalid_mumu_endpoint_stage_is_configuration_failure() -> None:
     stage = StageName.WAIT_MUMU_ADB_READY
     report = factory(stage).execute(context(stage, deadline=Deadline.after(30)))
     assert report.error_code == ErrorCode.CONFIG_SCHEMA_ERROR
+
+
+def test_managed_stop_mumu_stage_maps_stopped_to_success() -> None:
+    """managed 下 STOP_MUMU 必须调 stop() 且把 STOPPED 判为成功。
+
+    回归保护：执行器曾只对 VERIFY_MUMU_STOPPED 传递 “期望已停止” 语义，
+    导致真实停止成功的 STOP_MUMU 阶段被误判为 WORKFLOW_STAGE_FAILED。
+    """
+    port = FakeMumuPort(mumu_result(MumuRuntimeStatus.STOPPED))
+    runtime_factories, _ = factories(mumu=port)
+    report, _ = execute(AppConfig(), StageName.STOP_MUMU, runtime_factories, deadline=Deadline.after(30))
+    assert (report.outcome, report.error_code) == (OutcomeKind.SUCCESS, ErrorCode.OK)
+    assert port.stop_calls == 1
+    assert port.status_calls == 0
+
+
+def test_managed_verify_mumu_stopped_stage_still_reads_status() -> None:
+    """VERIFY_MUMU_STOPPED 仍应只读查状态，不得调用 stop()。"""
+    port = FakeMumuPort(mumu_result(MumuRuntimeStatus.STOPPED))
+    runtime_factories, _ = factories(mumu=port)
+    report, _ = execute(AppConfig(), StageName.VERIFY_MUMU_STOPPED, runtime_factories, deadline=Deadline.after(30))
+    assert (report.outcome, report.error_code) == (OutcomeKind.SUCCESS, ErrorCode.OK)
+    assert port.status_calls == 1
+    assert port.stop_calls == 0

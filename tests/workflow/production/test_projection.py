@@ -172,9 +172,33 @@ def test_mumu_stopped_succeeds_verify_stopped() -> None:
     report = project_mumu(
         StageName.VERIFY_MUMU_STOPPED,
         mumu_result(MumuRuntimeStatus.STOPPED),
-        verify_stopped=True,
+        expect_stopped=True,
     )
     assert report.outcome == OutcomeKind.SUCCESS
+
+
+def test_mumu_stop_action_stopped_is_success() -> None:
+    """``STOP_MUMU`` 以 STOPPED 为成功：managed 停止动作成功时就是返回 STOPPED。
+
+    回归保护：STOPPED 原本仅在 VERIFY_MUMU_STOPPED 阶段被归为成功，导致真实停止
+    成功的 STOP_MUMU 阶段被误判为 WORKFLOW_STAGE_FAILED。
+    """
+    report = project_mumu(
+        StageName.STOP_MUMU,
+        mumu_result(MumuRuntimeStatus.STOPPED),
+        expect_stopped=True,
+    )
+    assert (report.outcome, report.error_code) == (OutcomeKind.SUCCESS, ErrorCode.OK)
+
+
+def test_mumu_stop_stage_rejects_still_ready() -> None:
+    """停止阶段拿到 READY 必须判失败——说明模拟器并未真正停下。"""
+    report = project_mumu(
+        StageName.STOP_MUMU,
+        mumu_result(MumuRuntimeStatus.READY),
+        expect_stopped=True,
+    )
+    assert report.outcome == OutcomeKind.FAILURE
 
 
 def test_mumu_projection_uses_allowlist() -> None:

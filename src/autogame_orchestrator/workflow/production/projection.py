@@ -118,7 +118,7 @@ def project_mumu(
     *,
     lifecycle_mode: MumuLifecycleMode = MumuLifecycleMode.MANAGED,
     ensure_running: bool = False,
-    verify_stopped: bool = False,
+    expect_stopped: bool = False,
 ) -> StageReport:
     diagnostics: dict[str, JsonValue] = {
         "source_error_code": result.error_code.value,
@@ -154,14 +154,16 @@ def project_mumu(
         outcome, code = OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT
     elif result.status == MumuRuntimeStatus.CANCELLED:
         outcome, code = OutcomeKind.CANCELLED, ErrorCode.WORKFLOW_CANCELLED
-    elif verify_stopped and result.status == MumuRuntimeStatus.STOPPED:
+    elif expect_stopped and result.status == MumuRuntimeStatus.STOPPED:
+        # STOP_MUMU 与 VERIFY_MUMU_STOPPED 都以 STOPPED 为成功：
+        # 前者是 managed 停止动作成功返回，后者是只读确认已停止。
         outcome, code = OutcomeKind.SUCCESS, ErrorCode.OK
     elif ensure_running and result.status == MumuRuntimeStatus.STOPPED:
         outcome, code = OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_BLOCKED
         diagnostics["blocker"] = (
             "mumu_external_not_ready" if lifecycle_mode == MumuLifecycleMode.EXTERNAL else "mumu_start_not_approved"
         )
-    elif not verify_stopped and result.status in (
+    elif not expect_stopped and result.status in (
         MumuRuntimeStatus.READY,
         MumuRuntimeStatus.STARTED,
         MumuRuntimeStatus.RESTARTED,

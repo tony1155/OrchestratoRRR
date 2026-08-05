@@ -155,8 +155,12 @@ def test_disabled_update_reaches_stopped_mumu_gate(tmp_path: Path) -> None:
     assert counts["mumu"] == 1
 
 
-def test_ready_mumu_managed_reaches_stop_and_verify_gate(tmp_path: Path) -> None:
-    """managed 下 stop_mumu 会真正执行；若模拟器未真停，verify 阶段必须拦下。"""
+def test_ready_mumu_managed_stop_stage_catches_not_stopped(tmp_path: Path) -> None:
+    """managed 下 stop_mumu 会真正执行；若模拟器仍报 READY，该阶段自身即应失败。
+
+    Fake 模拟器恒返 READY（不会真停），因此停止阶段就应当场报错，
+    而不是放行到下一个验证阶段才发现。
+    """
     config = valid_config(tmp_path)
     runtime_factories, _ = factories()
     report = WorkflowRunner(
@@ -166,5 +170,5 @@ def test_ready_mumu_managed_reaches_stop_and_verify_gate(tmp_path: Path) -> None
     ).run(deadline=Deadline.after(30))
     assert report.stages[2].outcome == OutcomeKind.SUCCESS
     assert report.stages[3].outcome == OutcomeKind.SUCCESS
-    assert report.stages[8].outcome == OutcomeKind.SUCCESS
-    assert report.stages[9].error_code == ErrorCode.WORKFLOW_STAGE_FAILED
+    assert report.stages[8].error_code == ErrorCode.WORKFLOW_STAGE_FAILED
+    assert report.stages[9].outcome == OutcomeKind.SKIPPED

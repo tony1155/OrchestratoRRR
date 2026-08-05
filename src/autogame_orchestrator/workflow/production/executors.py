@@ -246,7 +246,7 @@ class ProductionStageExecutor:
             result,
             lifecycle_mode=self._config.mumu.lifecycle_mode,
             ensure_running=self._stage == StageName.ENSURE_MUMU_RUNNING,
-            verify_stopped=self._stage == StageName.VERIFY_MUMU_STOPPED,
+            expect_stopped=self._stage in {StageName.STOP_MUMU, StageName.VERIFY_MUMU_STOPPED},
         )
 
     def _verify_starrail_postcondition(self) -> StageReport:
