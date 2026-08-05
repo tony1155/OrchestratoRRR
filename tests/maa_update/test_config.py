@@ -127,3 +127,15 @@ def test_loader_rejects_wrong_types(field: str, value: object) -> None:
 )
 def test_loader_rejects_unapproved_fields(field: str) -> None:
     assert _parse_maa_update({field: "forbidden"}) == (None, [ErrorCode.CONFIG_SCHEMA_ERROR])
+
+
+def test_default_timeout_leaves_margin_for_large_archive_extraction() -> None:
+    """默认超时须留出足够余量，降低解压中途被强杀而留下坏资源的概率。
+
+    maa-cli 的解压环节非原子：`maa-installer` 的 `extract.rs` 逐文件 `File::create`
+    加 `io::copy` 原地覆盖，未使用该项目自有的 `atomic_fs`，且 maa_core / resource
+    两个安装器均无备份与回滚。官方整包为 260 MB 量级、解压为数千文件，1800 秒
+    偏紧；取 3600 以降低风险。此值只降低风险，不构成安全保证，故 `run` 入口仍
+    以 maa_update_not_allowed_in_run_v1 阻断该能力。
+    """
+    assert MAAUpdateConfig().timeout_seconds >= 3600
