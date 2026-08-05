@@ -148,6 +148,26 @@ def test_mumu_stopped_blocks_ensure_running() -> None:
     assert report.diagnostics["blocker"] == "mumu_start_not_approved"
 
 
+@pytest.mark.parametrize(
+    ("stage", "status", "ensure_running"),
+    [
+        (StageName.ENSURE_MUMU_RUNNING, MumuRuntimeStatus.STARTED, True),
+        (StageName.START_MUMU, MumuRuntimeStatus.STARTED, False),
+        (StageName.ENSURE_MUMU_RUNNING, MumuRuntimeStatus.RESTARTED, True),
+    ],
+)
+def test_mumu_lifecycle_action_statuses_are_success(
+    stage: StageName, status: MumuRuntimeStatus, ensure_running: bool
+) -> None:
+    """managed 生命周期动作成功时返回 STARTED/RESTARTED，投影层必须认作成功。
+
+    回归保护：投影层原本只把只读探测的 READY 归为成功，而 ``MumuAdapter.start()``
+    成功时返回 STARTED，因此真实启动成功的模拟器会被误判为 WORKFLOW_STAGE_FAILED。
+    """
+    report = project_mumu(stage, mumu_result(status), ensure_running=ensure_running)
+    assert (report.outcome, report.error_code) == (OutcomeKind.SUCCESS, ErrorCode.OK)
+
+
 def test_mumu_stopped_succeeds_verify_stopped() -> None:
     report = project_mumu(
         StageName.VERIFY_MUMU_STOPPED,

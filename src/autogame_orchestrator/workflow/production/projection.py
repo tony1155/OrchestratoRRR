@@ -161,7 +161,13 @@ def project_mumu(
         diagnostics["blocker"] = (
             "mumu_external_not_ready" if lifecycle_mode == MumuLifecycleMode.EXTERNAL else "mumu_start_not_approved"
         )
-    elif not verify_stopped and result.status == MumuRuntimeStatus.READY:
+    elif not verify_stopped and result.status in (
+        MumuRuntimeStatus.READY,
+        MumuRuntimeStatus.STARTED,
+        MumuRuntimeStatus.RESTARTED,
+    ):
+        # READY 来自只读探测；STARTED/RESTARTED 来自 managed 生命周期动作成功返回。
+        # 三者都表示模拟器已就绪，缺少后两者会把成功的 start() 误判为 WORKFLOW_STAGE_FAILED。
         outcome, code = OutcomeKind.SUCCESS, ErrorCode.OK
     else:
         outcome, code = OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_FAILED
