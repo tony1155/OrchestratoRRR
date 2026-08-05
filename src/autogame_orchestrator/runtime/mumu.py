@@ -5,6 +5,11 @@
 
 管理命令由 ProcessSupervisor 执行（短生命周期），
 实际模拟器进程不由阶段 2B 的 Job Object 长期持有。
+
+管理命令使用 ``descendants_survive_close=True``：``MuMuManager.exe`` 是引信型短命令，
+触发后立即退出，但其派生的模拟器进程必须活过命令本身。若沛用默认的
+``KILL_ON_JOB_CLOSE``，命令退出并关闭 Job 句柄时会连带终止刚启动的模拟器，
+表现为命令报告成功但 readiness 永不到达。
 """
 
 from __future__ import annotations
@@ -14,8 +19,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from autogame_orchestrator.models import JsonValue
 from autogame_orchestrator.probes.adb_client import AdbClient, AdbClientConfig
-from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeStatus
+from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeResult, ProbeStatus
 from autogame_orchestrator.probes.mumu_readiness import MumuReadinessProbe
 from autogame_orchestrator.process import CancellationToken, Deadline, ProcessSpec, ProcessSupervisor
 from autogame_orchestrator.process.errors import TerminationReason
@@ -28,6 +34,40 @@ from autogame_orchestrator.runtime.models import (
 
 _POLL_INTERVAL = 0.3  # readiness 轮询间隔（秒）
 _CommandResult = dict[str, Any]  # _run_manager_command 返回类型
+_PROBE_STEP_ALLOWLIST = {
+    "tcp_probe",
+    "adb_devices",
+    "select_device",
+    "adb_get_state",
+    "adb_boot_completed",
+    "adb_connect",
+    "none",
+}
+_CONNECT_STATUS_ALLOWLIST = {"not_attempted", "connected", "already_connected", "failed"}
+
+
+def _safe_probe_diagnostics(result: ProbeResult) -> dict[str, JsonValue]:
+    step = result.diagnostics.get("step", "none")
+    safe_step = step if isinstance(step, str) and step in _PROBE_STEP_ALLOWLIST else "none"
+    safe: dict[str, JsonValue] = {
+        "probe_status": result.status.value,
+        "probe_error": result.error_code.value,
+        "probe_step": safe_step,
+    }
+    attempted = result.diagnostics.get("adb_connect_attempted")
+    if isinstance(attempted, bool):
+        safe["adb_connect_attempted"] = attempted
+    connect_status = result.diagnostics.get("adb_connect_status")
+    if isinstance(connect_status, str) and connect_status in _CONNECT_STATUS_ALLOWLIST:
+        safe["adb_connect_status"] = connect_status
+    connect_error = result.diagnostics.get("adb_connect_error")
+    allowed_errors = {"none", *(code.value for code in ProbeErrorCode)}
+    if isinstance(connect_error, str) and connect_error in allowed_errors:
+        safe["adb_connect_error"] = connect_error
+    rechecked = result.diagnostics.get("readiness_rechecked_after_connect")
+    if isinstance(rechecked, bool):
+        safe["readiness_rechecked_after_connect"] = rechecked
+    return safe
 
 
 class MumuAdapter:
@@ -52,7 +92,7 @@ class MumuAdapter:
         if not adb_host or adb_host != "127.0.0.1":
             msg = f"adb_host 必须是 127.0.0.1，收到 {adb_host}"
             raise ValueError(msg)
-        if not 1 <= adb_port <= 65535:
+        if isinstance(adb_port, bool) or not isinstance(adb_port, int) or not 1 <= adb_port <= 65535:
             msg = f"adb_port 必须在 1-65535 之间，收到 {adb_port}"
             raise ValueError(msg)
 
@@ -77,11 +117,21 @@ class MumuAdapter:
 
         if result.status == ProbeStatus.READY:
             return MumuRuntimeResult.from_monotonic(
-                MumuAction.STATUS, MumuRuntimeStatus.READY, MumuRuntimeErrorCode.OK, started_at, changed=False
+                MumuAction.STATUS,
+                MumuRuntimeStatus.READY,
+                MumuRuntimeErrorCode.OK,
+                started_at,
+                changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
             )
         if result.error_code in (ProbeErrorCode.PORT_CLOSED, ProbeErrorCode.DEVICE_NOT_FOUND):
             return MumuRuntimeResult.from_monotonic(
-                MumuAction.STATUS, MumuRuntimeStatus.STOPPED, MumuRuntimeErrorCode.OK, started_at, changed=False
+                MumuAction.STATUS,
+                MumuRuntimeStatus.STOPPED,
+                MumuRuntimeErrorCode.OK,
+                started_at,
+                changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
             )
         if result.status == ProbeStatus.TIMEOUT:
             return MumuRuntimeResult.from_monotonic(
@@ -90,6 +140,7 @@ class MumuAdapter:
                 MumuRuntimeErrorCode.READINESS_FAILED,
                 started_at,
                 changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
             )
         if result.error_code == ProbeErrorCode.ADB_CANCELLED:
             return MumuRuntimeResult.from_monotonic(
@@ -98,6 +149,7 @@ class MumuAdapter:
                 MumuRuntimeErrorCode.CANCELLED,
                 started_at,
                 changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
             )
         return MumuRuntimeResult.from_monotonic(
             MumuAction.STATUS,
@@ -105,7 +157,49 @@ class MumuAdapter:
             MumuRuntimeErrorCode.READINESS_FAILED,
             started_at,
             changed=False,
-            diagnostics={"probe_status": result.status.value, "probe_error": result.error_code.value},
+            diagnostics=_safe_probe_diagnostics(result),
+        )
+
+    def ensure_external_ready(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
+        """Explicit external readiness with one controlled local ADB connect."""
+        started_at = time.monotonic()
+        probe = self._create_probe()
+        result = probe.ensure_ready(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
+
+        if result.status == ProbeStatus.READY:
+            return MumuRuntimeResult.from_monotonic(
+                MumuAction.STATUS,
+                MumuRuntimeStatus.READY,
+                MumuRuntimeErrorCode.OK,
+                started_at,
+                changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
+            )
+        if result.status == ProbeStatus.TIMEOUT:
+            return MumuRuntimeResult.from_monotonic(
+                MumuAction.STATUS,
+                MumuRuntimeStatus.TIMEOUT,
+                MumuRuntimeErrorCode.READINESS_FAILED,
+                started_at,
+                changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
+            )
+        if result.error_code == ProbeErrorCode.ADB_CANCELLED:
+            return MumuRuntimeResult.from_monotonic(
+                MumuAction.STATUS,
+                MumuRuntimeStatus.CANCELLED,
+                MumuRuntimeErrorCode.CANCELLED,
+                started_at,
+                changed=False,
+                diagnostics=_safe_probe_diagnostics(result),
+            )
+        return MumuRuntimeResult.from_monotonic(
+            MumuAction.STATUS,
+            MumuRuntimeStatus.NOT_READY,
+            MumuRuntimeErrorCode.READINESS_FAILED,
+            started_at,
+            changed=False,
+            diagnostics=_safe_probe_diagnostics(result),
         )
 
     def start(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
@@ -318,6 +412,7 @@ class MumuAdapter:
                     arguments=arguments,
                     stdout_path=td / "stdout.log",
                     stderr_path=td / "stderr.log",
+                    descendants_survive_close=True,
                 )
 
                 with ProcessSupervisor() as supervisor:
@@ -381,7 +476,11 @@ class MumuAdapter:
         deadline: Deadline,
         cancel: CancellationToken | None,
     ) -> MumuRuntimeResult:
-        """轮询直到 readiness 或 deadline 到期。"""
+        """轮询直到 readiness 或 deadline 到期。
+
+        使用 ``ensure_ready()`` 而非只读 ``probe()``：新启动的模拟器尚未被 adb 登记，
+        必须经一次受控 ``adb connect`` 才能出现在设备列表中；仅靠只读探测会永远等不到就绪。
+        """
         while not deadline.expired:
             if cancel is not None and cancel.is_cancelled:
                 return MumuRuntimeResult.from_monotonic(
@@ -389,7 +488,7 @@ class MumuAdapter:
                 )
 
             probe = self._create_probe()
-            result = probe.probe(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
+            result = probe.ensure_ready(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
 
             if result.status == ProbeStatus.READY:
                 return MumuRuntimeResult.from_monotonic(

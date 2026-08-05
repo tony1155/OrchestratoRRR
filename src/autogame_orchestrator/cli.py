@@ -10,6 +10,7 @@ validate 和 plan 不启动外部业务程序。
 
 from __future__ import annotations
 
+import signal
 import traceback
 import uuid
 from datetime import UTC, datetime
@@ -20,6 +21,13 @@ import typer
 
 from autogame_orchestrator import __version__
 from autogame_orchestrator.config_loader import load_config
+from autogame_orchestrator.default_entry import DEFAULT_START_DEADLINE_SECONDS, execute_default_entry
+from autogame_orchestrator.diagnostics.packaged_isolated_workflow import (
+    ISOLATED_WORKFLOW_CONFIRMATION,
+    IsolatedWorkflowError,
+    execute_isolated_workflow,
+    validate_isolated_deadline,
+)
 from autogame_orchestrator.log_writer import JsonlLogWriter
 from autogame_orchestrator.models import (
     ErrorCode,
@@ -30,7 +38,9 @@ from autogame_orchestrator.models import (
     StageReport,
 )
 from autogame_orchestrator.planning import PLAN_HEADER, build_plan
+from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.reporter import write_report_atomic
+from autogame_orchestrator.run_application import RunRequest, execute_run_request
 
 if TYPE_CHECKING:
     pass
@@ -77,6 +87,98 @@ def version() -> None:
 
 
 @app.command()
+def start(
+    deadline_seconds: float = typer.Option(  # noqa: B008
+        DEFAULT_START_DEADLINE_SECONDS,
+        "--deadline-seconds",
+        help="Finite default-entry workflow deadline.",
+    ),
+) -> None:
+    """Interactively preview and start the canonical external workflow."""
+    result = execute_default_entry(deadline_seconds)
+    if result.exit_code != 0:
+        raise typer.Exit(code=result.exit_code)
+
+
+@app.command("_isolated-workflow-smoke", hidden=True)
+def isolated_workflow_smoke(
+    workspace: str = typer.Option(..., "--workspace", help="Empty workspace for synthetic evidence."),  # noqa: B008
+    deadline_seconds: float = typer.Option(..., "--deadline-seconds", help="Bounded synthetic workflow deadline."),  # noqa: B008
+    confirm_isolated_execution: str = typer.Option(  # noqa: B008
+        ...,
+        "--confirm-isolated-execution",
+        help="Exact acknowledgement for the synthetic isolated workflow.",
+    ),
+) -> None:
+    """Internal synthetic workflow smoke; hidden from the public CLI help."""
+
+    if confirm_isolated_execution != ISOLATED_WORKFLOW_CONFIRMATION:
+        typer.echo("ISOLATED_CONFIRMATION_REQUIRED", err=True)
+        raise typer.Exit(code=2)
+    if validate_isolated_deadline(deadline_seconds) is not None:
+        typer.echo("ISOLATED_DEADLINE_INVALID", err=True)
+        raise typer.Exit(code=2)
+    try:
+        result = execute_isolated_workflow(Path(workspace), deadline_seconds)
+    except IsolatedWorkflowError as exc:
+        typer.echo(exc.code, err=True)
+        raise typer.Exit(code=2) from None
+    except Exception:
+        typer.echo("ISOLATED_INTERNAL_ERROR", err=True)
+        raise typer.Exit(code=8) from None
+
+    typer.echo(
+        "Isolated workflow completed: "
+        f"status={result.report.status.value} "
+        f"error_code={result.report.error_code.value} "
+        f"mode={result.report.mode} "
+        f"stages={len(result.report.stages)} "
+        f"forbidden_calls={result.ledger.forbidden_calls}"
+    )
+
+
+@app.command("run")
+def run_workflow(
+    config: str = typer.Option(..., "--config", "-c", help="Path to TOML configuration file."),  # noqa: B008
+    deadline_seconds: float = typer.Option(..., "--deadline-seconds", help="Finite workflow deadline."),  # noqa: B008
+    confirm_real_execution: str = typer.Option(  # noqa: B008
+        ...,
+        "--confirm-real-execution",
+        help="Exact acknowledgement required for real execution.",
+    ),
+    elevation_child: bool = typer.Option(False, "--_elevation-child", hidden=True),  # noqa: B008
+) -> None:
+    """运行受控 external 生产工作流。"""
+
+    token = CancellationToken()
+    previous_handler = signal.getsignal(signal.SIGINT)
+
+    def request_cancel(_signum: int, _frame: object) -> None:
+        token.cancel()
+
+    signal.signal(signal.SIGINT, request_cancel)
+    try:
+        result = execute_run_request(
+            RunRequest(
+                config_path=Path(config),
+                deadline_seconds=deadline_seconds,
+                confirmation=confirm_real_execution,
+                elevation_child=elevation_child,
+            ),
+            cancel=token,
+        )
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
+
+    if result.exit_code == 0 and result.status == "success":
+        typer.echo("Workflow completed: status=success error_code=OK")
+    else:
+        typer.echo(f"Workflow finished: status={result.status} error_code={result.error_code}")
+    if result.exit_code != 0:
+        raise typer.Exit(code=result.exit_code)
+
+
+@app.command()
 def validate(
     config: str = typer.Option(  # noqa: B008
         ..., "--config", "-c", help="Path to TOML configuration file."
@@ -118,7 +220,7 @@ def validate(
             traceback.print_exc()
 
     log_writer = _open_log(log_dir, run_id, log_writer)
-    _log_validation(log_writer, config_path, check_paths, error_code)
+    _log_validation(log_writer, check_paths, error_code)
 
     stage_report = _make_stage_report(StageName.VALIDATE_CONFIG, outcome_kind, error_code, started_at, stage_message)
 
@@ -207,7 +309,11 @@ def plan(
 
     log_writer = _open_log(log_dir, run_id, log_writer)
     if log_writer is not None:
-        log_writer.info("plan.start", "Execution plan requested", {"config": str(config_path)})
+        log_writer.info(
+            "plan.start",
+            "Execution plan requested",
+            {"config_provided": True, "check_paths": check_paths},
+        )
 
     if error_code != ErrorCode.OK:
         stage_reports.append(
@@ -316,7 +422,6 @@ def _safe_close_log(writer: JsonlLogWriter) -> None:
 
 def _log_validation(
     writer: JsonlLogWriter | None,
-    config_path: Path,
     check_paths: bool,
     error_code: ErrorCode,
 ) -> None:
@@ -327,7 +432,7 @@ def _log_validation(
             "validate.run",
             "Validation complete",
             {
-                "config": str(config_path),
+                "config_provided": True,
                 "check_paths": check_paths,
                 "error_code": error_code.value,
             },

@@ -57,16 +57,15 @@ def test_timeout_precise() -> None:
         assert result.error_code == ProbeErrorCode.TCP_TIMEOUT
 
 
-def test_ipv6_loopback_ready_or_skip() -> None:
-    """IPv6 loopback 能连接则 READY，否则 SKIP。"""
+def test_ipv6_loopback_ready() -> None:
+    """IPv6 loopback 必须能够建立 READY 探测。"""
     try:
         sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         sock.bind(("::1", 0))
         sock.listen(1)
         port = sock.getsockname()[1]
-    except OSError:
-        pytest.skip("IPv6 在当前机器不可用")
-        return
+    except OSError as error:
+        pytest.fail(f"IPv6 loopback 不可用：{error.__class__.__name__}")
     try:
         result = probe_tcp_endpoint("::1", port, Deadline.after(1.0))
         assert result.status == ProbeStatus.READY

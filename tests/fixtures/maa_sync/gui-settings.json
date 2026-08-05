@@ -1,0 +1,16 @@
+{
+  "Current": "fictional-alpha",
+  "Configurations": {
+    "fictional-alpha": {
+      "Connect.AdbPath": "X:/fictional/device-tool",
+      "Connect.Address": "fake-local-endpoint",
+      "Connect.ConnectConfig": "FictionalConfig",
+      "Connect.TouchMode": "maatouch",
+      "Connect.AdbLiteEnabled": true,
+      "Connect.KillAdbOnExit": false,
+      "Start.ClientType": "FictionalClient",
+      "Start.StartGame": false,
+      "Unknown.Secret": "must-not-pass"
+    }
+  }
+}

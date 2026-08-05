@@ -50,7 +50,7 @@ Phase 2D 的 cancellation 测试已改为：
 
 该测试连续执行 20 次全部通过。
 
-完整 `pytest -q` 未排除 diagnostics、未使用 skip、xfail、flaky marker 或 rerun 插件，并连续两次得到 `323 passed`。
+完整 `pytest -q` 未排除 diagnostics、未使用测试规避标记或自动重试插件，并连续两次得到 `323 passed`。
 
 StarRail child cleanup 测试强制验证：
 
@@ -69,7 +69,7 @@ StarRail child cleanup 测试强制验证：
 - [x] 生产 StarRail Adapter 未使用 `subprocess.run`、`subprocess.Popen` 或 `os.system`
 - [x] 未修改 `ProcessSupervisor` 和 Win32 Job Object 核心
 - [x] 完整测试未排除 diagnostics
-- [x] 未增加 skip、xfail、flaky marker 或 rerun 插件
+- [x] 未增加测试规避标记或自动重试插件
 - [x] 真实 StarRailCopilot smoke 仍待用户明确批准
 
 ## 验收结论

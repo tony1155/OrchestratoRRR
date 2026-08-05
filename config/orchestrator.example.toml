@@ -10,11 +10,14 @@ heartbeat_interval_seconds = 10
 poll_interval_seconds = 1
 
 [mumu]
+lifecycle_mode = "managed"
 executable = "C:\\path\\to\\MuMuNxDevice.exe"
 adb_executable = "C:\\path\\to\\adb.exe"
-adb_serial = "127.0.0.1:16384"
+adb_serial = "127.0.0.1:<PORT>"
 start_timeout_seconds = 120
 stop_timeout_seconds = 20
+start_arguments = []
+stop_arguments = []
 
 [starrail]
 executable = "C:\\path\\to\\StarRailCopilot\\toolkit\\python.exe"
@@ -46,6 +49,23 @@ stop_timeout_seconds = 10
 
 [maa.environment]
 PYTHONIOENCODING = "utf-8"
+
+[maa_sync]
+enabled = false
+gui_settings_source = ""
+gui_tasks_source = ""
+cli_profile_destination = ""
+cli_tasks_destination = ""
+backup_enabled = true
+max_source_bytes = 4194304
+requires_administrator = false
+
+[maa_update]
+enabled = false
+allow_network = false
+requires_administrator = false
+arguments = ["update"]
+timeout_seconds = 1800
 
 [aalc]
 executable = "C:\\path\\to\\AALC.exe"

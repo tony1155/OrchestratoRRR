@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import locale
-import sys
 import tempfile
 import time
 from collections.abc import Mapping, Sequence
@@ -128,7 +127,6 @@ class MumuCliProbeReport:
     """候选可执行文件探测汇总报告。"""
 
     candidate_name: str
-    candidate_path: str
     status: MumuCliCandidateStatus
     attempts: tuple[MumuCliProbeAttempt, ...]
     runtime_approved: bool
@@ -139,30 +137,19 @@ class MumuCliProbeReport:
 
 
 def validate_mumu_candidate(path: Path) -> ProbeCommand:
-    """验证候选路径并返回 ProbeCommand。
-
-    Raises:
-        ValueError: 路径无效或不在白名单中。
-    """
+    """使用不含输入路径的稳定错误码验证候选。"""
     if not path.is_absolute():
-        msg = f"候选路径必须是绝对路径: {path}"
-        raise ValueError(msg)
+        raise ValueError("candidate_not_absolute")
     if not path.exists():
-        msg = f"候选路径不存在: {path}"
-        raise ValueError(msg)
+        raise ValueError("candidate_not_found")
     if not path.is_file():
-        msg = f"候选路径不是普通文件: {path}"
-        raise ValueError(msg)
+        raise ValueError("candidate_not_file")
 
     name_lower = path.name.casefold()
-
     if name_lower in FORBIDDEN_CANDIDATE_NAMES:
-        msg = f"候选文件被禁止: {path.name}"
-        raise ValueError(msg)
-
+        raise ValueError("candidate_forbidden")
     if name_lower not in ALLOWED_CANDIDATE_NAMES:
-        msg = f"候选文件不在允许列表中: {path.name}"
-        raise ValueError(msg)
+        raise ValueError("candidate_not_allowlisted")
 
     return ProbeCommand(display_name=path.name, executable=path, prefix_arguments=())
 
@@ -335,7 +322,6 @@ class MumuCliProbe:
 
         return MumuCliProbeReport(
             candidate_name=command.display_name,
-            candidate_path=_redact_user_home(command.executable),
             status=status,
             attempts=tuple(attempts),
             runtime_approved=False,
@@ -509,22 +495,22 @@ def report_to_dict(report: MumuCliProbeReport) -> dict[str, JsonValue]:
     """将 MumuCliProbeReport 转换为 JSON 可序列化字典。"""
     attempts_list: list[JsonValue] = []
     for a in report.attempts:
+        safe_markers = [marker for marker in a.matched_markers if marker in HELP_MARKERS]
         attempts_list.append(
             {
                 "arguments": list(a.arguments),
                 "status": a.status.value,
                 "exit_code": a.exit_code,
                 "duration_ms": a.duration_ms,
-                "stdout_excerpt": a.stdout_excerpt,
-                "stderr_excerpt": a.stderr_excerpt,
+                "stdout_present": bool(a.stdout_excerpt),
+                "stderr_present": bool(a.stderr_excerpt),
                 "stdout_truncated": a.stdout_truncated,
                 "stderr_truncated": a.stderr_truncated,
-                "matched_markers": list(a.matched_markers),
+                "matched_markers": safe_markers,
             }
         )
     return {
         "candidate_name": report.candidate_name,
-        "candidate_path": report.candidate_path,
         "status": report.status.value,
         "attempts": attempts_list,
         "runtime_approved": report.runtime_approved,
@@ -563,7 +549,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd = validate_mumu_candidate(Path(cand_path_str))
             commands.append(cmd)
         except ValueError as exc:
-            print(f"错误: {exc}", file=sys.stdout)
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False))
             return 2
 
     probe = MumuCliProbe(
@@ -571,14 +557,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         total_timeout_seconds=args.total_timeout_seconds,
     )
 
+    public_reports: list[dict[str, JsonValue]] = []
     for cmd in commands:
         try:
             report = probe.probe(cmd)
-            d = report_to_dict(report)
-            print(json.dumps(d, indent=2, ensure_ascii=False))
-        except Exception as exc:
-            print(f"内部错误 ({cmd.display_name}): {exc}", file=sys.stdout)
+            public_reports.append(report_to_dict(report))
+        except Exception:
+            print(json.dumps({"error": "internal_error"}, ensure_ascii=False))
             return 3
+
+    payload: dict[str, JsonValue] = public_reports[0] if len(public_reports) == 1 else {"results": public_reports}
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
 
     return 0
 

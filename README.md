@@ -1,19 +1,55 @@
 # OrchestratoRRR
 
-Adapter 真实 smoke 门禁已于 2026-07-30 正式关闭：StarRail、MAA、AALC 的受控真实 smoke 均已通过。AALC 使用无限工作负载，本次验收以操作者确认运行正常后优雅关闭作为终止条件，不声称无限业务自动完成。允许进入 Phase 6 完整工作流实施，但 Phase 6 尚未在本提交中实现。脱敏证据见 [最终验收记录](docs/acceptance/adapter-real-smoke.md)。
+## 当前状态 / Project status
+
+**Phase 7 进行中，尚未完成。** 本分支反映截至 6B2B3C 的已验收能力：
+
+- 已完成并经真实端到端验收：Phase 0–5 全部适配器、Phase 6 完整工作流编排、
+  managed MuMu 生命周期（自动启停模拟器）、MAA 配置同步、PyInstaller onedir
+  打包与默认入口。最近一次 15 阶段完整工作流验收为一次通过、无重试。
+- 未完成：Phase 7 收口（7E 旧 PowerShell 入口替换），6B2B2B（maa-cli 自更新）
+  仍阻断，交互式 `start` 命令仍为 external-only。
+- 已知问题与未完成项以各阶段验收文档为准，最新一份为
+  `docs/acceptance/phase-6b2b3c-managed-mumu-lifecycle.md`。
+
+阶段状态的唯一事实来源是 `docs/phase-plan.md` 与 `docs/acceptance/`；
+如遇文档与实际能力不一致，以验收文档中记录的实测证据为准。
+
+## Native default entry setup
+
+The packaged default-entry layout is:
+
+- install: %LOCALAPPDATA%\Programs\OrchestratoRRR
+- config: %LOCALAPPDATA%\OrchestratoRRR\config\orchestrator.toml
+- runtime cwd: %LOCALAPPDATA%\OrchestratoRRR\runtime
+- logs: %LOCALAPPDATA%\OrchestratoRRR\logs
+- reports: %LOCALAPPDATA%\OrchestratoRRR\run-results
+
+All configured business executable and working-directory paths must be
+absolute. The configured log and report directories must exactly match the
+canonical paths above. The Start Menu shortcut invokes only
+OrchestratoRRR.exe start; every real run requires the operator to type the
+real-execution confirmation interactively. Never store that confirmation in a
+shortcut or configuration file.
+
+The legacy PowerShell entry remains available during the parallel-validation
+period. scripts/install-default-entry.ps1 defines the future first-install
+layout, but Phase 7D1 does not execute it or create a real shortcut.
+
+Adapter 真实 smoke 门禁已于 2026-07-30 正式关闭。Phase 6C2 的第一次 external 真实工作流 smoke 已按批准执行一次，但在 `ENSURE_MUMU_RUNNING` 安全停止，StarRail、MAA 和 AALC 均未启动。Phase 6C2A 已修复合法空白分隔 ADB devices 输出的兼容性并增强安全诊断；修复后的 readiness 和完整 smoke 尚未执行。maa-cli 自更新与 MuMu managed 实例化生命周期控制仍被阻断，因此 Phase 6 整体尚未完成。脱敏 Adapter 证据见 [最终验收记录](docs/acceptance/adapter-real-smoke.md)。
 
 Phase 5 后、Phase 6 前的单 Adapter 真实 smoke 门禁已经完成。诊断入口要求精确确认、有限 Deadline、单 Adapter 选择和原子安全结果；后续复验流程见 [统一门禁手册](docs/manual/adapter-real-smoke-gate.md)。
 
 AALC 可通过 `requires_administrator = true` 声明管理员权限要求。普通权限 smoke 入口会在 Adapter 构造前请求一次 UAC，提升整个 OrchestratoRRR/Python 入口；拒绝 UAC 时安全停止。不会用 `runas` 单独启动 AALC，提升后仍保留 ProcessSupervisor 与 Job Object 契约。该 bootstrap 已纳入真实 smoke 验收，但不代表 Phase 6 已实现。
 
-当前阶段：Phase 5——AALC Runtime Adapter。Fake 环境和三个 Adapter 的真实 smoke 验收均已完成，Phase 6 已获实施授权但尚未实现。成功只依据 exit 0；最多三次尝试，只有非零退出和单次尝试超时允许重试。
+当前阶段：Phase 6C2A——ADB devices 空白分隔兼容修复。解析器现在兼容空格、Tab 及其混合分隔，同时保持标题、设备行、重复 serial 和状态选择的严格语义；MuMu Stage 只投影固定的 `probe_status`、`probe_error` 和 `probe_step` 分类。
 
 OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进程编排器。
 
 项目正在逐阶段替换旧的单体 PowerShell 编排流程，目标是可靠管理 MuMu Player、StarRailCopilot、MAA 和 AALC，并为每个外部进程提供明确的超时、取消、进程树清理和结构化结果。
 
 > cleanup failure、取消、路径、配置和启动失败均不重试。
-> 未实现完整工作流或公开 run CLI，未替换旧 PowerShell 编排入口。
+> MuMu managed start/stop 仍未获准，maa-cli 自更新尚未实现；公开 run v1 仅支持 external 安全路径。本轮未执行修复后的真实完整工作流，未替换旧 PowerShell 编排入口。
 
 ## 当前能力
 
@@ -26,6 +62,15 @@ OrchestratoRRR 是一个面向 Windows 本地桌面自动化场景的有界进�
 - MuMu 候选 CLI 固定帮助参数诊断探针；
 - JSONL 日志和结构化运行报告；
 - 配置验证和静态执行计划。
+- Phase 6A 冻结执行计划、Fake Stage 编排、失败/取消/Deadline 传播和 RunReport 最终化。
+- Phase 6B1 Runtime 结果白名单投影、惰性生产绑定、每次运行独立状态和生产 ReportSink。
+- Phase 6B2A 以纯静态方式调查旧流程契约；结论与可实施性矩阵见 [验收记录](docs/acceptance/phase-6b2a-discovery.md)。
+- Phase 6B2B1 提供默认关闭的安全 MAA 配置同步；验收见 [阶段记录](docs/acceptance/phase-6b2b1.md)。
+- Phase 6B2B2A 提供默认关闭、显式网络授权的 MaaCore/资源更新；验收见 [阶段记录](docs/acceptance/phase-6b2b2a.md)。
+- Phase 6B2B3A 完成 MuMu CLI 探针路径脱敏、机器可读输出加固和只读否定证据固化；验收见 [阶段记录](docs/acceptance/phase-6b2b3a-mumu-cli-evidence.md)。
+- Phase 6B2B3B 提供只验证 readiness 的 external MuMu 安全路径；验收见 [阶段记录](docs/acceptance/phase-6b2b3b-external-mumu.md)。
+- Phase 6C1 提供 external-only 的公开 `run` v1、入口级 elevation 接线、稳定退出码和完整 Fake 验收；验收见 [阶段记录](docs/acceptance/phase-6c1.md)，后续人工步骤见 [真实 smoke 手册](docs/manual/phase-6c-external-real-smoke.md)。
+- Phase 6C2A 修复 ADB devices 合法空白分隔兼容并增加脱敏 readiness 分类；第一次真实 smoke 与修复边界见 [阶段记录](docs/acceptance/phase-6c2a-adb-parser-compat.md)。
 
 ## 当前安全边界
 

@@ -18,6 +18,7 @@ from typing import cast
 
 from autogame_orchestrator.config_loader import load_config
 from autogame_orchestrator.config_model import AALCConfig, MAAConfig, StarRailConfig
+from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.models import JsonValue
 from autogame_orchestrator.platform.windows_elevation import (
     ElevationErrorCode,
@@ -37,6 +38,16 @@ EXIT_ELEVATION_CANCELLED = 9
 EXIT_ELEVATION_FAILED = 10
 ELEVATION_MARKER = "--_elevation-child"
 MODULE_NAME = "autogame_orchestrator.diagnostics.adapter_smoke"
+
+
+def _build_relaunch_spec(raw_arguments: Sequence[str]) -> ElevationLaunchSpec:
+    """Preserve the source-module diagnostic entry while adapting to the spec API."""
+
+    return ElevationLaunchSpec(
+        executable=Path(sys.executable),
+        arguments=("-m", MODULE_NAME, *raw_arguments, ELEVATION_MARKER),
+        working_directory=Path.cwd(),
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -214,7 +225,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args._elevation_child:
                     print("提权后的入口仍未获得管理员权限，已安全停止。")
                     return EXIT_ELEVATION_FAILED
-                elevation = relaunch_current_process_elevated(["-m", MODULE_NAME, *raw_arguments, ELEVATION_MARKER])
+                elevation = relaunch_current_process_elevated(_build_relaunch_spec(raw_arguments))
                 if elevation.error_code == ElevationErrorCode.ELEVATION_CANCELLED:
                     print("用户取消了管理员权限请求，未启动 Adapter。")
                     return EXIT_ELEVATION_CANCELLED

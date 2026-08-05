@@ -2,23 +2,29 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from autogame_orchestrator.probes.adb_client import AdbClient, AdbClientConfig
-from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeStatus
+from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeResult, ProbeStatus
 from autogame_orchestrator.process import CancellationToken, Deadline
 
 _FAKE_ADB = str(Path(__file__).resolve().parent.parent / "fakes" / "fake_adb.py")
 
 
-def _make_client(mode: str = "normal") -> AdbClient:
+def _make_client(mode: str = "normal", args_file: Path | None = None) -> AdbClient:
+    base_arguments = [_FAKE_ADB, "--mode", mode]
+    if args_file is not None:
+        base_arguments.extend(["--args-file", str(args_file)])
     return AdbClient(
         AdbClientConfig(
             executable=Path(sys.executable),
-            base_arguments=(_FAKE_ADB, "--mode", mode),
+            base_arguments=tuple(base_arguments),
         )
     )
 
@@ -139,3 +145,127 @@ def test_no_pipe_no_shell() -> None:
     config = AdbClientConfig(executable=Path(sys.executable))
     assert not hasattr(config, "shell")
     assert not hasattr(config, "use_pipe")
+
+
+def test_connect_success() -> None:
+    result = _make_client("connect_success").connect("127.0.0.1", 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.READY
+    assert result.error_code == ProbeErrorCode.OK
+    assert result.diagnostics == {"connect_status": "connected"}
+
+
+def test_connect_already_connected_is_success() -> None:
+    result = _make_client("connect_already").connect("127.0.0.1", 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.READY
+    assert result.error_code == ProbeErrorCode.OK
+    assert result.diagnostics == {"connect_status": "already_connected"}
+
+
+def test_connect_failure_text_with_zero_exit_is_failure() -> None:
+    result = _make_client("connect_failed").connect("127.0.0.1", 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.FAILED
+    assert result.error_code == ProbeErrorCode.ADB_CONNECT_FAILED
+    assert result.diagnostics == {"connect_status": "failed"}
+
+
+@pytest.mark.parametrize(
+    ("mode", "error_code"),
+    [
+        ("connect_not_connected", ProbeErrorCode.ADB_CONNECT_FAILED),
+        ("connect_conflict", ProbeErrorCode.ADB_CONNECT_FAILED),
+        ("connect_empty", ProbeErrorCode.ADB_CONNECT_FAILED),
+        ("connect_invalid_utf8", ProbeErrorCode.ADB_OUTPUT_INVALID),
+    ],
+)
+def test_connect_negative_or_conflicting_output_is_failure(mode: str, error_code: ProbeErrorCode) -> None:
+    result = _make_client(mode).connect("127.0.0.1", 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.FAILED
+    assert result.error_code == error_code
+    assert result.diagnostics == {"connect_status": "failed"}
+
+
+def test_connect_unknown_text_with_zero_exit_is_failure() -> None:
+    result = _make_client("connect_unknown").connect("127.0.0.1", 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.FAILED
+    assert result.error_code == ProbeErrorCode.ADB_CONNECT_FAILED
+
+
+def test_connect_nonzero_exit_is_failure() -> None:
+    result = _make_client("connect_nonzero").connect("127.0.0.1", 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.FAILED
+    assert result.error_code == ProbeErrorCode.ADB_EXIT_NONZERO
+    assert result.diagnostics == {"connect_status": "failed"}
+
+
+def test_connect_timeout() -> None:
+    result = _make_client("sleep_forever").connect("127.0.0.1", 16384, Deadline.after(0.2))
+    assert result.status == ProbeStatus.TIMEOUT
+    assert result.error_code == ProbeErrorCode.ADB_TIMEOUT
+    assert result.diagnostics == {"connect_status": "failed"}
+
+
+def test_connect_cancellation() -> None:
+    client = _make_client("sleep_forever")
+    cancel = CancellationToken()
+
+    def _cancel() -> None:
+        time.sleep(0.1)
+        cancel.cancel()
+
+    thread = threading.Thread(target=_cancel, daemon=True)
+    thread.start()
+    result = client.connect("127.0.0.1", 16384, Deadline.after(5.0), cancel)
+    thread.join()
+
+    assert result.status == ProbeStatus.FAILED
+    assert result.error_code == ProbeErrorCode.ADB_CANCELLED
+    assert result.diagnostics == {"connect_status": "failed"}
+
+
+def test_connect_process_start_failure(tmp_path: Path) -> None:
+    executable = tmp_path / "not-an-executable"
+    executable.write_text("not executable", encoding="utf-8")
+    client = AdbClient(AdbClientConfig(executable=executable))
+    result = client.connect("127.0.0.1", 16384, Deadline.after(1.0))
+    assert result.status == ProbeStatus.FAILED
+    assert result.error_code == ProbeErrorCode.ADB_START_FAILED
+    assert result.diagnostics == {"connect_status": "failed"}
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["localhost", "127.0.0.01", "127.1", "0.0.0.0", "::1", "127.0.0.1\n", "127.0.0.1;echo"],
+)
+def test_connect_non_local_host_is_rejected_without_starting(host: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _make_client("connect_success")
+
+    def _unexpected(*args: object, **kwargs: object) -> ProbeResult:
+        raise AssertionError("process must not start")
+
+    monkeypatch.setattr(client, "_run_adb_command", _unexpected)
+    result = client.connect(host, 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.FAILED
+    assert result.error_code == ProbeErrorCode.NON_LOCAL_ADDRESS_REJECTED
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536, True, 1.5, "16384", "16:384", " 16384", "16384\n"])
+def test_connect_invalid_port_is_rejected_without_starting(port: object, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _make_client("connect_success")
+
+    def _unexpected(*args: object, **kwargs: object) -> ProbeResult:
+        raise AssertionError("process must not start")
+
+    monkeypatch.setattr(client, "_run_adb_command", _unexpected)
+    result = client.connect("127.0.0.1", port, Deadline.after(5.0))
+    assert result.status == ProbeStatus.FAILED
+    assert result.error_code == ProbeErrorCode.INVALID_CONFIGURATION
+
+
+def test_connect_arguments_are_exact_and_diagnostics_are_safe(tmp_path: Path) -> None:
+    args_file = tmp_path / "args.json"
+    result = _make_client("connect_success", args_file).connect("127.0.0.1", 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.READY
+    assert json.loads(args_file.read_text(encoding="utf-8")) == ["connect", "127.0.0.1:16384"]
+    rendered = json.dumps(dict(result.diagnostics)) + repr(result)
+    for forbidden in ("127.0.0.1", "16384", "target", "stdout", "stderr"):
+        assert forbidden not in rendered

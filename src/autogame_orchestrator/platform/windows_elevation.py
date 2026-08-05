@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.wintypes
-import os
 import subprocess
-import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+
+from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 
 TOKEN_QUERY = 0x0008
 TOKEN_ELEVATION_CLASS = 20
@@ -174,12 +174,19 @@ def is_process_elevated() -> bool:
     return _api.is_process_elevated()
 
 
-def relaunch_current_process_elevated(arguments: Sequence[str]) -> ElevationResult:
-    """提升当前 Python 入口，等待完成并转发其退出码。"""
+def relaunch_current_process_elevated(spec: ElevationLaunchSpec) -> ElevationResult:
+    """Launch the explicit entry specification and forward its exit code."""
 
     handle: int | None = None
     try:
-        handle = _api.launch_elevated(sys.executable, quote_windows_arguments(arguments), os.getcwd())
+        launched_handle = _api.launch_elevated(
+            str(spec.executable),
+            quote_windows_arguments(spec.arguments),
+            str(spec.working_directory),
+        )
+        if not launched_handle:
+            raise ElevationLaunchError(0)
+        handle = launched_handle
         return ElevationResult(ElevationErrorCode.OK, _api.wait_for_exit(handle))
     except ElevationLaunchError as exc:
         if exc.win32_code == ERROR_CANCELLED:

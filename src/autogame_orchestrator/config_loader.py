@@ -15,7 +15,10 @@ from autogame_orchestrator.config_model import (
     AALCConfig,
     AppConfig,
     MAAConfig,
+    MAASyncConfig,
+    MAAUpdateConfig,
     MuMuConfig,
+    MumuLifecycleMode,
     OrchestratorConfig,
     StarRailConfig,
 )
@@ -79,12 +82,16 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     cfg_mu = _parse_mumu(data.get("mumu"))
     cfg_sr = _parse_starrail(data.get("starrail"))
     cfg_ma = _parse_maa(data.get("maa"))
+    cfg_ms = _parse_maa_sync(data.get("maa_sync"))
+    cfg_up = _parse_maa_update(data.get("maa_update"))
     cfg_al = _parse_aalc(data.get("aalc"))
 
     all_errors.extend(cfg_or[1])
     all_errors.extend(cfg_mu[1])
     all_errors.extend(cfg_sr[1])
     all_errors.extend(cfg_ma[1])
+    all_errors.extend(cfg_ms[1])
+    all_errors.extend(cfg_up[1])
     all_errors.extend(cfg_al[1])
 
     if all_errors:
@@ -95,6 +102,8 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
         mumu=cfg_mu[0],  # type: ignore[arg-type]
         starrail=cfg_sr[0],  # type: ignore[arg-type]
         maa=cfg_ma[0],  # type: ignore[arg-type]
+        maa_sync=cfg_ms[0],  # type: ignore[arg-type]
+        maa_update=cfg_up[0],  # type: ignore[arg-type]
         aalc=cfg_al[0],  # type: ignore[arg-type]
     )
 
@@ -146,27 +155,59 @@ def _parse_mumu(raw: object) -> tuple[MuMuConfig | None, list[ErrorCode]]:
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return None, errors
 
-    for fld in ("executable", "adb_executable", "adb_serial"):
-        val = raw.get(fld)
-        if not isinstance(val, str) or not val.strip():
+    mode_raw = raw.get("lifecycle_mode", MumuLifecycleMode.MANAGED.value)
+    if isinstance(mode_raw, str):
+        try:
+            lifecycle_mode = MumuLifecycleMode(mode_raw)
+        except ValueError:
+            lifecycle_mode = None
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    else:
+        lifecycle_mode = None
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    executable = raw.get("executable", "")
+    adb_executable = raw.get("adb_executable")
+    adb_serial = raw.get("adb_serial")
+    if not isinstance(executable, str) or lifecycle_mode == MumuLifecycleMode.MANAGED and not executable.strip():
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    for value in (adb_executable, adb_serial):
+        if not isinstance(value, str) or not value.strip():
             errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
     start_to = raw.get("start_timeout_seconds", 120)
     stop_to = raw.get("stop_timeout_seconds", 20)
-    if not isinstance(start_to, int):
+    if not isinstance(start_to, int) or isinstance(start_to, bool):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
-    if not isinstance(stop_to, int):
+    if not isinstance(stop_to, int) or isinstance(stop_to, bool):
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    start_arguments = _tolist(raw.get("start_arguments", []))
+    stop_arguments = _tolist(raw.get("stop_arguments", []))
+    if start_arguments is None or stop_arguments is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    if lifecycle_mode == MumuLifecycleMode.EXTERNAL and (start_arguments or stop_arguments):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
     if errors:
         return None, errors
 
+    assert lifecycle_mode is not None
+    assert isinstance(executable, str)
+    assert isinstance(adb_executable, str)
+    assert isinstance(adb_serial, str)
+    assert isinstance(start_to, int)
+    assert isinstance(stop_to, int)
+    assert start_arguments is not None
+    assert stop_arguments is not None
     return MuMuConfig(
-        executable=str(raw.get("executable", "")),
-        adb_executable=str(raw.get("adb_executable", "")),
-        adb_serial=str(raw.get("adb_serial", "127.0.0.1:16384")),
-        start_timeout_seconds=int(start_to),
-        stop_timeout_seconds=int(stop_to),
+        lifecycle_mode=lifecycle_mode,
+        executable=executable,
+        adb_executable=adb_executable,
+        adb_serial=adb_serial,
+        start_timeout_seconds=start_to,
+        stop_timeout_seconds=stop_to,
+        start_arguments=tuple(start_arguments),
+        stop_arguments=tuple(stop_arguments),
     ), []
 
 
@@ -271,6 +312,81 @@ def _parse_maa(raw: object) -> tuple[MAAConfig | None, list[ErrorCode]]:
         environment_overrides=environment if environment is not None else (),
         timeout_seconds=timeout,
         stop_timeout_seconds=stop_timeout,
+    ), []
+
+
+def _parse_maa_sync(raw: object) -> tuple[MAASyncConfig | None, list[ErrorCode]]:
+    if raw is None:
+        return MAASyncConfig(), []
+    if not isinstance(raw, dict):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    enabled = raw.get("enabled", False)
+    backup_enabled = raw.get("backup_enabled", True)
+    max_source_bytes = raw.get("max_source_bytes", 4 * 1024 * 1024)
+    requires_administrator = raw.get("requires_administrator", False)
+    paths = [
+        raw.get("gui_settings_source", ""),
+        raw.get("gui_tasks_source", ""),
+        raw.get("cli_profile_destination", ""),
+        raw.get("cli_tasks_destination", ""),
+    ]
+    valid = (
+        isinstance(enabled, bool)
+        and isinstance(backup_enabled, bool)
+        and isinstance(max_source_bytes, int)
+        and not isinstance(max_source_bytes, bool)
+        and isinstance(requires_administrator, bool)
+        and all(isinstance(value, str) for value in paths)
+    )
+    if not valid:
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    return MAASyncConfig(
+        enabled=enabled,
+        gui_settings_source=paths[0],
+        gui_tasks_source=paths[1],
+        cli_profile_destination=paths[2],
+        cli_tasks_destination=paths[3],
+        backup_enabled=backup_enabled,
+        max_source_bytes=max_source_bytes,
+        requires_administrator=requires_administrator,
+    ), []
+
+
+def _parse_maa_update(raw: object) -> tuple[MAAUpdateConfig | None, list[ErrorCode]]:
+    if raw is None:
+        return MAAUpdateConfig(), []
+    if not isinstance(raw, dict):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    allowed_fields = {
+        "enabled",
+        "allow_network",
+        "requires_administrator",
+        "arguments",
+        "timeout_seconds",
+    }
+    if any(key not in allowed_fields for key in raw):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    enabled = raw.get("enabled", False)
+    allow_network = raw.get("allow_network", False)
+    requires_administrator = raw.get("requires_administrator", False)
+    arguments = _tolist(raw.get("arguments", ["update"]))
+    timeout_seconds = raw.get("timeout_seconds", 1800)
+    valid = (
+        isinstance(enabled, bool)
+        and isinstance(allow_network, bool)
+        and isinstance(requires_administrator, bool)
+        and arguments is not None
+        and isinstance(timeout_seconds, int)
+        and not isinstance(timeout_seconds, bool)
+    )
+    if not valid:
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    return MAAUpdateConfig(
+        enabled=enabled,
+        allow_network=allow_network,
+        requires_administrator=requires_administrator,
+        arguments=tuple(arguments) if arguments is not None else (),
+        timeout_seconds=timeout_seconds,
     ), []
 
 

@@ -6,8 +6,10 @@ validation functions — every error is mapped to a stable *ErrorCode*.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from autogame_orchestrator.models import ErrorCode
@@ -17,6 +19,13 @@ if TYPE_CHECKING:
 
 
 _VALID_PATH_CHARS_RE = re.compile(r'^[^\x00-\x1f\x7f"*:<>?|]+$')
+
+
+@dataclass(frozen=True)
+class DefaultEntryPathIssue:
+    """A stable field-only diagnostic for the strict default-entry policy."""
+
+    field: str
 
 
 def _validate_path_shape(value: str, label: str) -> list[ErrorCode]:
@@ -81,8 +90,16 @@ class OrchestratorConfig:
         return errors
 
 
+class MumuLifecycleMode(StrEnum):
+    """MuMu 生命周期的稳定管理模式。"""
+
+    MANAGED = "managed"
+    EXTERNAL = "external"
+
+
 @dataclass(frozen=True)
 class MuMuConfig:
+    lifecycle_mode: MumuLifecycleMode = MumuLifecycleMode.MANAGED
     executable: str = ""
     adb_executable: str = ""
     adb_serial: str = "127.0.0.1:16384"
@@ -93,22 +110,32 @@ class MuMuConfig:
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
-        errors.extend(_validate_non_empty_str(self.executable, "executable"))
-        errors.extend(_validate_non_empty_str(self.adb_executable, "adb_executable"))
-        errors.extend(_validate_non_empty_str(self.adb_serial, "adb_serial"))
-        errors.extend(_validate_positive_int(self.start_timeout_seconds, "start_timeout_seconds"))
-        errors.extend(_validate_positive_int(self.stop_timeout_seconds, "stop_timeout_seconds"))
-        if self.start_arguments:
-            errors.extend(_validate_str_list(list(self.start_arguments), "start_arguments"))
-        if self.stop_arguments:
-            errors.extend(_validate_str_list(list(self.stop_arguments), "stop_arguments"))
+        if not isinstance(self.lifecycle_mode, MumuLifecycleMode):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            return errors
+        if not isinstance(self.executable, str):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        elif self.lifecycle_mode == MumuLifecycleMode.MANAGED:
+            errors.extend(_validate_non_empty_str(self.executable, "executable"))
+        for value in (self.adb_executable, self.adb_serial):
+            if not isinstance(value, str) or not value.strip():
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        for timeout in (self.start_timeout_seconds, self.stop_timeout_seconds):
+            if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        for arguments in (self.start_arguments, self.stop_arguments):
+            if not isinstance(arguments, tuple) or not all(isinstance(item, str) for item in arguments):
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if self.lifecycle_mode == MumuLifecycleMode.EXTERNAL and (self.start_arguments or self.stop_arguments):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return errors
 
     def check_paths(self) -> list[ErrorCode]:
         from pathlib import Path
 
         errors: list[ErrorCode] = []
-        errors.extend(_check_required_path(Path(self.executable), "executable"))
+        if self.lifecycle_mode == MumuLifecycleMode.MANAGED:
+            errors.extend(_check_required_path(Path(self.executable), "executable"))
         errors.extend(_check_required_path(Path(self.adb_executable), "adb_executable"))
         return errors
 
@@ -324,11 +351,122 @@ class AALCConfig:
 
 
 @dataclass(frozen=True)
+class MAASyncConfig:
+    """MAA GUI 配置到 CLI 配置的安全同步契约。"""
+
+    enabled: bool = False
+    gui_settings_source: str = ""
+    gui_tasks_source: str = ""
+    cli_profile_destination: str = ""
+    cli_tasks_destination: str = ""
+    backup_enabled: bool = True
+    max_source_bytes: int = 4 * 1024 * 1024
+    requires_administrator: bool = False
+
+    def validate(self) -> list[ErrorCode]:
+        errors: list[ErrorCode] = []
+        if not isinstance(self.enabled, bool):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.backup_enabled, bool):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.requires_administrator, bool):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if (
+            not isinstance(self.max_source_bytes, int)
+            or isinstance(self.max_source_bytes, bool)
+            or self.max_source_bytes <= 0
+        ):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.enabled, bool):
+            return errors
+        paths = (
+            self.gui_settings_source,
+            self.gui_tasks_source,
+            self.cli_profile_destination,
+            self.cli_tasks_destination,
+        )
+        if not self.enabled:
+            return errors
+        if any(not isinstance(value, str) or not value.strip() for value in paths):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            return errors
+        normalized = [os.path.normcase(os.path.abspath(value)) for value in paths]
+        sources = normalized[:2]
+        targets = normalized[2:]
+        if sources[0] == sources[1] or targets[0] == targets[1]:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if any(target in sources for target in targets):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        return errors
+
+    def check_paths(self) -> list[ErrorCode]:
+        from pathlib import Path
+
+        if not self.enabled:
+            return []
+        errors: list[ErrorCode] = []
+        for value in (self.gui_settings_source, self.gui_tasks_source):
+            path = Path(value)
+            if not path.exists():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+            elif not path.is_file():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_FILE)
+        for value in (self.cli_profile_destination, self.cli_tasks_destination):
+            path = Path(value)
+            if path.exists() and not path.is_file():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_FILE)
+        return errors
+
+
+@dataclass(frozen=True)
+class MAAUpdateConfig:
+    """仅允许 MaaCore/资源 update 的安全配置。"""
+
+    enabled: bool = False
+    allow_network: bool = False
+    requires_administrator: bool = False
+    arguments: tuple[str, ...] = ("update",)
+    timeout_seconds: int = 1800
+
+    def validate(self) -> list[ErrorCode]:
+        errors: list[ErrorCode] = []
+        for value in (self.enabled, self.allow_network, self.requires_administrator):
+            if not isinstance(value, bool):
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if (
+            not isinstance(self.timeout_seconds, int)
+            or isinstance(self.timeout_seconds, bool)
+            or self.timeout_seconds <= 0
+        ):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.arguments, (tuple, list)) or not self.arguments or len(self.arguments) > 16:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        else:
+            forbidden = {"self", "hot-update", "install", "run", "task"}
+            for argument in self.arguments:
+                if (
+                    not isinstance(argument, str)
+                    or not argument
+                    or len(argument) > 512
+                    or any(ord(char) < 32 or ord(char) == 127 for char in argument)
+                    or argument.casefold() in forbidden
+                ):
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            if self.arguments[0] != "update":
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if isinstance(self.enabled, bool) and self.enabled and self.allow_network is not True:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        return errors
+
+
+@dataclass(frozen=True)
 class AppConfig:
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
     mumu: MuMuConfig = field(default_factory=MuMuConfig)
     starrail: StarRailConfig = field(default_factory=StarRailConfig)
     maa: MAAConfig = field(default_factory=MAAConfig)
+    maa_sync: MAASyncConfig = field(default_factory=MAASyncConfig)
+    maa_update: MAAUpdateConfig = field(default_factory=MAAUpdateConfig)
     aalc: AALCConfig = field(default_factory=AALCConfig)
 
     def validate(self) -> list[ErrorCode]:
@@ -337,6 +475,8 @@ class AppConfig:
         errors.extend(self.mumu.validate())
         errors.extend(self.starrail.validate())
         errors.extend(self.maa.validate())
+        errors.extend(self.maa_sync.validate())
+        errors.extend(self.maa_update.validate())
         errors.extend(self.aalc.validate())
         return errors
 
@@ -345,5 +485,63 @@ class AppConfig:
         errors.extend(self.mumu.check_paths())
         errors.extend(self.starrail.check_paths())
         errors.extend(self.maa.check_paths())
+        errors.extend(self.maa_sync.check_paths())
         errors.extend(self.aalc.check_paths())
         return errors
+
+    def check_default_entry_paths(
+        self,
+        *,
+        canonical_log_directory: Path,
+        canonical_report_directory: Path,
+    ) -> tuple[DefaultEntryPathIssue, ...]:
+        """Require deterministic absolute paths for the interactive default entry."""
+        from pathlib import Path
+
+        issues: list[DefaultEntryPathIssue] = []
+
+        def require_absolute(field_name: str, value: str, *, allow_empty: bool = False) -> None:
+            if allow_empty and not value:
+                return
+            try:
+                absolute = bool(value) and Path(value).is_absolute()
+            except (OSError, ValueError):
+                absolute = False
+            if not absolute:
+                issues.append(DefaultEntryPathIssue(field_name))
+
+        def require_canonical(field_name: str, value: str, expected: Path) -> None:
+            require_absolute(field_name, value)
+            if issues and issues[-1].field == field_name:
+                return
+            try:
+                matches = Path(value).resolve(strict=False) == expected.resolve(strict=False)
+            except (OSError, ValueError):
+                matches = False
+            if not matches:
+                issues.append(DefaultEntryPathIssue(field_name))
+
+        require_canonical("orchestrator.log_dir", self.orchestrator.log_dir, canonical_log_directory)
+        require_canonical("orchestrator.report_dir", self.orchestrator.report_dir, canonical_report_directory)
+        require_absolute(
+            "mumu.executable",
+            self.mumu.executable,
+            allow_empty=self.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL,
+        )
+        require_absolute("mumu.adb_executable", self.mumu.adb_executable)
+        require_absolute("starrail.executable", self.starrail.executable)
+        require_absolute("starrail.working_directory", self.starrail.working_directory)
+        require_absolute("starrail.log_path_template", self.starrail.log_path_template.replace("{date}", "2000-01-01"))
+        require_absolute("maa.executable", self.maa.executable)
+        require_absolute("maa.working_directory", self.maa.working_directory)
+        require_absolute("aalc.executable", self.aalc.executable)
+        require_absolute("aalc.working_directory", self.aalc.working_directory)
+        sync_paths = (
+            ("maa_sync.gui_settings_source", self.maa_sync.gui_settings_source),
+            ("maa_sync.gui_tasks_source", self.maa_sync.gui_tasks_source),
+            ("maa_sync.cli_profile_destination", self.maa_sync.cli_profile_destination),
+            ("maa_sync.cli_tasks_destination", self.maa_sync.cli_tasks_destination),
+        )
+        for field_name, value in sync_paths:
+            require_absolute(field_name, value, allow_empty=not self.maa_sync.enabled)
+        return tuple(issues)

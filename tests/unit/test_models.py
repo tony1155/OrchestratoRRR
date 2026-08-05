@@ -60,7 +60,7 @@ def test_stage_report_failure_must_not_use_ok() -> None:
         )
 
 
-def test_stage_report_skipped_with_ok_rejected() -> None:
+def test_stage_report_omitted_outcome_with_ok_rejected() -> None:
     with pytest.raises(ValueError, match="non-SUCCESS"):
         StageReport(
             stage=StageName.RUN_MAA,
@@ -73,7 +73,7 @@ def test_stage_report_skipped_with_ok_rejected() -> None:
         )
 
 
-def test_stage_report_skipped_with_skipped_accepted() -> None:
+def test_stage_report_omitted_outcome_with_omitted_code_accepted() -> None:
     report = StageReport(
         stage=StageName.RUN_MAA,
         outcome=OutcomeKind.SKIPPED,
