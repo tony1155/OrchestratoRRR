@@ -1,5 +1,20 @@
 # OrchestratoRRR
 
+## 当前状态 / Project status
+
+**Phase 7 进行中，尚未完成。** 本分支反映截至 6B2B3C 的已验收能力：
+
+- 已完成并经真实端到端验收：Phase 0–5 全部适配器、Phase 6 完整工作流编排、
+  managed MuMu 生命周期（自动启停模拟器）、MAA 配置同步、PyInstaller onedir
+  打包与默认入口。最近一次 15 阶段完整工作流验收为一次通过、无重试。
+- 未完成：Phase 7 收口（7E 旧 PowerShell 入口替换），6B2B2B（maa-cli 自更新）
+  仍阻断，交互式 `start` 命令仍为 external-only。
+- 已知问题与未完成项以各阶段验收文档为准，最新一份为
+  `docs/acceptance/phase-6b2b3c-managed-mumu-lifecycle.md`。
+
+阶段状态的唯一事实来源是 `docs/phase-plan.md` 与 `docs/acceptance/`；
+如遇文档与实际能力不一致，以验收文档中记录的实测证据为准。
+
 ## Native default entry setup
 
 The packaged default-entry layout is:
