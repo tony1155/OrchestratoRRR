@@ -14,6 +14,7 @@ from autogame_orchestrator.workflow.production.ports import (
     MAARunPort,
     MAASyncPort,
     MAAUpdatePort,
+    ManagedMumuRuntimePort,
     MumuRuntimePort,
     StarRailRunPort,
 )
@@ -89,11 +90,14 @@ class ProductionStageExecutor:
             return self._run_maa_sync(context)
         if stage == StageName.UPDATE_MAA:
             return self._run_maa_update(context)
-        blockers = {
-            StageName.STOP_MUMU: "mumu_stop_not_approved",
-            StageName.START_MUMU: "mumu_start_not_approved",
-        }
-        if stage in blockers:
+        if self._config.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL and stage in {
+            StageName.STOP_MUMU,
+            StageName.START_MUMU,
+        }:
+            blockers = {
+                StageName.STOP_MUMU: "mumu_stop_not_approved",
+                StageName.START_MUMU: "mumu_start_not_approved",
+            }
             return _instant(
                 stage,
                 OutcomeKind.FAILURE,
@@ -105,6 +109,8 @@ class ProductionStageExecutor:
             StageName.WAIT_MUMU_ADB_READY,
             StageName.VERIFY_MUMU_STOPPED,
             StageName.WAIT_MUMU_ADB_READY_AFTER_RESTART,
+            StageName.STOP_MUMU,
+            StageName.START_MUMU,
         }:
             return self._run_mumu(context)
         if stage == StageName.RUN_STARRAIL:
@@ -217,10 +223,21 @@ class ProductionStageExecutor:
                 ErrorCode.WORKFLOW_DEADLINE_REQUIRED,
             )
         mumu = self._mumu()
-        if (
-            self._stage == StageName.ENSURE_MUMU_RUNNING
-            and self._config.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL
-        ):
+        managed = self._config.mumu.lifecycle_mode == MumuLifecycleMode.MANAGED
+        lifecycle_stages = {StageName.ENSURE_MUMU_RUNNING, StageName.START_MUMU, StageName.STOP_MUMU}
+        if managed and self._stage in lifecycle_stages:
+            if not isinstance(mumu, ManagedMumuRuntimePort):
+                return _instant(
+                    self._stage,
+                    OutcomeKind.FAILURE,
+                    ErrorCode.WORKFLOW_STAGE_BLOCKED,
+                    {"blocker": "mumu_lifecycle_port_unavailable"},
+                )
+            if self._stage == StageName.STOP_MUMU:
+                result = mumu.stop(context.deadline, context.cancel)
+            else:
+                result = mumu.start(context.deadline, context.cancel)
+        elif self._stage == StageName.ENSURE_MUMU_RUNNING:
             result = mumu.ensure_external_ready(context.deadline, context.cancel)
         else:
             result = mumu.status(context.deadline, context.cancel)

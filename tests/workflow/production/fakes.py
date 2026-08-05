@@ -202,6 +202,8 @@ class FakeMumuPort:
         self.calls = 0
         self.status_calls = 0
         self.ensure_calls = 0
+        self.start_calls = 0
+        self.stop_calls = 0
         self.deadline: Deadline | None = None
         self.cancel: CancellationToken | None = None
 
@@ -218,3 +220,50 @@ class FakeMumuPort:
         self.deadline = deadline
         self.cancel = cancel
         return self.ensure_result if self.ensure_result is not None else self.result
+
+    def start(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
+        self.calls += 1
+        self.start_calls += 1
+        self.deadline = deadline
+        self.cancel = cancel
+        return self.result
+
+    def stop(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
+        self.calls += 1
+        self.stop_calls += 1
+        self.deadline = deadline
+        self.cancel = cancel
+        return self.result
+
+
+class FakeExternalMumuStatusPort:
+    """镜像生产 ``_ExternalMumuStatusPort``：只暴露 status/ensure，不含生命周期方法。"""
+
+    def __init__(self, result: MumuRuntimeResult, ensure_result: MumuRuntimeResult | None = None) -> None:
+        self._inner = FakeMumuPort(result, ensure_result)
+
+    @property
+    def calls(self) -> int:
+        return self._inner.calls
+
+    @property
+    def status_calls(self) -> int:
+        return self._inner.status_calls
+
+    @property
+    def ensure_calls(self) -> int:
+        return self._inner.ensure_calls
+
+    @property
+    def deadline(self) -> Deadline | None:
+        return self._inner.deadline
+
+    @property
+    def cancel(self) -> CancellationToken | None:
+        return self._inner.cancel
+
+    def status(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
+        return self._inner.status(deadline, cancel)
+
+    def ensure_external_ready(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
+        return self._inner.ensure_external_ready(deadline, cancel)

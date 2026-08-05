@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from autogame_orchestrator.config_model import AppConfig, MuMuConfig
+from autogame_orchestrator.config_model import AppConfig, MuMuConfig, MumuLifecycleMode
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, StageName
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
@@ -110,9 +110,11 @@ def test_validate_path_failure_does_not_expose_path(tmp_path: Path) -> None:
         (StageName.START_MUMU, "mumu_start_not_approved"),
     ],
 )
-def test_unapproved_stage_is_explicitly_blocked(stage: StageName, blocker: str) -> None:
+def test_unapproved_stage_is_explicitly_blocked_in_external(stage: StageName, blocker: str) -> None:
+    """external 模式下编排器不得接管模拟器生命周期，仍然硬阻断。"""
     runtime_factories, counts = factories()
-    report, _ = execute(AppConfig(), stage, runtime_factories)
+    config = AppConfig(mumu=MuMuConfig(lifecycle_mode=MumuLifecycleMode.EXTERNAL))
+    report, _ = execute(config, stage, runtime_factories)
     assert (report.outcome, report.error_code) == (OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_BLOCKED)
     assert report.diagnostics == {"blocker": blocker}
     assert counts == Counter()
@@ -157,12 +159,13 @@ def test_ensure_mumu_status_mapping(status: MumuRuntimeStatus, expected: ErrorCo
     assert port.calls == 1
 
 
-def test_mumu_stopped_does_not_call_start() -> None:
+def test_managed_stopped_mumu_calls_start() -> None:
+    """managed 模式下 ENSURE_MUMU_RUNNING 应调用 start() 而非仅查状态。"""
     port = FakeMumuPort(mumu_result(MumuRuntimeStatus.STOPPED))
-    assert not hasattr(port, "start")
     runtime_factories, _ = factories(mumu=port)
     execute(AppConfig(), StageName.ENSURE_MUMU_RUNNING, runtime_factories, deadline=Deadline.after(30))
-    assert port.calls == 1
+    assert port.start_calls == 1
+    assert port.status_calls == 0
 
 
 def test_mumu_receives_same_deadline_and_token() -> None:

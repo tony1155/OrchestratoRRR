@@ -14,7 +14,7 @@ from autogame_orchestrator.workflow.production.application import ProductionAppl
 from autogame_orchestrator.workflow.production.ports import RuntimeFactories
 from tests.workflow.fakes import FakeElevationGateway, MemorySink
 from tests.workflow.production.fakes import (
-    FakeMumuPort,
+    FakeExternalMumuStatusPort,
     FakeRunPort,
     aalc_result,
     maa_result,
@@ -165,7 +165,7 @@ def fake_dependencies(
     fail_log_open: bool = False,
 ):
     counts: Counter[str] = Counter()
-    mumu = FakeMumuPort(mumu_result(mumu_status))
+    mumu = FakeExternalMumuStatusPort(mumu_result(mumu_status))
     starrail = FakeRunPort(starrail_result(starrail_status))
     maa = FakeRunPort(maa_result(maa_status))
     aalc = FakeRunPort(

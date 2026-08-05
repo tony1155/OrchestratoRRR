@@ -25,6 +25,7 @@ from autogame_orchestrator.workflow.production.runtime_bindings import build_def
 from autogame_orchestrator.workflow.runner import WorkflowRunner
 from tests.workflow.fakes import MemorySink
 from tests.workflow.production.fakes import (
+    FakeExternalMumuStatusPort,
     FakeMumuPort,
     FakeRunPort,
     aalc_result,
@@ -61,6 +62,16 @@ class RecordingMumuPort(FakeMumuPort):
         self.deadlines.append(deadline)
         self.tokens.append(cancel)
         return super().ensure_external_ready(deadline, cancel)
+
+    def start(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
+        self.deadlines.append(deadline)
+        self.tokens.append(cancel)
+        return super().start(deadline, cancel)
+
+    def stop(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
+        self.deadlines.append(deadline)
+        self.tokens.append(cancel)
+        return super().stop(deadline, cancel)
 
 
 def _external_config(root: Path) -> AppConfig:
@@ -174,7 +185,8 @@ def test_external_success_reaches_maa_and_aalc(tmp_path: Path) -> None:
 
 
 def test_external_success_never_exposes_lifecycle_methods(tmp_path: Path) -> None:
-    runtime_factories, _, mumu, *_ = _factories()
+    status_only = FakeExternalMumuStatusPort(mumu_result(MumuRuntimeStatus.READY))
+    runtime_factories, _, mumu, *_ = _factories(mumu_port=status_only)
     _run(_external_config(tmp_path), runtime_factories)
     assert not hasattr(mumu, "start")
     assert not hasattr(mumu, "stop")
@@ -276,7 +288,8 @@ def test_external_mode_does_not_add_mumu_elevation(tmp_path: Path) -> None:
     assert build_execution_plan(_external_config(tmp_path)).requires_administrator is False
 
 
-def test_managed_stopped_blocker_remains_unchanged(tmp_path: Path) -> None:
+def test_managed_start_failure_still_blocks(tmp_path: Path) -> None:
+    """managed 下调用 start() 后仍为 STOPPED，投影层必须阻断而不是放行。"""
     config = valid_config(tmp_path)
     runtime_factories, _, mumu, *_ = _factories(mumu_status=MumuRuntimeStatus.STOPPED)
     factory = build_production_executor_factory(config, runtime_factories=runtime_factories)
@@ -287,7 +300,7 @@ def test_managed_stopped_blocker_remains_unchanged(tmp_path: Path) -> None:
     assert report.error_code == ErrorCode.WORKFLOW_STAGE_BLOCKED
     assert report.diagnostics["blocker"] == "mumu_start_not_approved"
     assert report.diagnostics["lifecycle_mode"] == "managed"
-    assert (mumu.ensure_calls, mumu.status_calls) == (0, 1)
+    assert (mumu.ensure_calls, mumu.start_calls) == (0, 1)
 
 
 def test_production_external_code_contains_no_control_or_scan_implementation() -> None:

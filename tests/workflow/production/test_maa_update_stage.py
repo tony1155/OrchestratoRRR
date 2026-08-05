@@ -155,7 +155,8 @@ def test_disabled_update_reaches_stopped_mumu_gate(tmp_path: Path) -> None:
     assert counts["mumu"] == 1
 
 
-def test_ready_mumu_reaches_stop_mumu_blocker(tmp_path: Path) -> None:
+def test_ready_mumu_managed_reaches_stop_and_verify_gate(tmp_path: Path) -> None:
+    """managed 下 stop_mumu 会真正执行；若模拟器未真停，verify 阶段必须拦下。"""
     config = valid_config(tmp_path)
     runtime_factories, _ = factories()
     report = WorkflowRunner(
@@ -165,5 +166,5 @@ def test_ready_mumu_reaches_stop_mumu_blocker(tmp_path: Path) -> None:
     ).run(deadline=Deadline.after(30))
     assert report.stages[2].outcome == OutcomeKind.SUCCESS
     assert report.stages[3].outcome == OutcomeKind.SUCCESS
-    assert report.stages[8].error_code == ErrorCode.WORKFLOW_STAGE_BLOCKED
-    assert report.stages[8].diagnostics["blocker"] == "mumu_stop_not_approved"
+    assert report.stages[8].outcome == OutcomeKind.SUCCESS
+    assert report.stages[9].error_code == ErrorCode.WORKFLOW_STAGE_FAILED

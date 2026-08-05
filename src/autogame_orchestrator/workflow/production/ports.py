@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from autogame_orchestrator.maa_sync.models import MAASyncResult
 from autogame_orchestrator.process.cancellation import CancellationToken
@@ -40,6 +40,8 @@ class AALCRunPort(Protocol):
 
 
 class MumuRuntimePort(Protocol):
+    """只读基础契约：external 模式只需满足这一层，物理上不具备启停能力。"""
+
     def status(
         self,
         deadline: Deadline,
@@ -47,6 +49,23 @@ class MumuRuntimePort(Protocol):
     ) -> MumuRuntimeResult: ...
 
     def ensure_external_ready(
+        self,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> MumuRuntimeResult: ...
+
+
+@runtime_checkable
+class ManagedMumuRuntimePort(MumuRuntimePort, Protocol):
+    """managed 模式额外要求生命周期能力；仅当配置为 managed 时才提供。"""
+
+    def start(
+        self,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> MumuRuntimeResult: ...
+
+    def stop(
         self,
         deadline: Deadline,
         cancel: CancellationToken | None = None,
