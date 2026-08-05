@@ -250,9 +250,24 @@ wait_mumu_adb_ready_after_restart    266ms
    新增阶段名（计划禁止重复阶段），属独立范围，未纳入本阶段。
 2. **收尾出现半开状态。** 最终轮结束后 `is_process_started=true` 而
    `is_android_started=false`，adb 无设备。成因未确证，未下结论。
-3. **`MuMuNxDevice` 进程堆积。** 观察到 7 个残留进程共约 870MB，来自多次
-   启停。编排器仅调用 `MuMuManager control shutdown` 且命令返回 0，堆积
-   发生在 MuMu 侧，非编排器缺陷，但长期运行会累积占用。
+3. **`MuMuNxDevice` 外壳进程孤儿堆积。** 复核实测：`MuMuNxDevice.exe` 共 36 个，
+   其中 35 个的父进程已不存在，合计占用约 3577 MB，最早创建时间早于本阶段
+   三天。同期 `MuMuVMM*` 进程为 0，即虚拟机本身已被正常关闭，泄漏仅发生在
+   外壳/设备进程层。
+
+   编排器仅调用 `MuMuManager.exe control -v <index> shutdown` 且命令返回
+   `errcode 0`，该指令亦是社区在 StarRailCopilot #921/#934 中验证有效的新版
+   关闭方式（旧的 `MuMuNxMain.exe api -v 0 shutdown_player` 在新版上会将窗口
+   拉到前台且关闭失败，本项目未使用该方式）。MuMuManager 未提供清理外壳残留
+   的接口。
+
+   成因未确证：未检索到与「外壳进程孤儿堆积」直接对应的公开讨论；已知新版
+   MuMu 架构中 `MuMuNxDevice.exe` 是相对独立的外壳层，但其在父进程退出后
+   继续存活的机制未经验证，不下结论。
+
+   判定：非编排器缺陷，命令用法正确，且不影响工作流成功判定。长期不重启
+   宿主机时会持续累积占用，需要时可按「父进程已不存在」条件安全清理。若后续
+   决定由编排器兜底清理，须先确认清理条件不会误伤在用实例。
 4. **提权子进程使用了非 venv 解释器。** 进程链显示提权重启使用
    `D:\Anaconda\python.exe` 而非 venv 解释器，尽管 `detect_entry_runtime()`
    经验证返回正确的 `sys.executable`。与本阶段故障无因果关系（绕过提权直接
