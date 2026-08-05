@@ -62,6 +62,7 @@ def write_run_config(
     update_enabled: bool = False,
     aalc_attempts: int = 1,
     aalc_requires_administrator: bool = False,
+    mumu_arguments: bool = True,
 ) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     work = root / "work"
@@ -86,6 +87,9 @@ def write_run_config(
     settings.write_text("{}", encoding="utf-8")
     tasks.write_text("{}", encoding="utf-8")
     mumu_executable = "" if lifecycle_mode == "external" else files["mumu-placeholder.exe"].as_posix()
+    managed_with_arguments = lifecycle_mode == "managed" and mumu_arguments
+    start_arguments = '["control", "-v", "0", "launch"]' if managed_with_arguments else "[]"
+    stop_arguments = '["control", "-v", "0", "shutdown"]' if managed_with_arguments else "[]"
     local_serial = "127.0.0.1:" + "16384"
     path = root / "run.toml"
     path.write_text(
@@ -102,8 +106,8 @@ adb_executable = "{files["adb-placeholder.exe"].as_posix()}"
 adb_serial = "{local_serial}"
 start_timeout_seconds = 120
 stop_timeout_seconds = 20
-start_arguments = []
-stop_arguments = []
+start_arguments = {start_arguments}
+stop_arguments = {stop_arguments}
 
 [starrail]
 executable = "{files["starrail-placeholder.exe"].as_posix()}"

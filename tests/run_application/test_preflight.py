@@ -20,6 +20,7 @@ from autogame_orchestrator.models import ErrorCode, RunReport, RunStatus, StageN
 from autogame_orchestrator.run_application import (
     ELEVATION_MARKER,
     EXTERNAL_RUN_STAGES,
+    MANAGED_RUN_STAGES,
     RUN_CONFIRMATION,
     RunRequest,
     build_relaunch_spec,
@@ -101,8 +102,26 @@ def test_finite_bounded_deadline_is_accepted(value: float) -> None:
     assert validate_run_request(_request(deadline=value)) is None
 
 
-def test_managed_mode_is_rejected_by_run_v1() -> None:
-    assert validate_run_v1_config(AppConfig(aalc=AALCConfig(attempts=1))) == "managed_mumu_not_supported"
+def test_managed_mode_without_arguments_is_rejected_by_run_v1() -> None:
+    """managed 已获批准，但未配置启停命令时必须在闸门处就拒绝。"""
+    config = AppConfig(
+        mumu=MuMuConfig(lifecycle_mode=MumuLifecycleMode.MANAGED),
+        aalc=AALCConfig(attempts=1),
+    )
+    assert validate_run_v1_config(config) == "managed_mumu_arguments_required"
+
+
+def test_managed_mode_with_arguments_is_accepted_by_run_v1() -> None:
+    """managed 配齐启停命令后应通过 run v1 闸门。"""
+    config = AppConfig(
+        mumu=MuMuConfig(
+            lifecycle_mode=MumuLifecycleMode.MANAGED,
+            start_arguments=("control", "-v", "0", "launch"),
+            stop_arguments=("control", "-v", "0", "shutdown"),
+        ),
+        aalc=AALCConfig(attempts=1),
+    )
+    assert validate_run_v1_config(config) is None
 
 
 def test_enabled_sync_is_rejected_by_run_v1() -> None:
@@ -127,6 +146,11 @@ def test_external_v1_config_is_accepted() -> None:
 
 def test_exact_external_plan_is_accepted() -> None:
     assert validate_external_plan(ExecutionPlan(EXTERNAL_RUN_STAGES, False)) is None
+
+
+def test_exact_managed_plan_is_accepted() -> None:
+    """managed 的 15 阶段默认计划应被接受。"""
+    assert validate_external_plan(ExecutionPlan(MANAGED_RUN_STAGES, False)) is None
 
 
 @pytest.mark.parametrize(
@@ -247,7 +271,7 @@ def test_invalid_toml_is_stable_error(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("settings", "error"),
     [
-        ({"lifecycle_mode": "managed"}, "managed_mumu_not_supported"),
+        ({"lifecycle_mode": "managed", "mumu_arguments": False}, "managed_mumu_arguments_required"),
         ({"sync_enabled": True}, "maa_sync_not_allowed_in_run_v1"),
         ({"update_enabled": True}, "maa_update_not_allowed_in_run_v1"),
         ({"aalc_attempts": 2}, "aalc_retries_not_allowed_in_run_v1"),

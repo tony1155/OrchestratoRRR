@@ -101,8 +101,8 @@ def test_invalid_deadline_is_safe_cli_error(tmp_path: Path, deadline: str) -> No
     assert str(tmp_path) not in result.stdout
 
 
-def test_managed_mode_is_safe_cli_error(tmp_path: Path) -> None:
-    path = write_run_config(tmp_path, lifecycle_mode="managed")
+def test_managed_mode_without_arguments_is_safe_cli_error(tmp_path: Path) -> None:
+    path = write_run_config(tmp_path, lifecycle_mode="managed", mumu_arguments=False)
     result = runner.invoke(
         cli.app,
         [
@@ -116,7 +116,7 @@ def test_managed_mode_is_safe_cli_error(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 2
-    assert "managed_mumu_not_supported" in result.stdout
+    assert "managed_mumu_arguments_required" in result.stdout
     assert str(path) not in result.stdout
     assert "127.0.0.1:" + "16384" not in result.stdout
 

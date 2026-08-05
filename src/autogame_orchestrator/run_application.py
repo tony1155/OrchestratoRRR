@@ -44,6 +44,25 @@ EXTERNAL_RUN_STAGES = (
 )
 
 
+MANAGED_RUN_STAGES = (
+    StageName.VALIDATE_CONFIG,
+    StageName.SYNC_MAA_CONFIG,
+    StageName.UPDATE_MAA,
+    StageName.ENSURE_MUMU_RUNNING,
+    StageName.WAIT_MUMU_ADB_READY,
+    StageName.RUN_STARRAIL,
+    StageName.STOP_STARRAIL,
+    StageName.VERIFY_STARRAIL_STOPPED,
+    StageName.STOP_MUMU,
+    StageName.VERIFY_MUMU_STOPPED,
+    StageName.START_MUMU,
+    StageName.WAIT_MUMU_ADB_READY_AFTER_RESTART,
+    StageName.RUN_MAA,
+    StageName.RUN_AALC,
+    StageName.WRITE_RUN_REPORT,
+)
+
+
 @dataclass(frozen=True)
 class RunRequest:
     config_path: Path
@@ -75,10 +94,15 @@ def validate_run_request(request: RunRequest) -> str | None:
 
 
 def validate_run_v1_config(config: AppConfig) -> str | None:
-    """限制首版生产运行能力，禁止同步、更新和 AALC 重试。"""
+    """限制首版生产运行能力，禁止同步、更新和 AALC 重试。
 
-    if config.mumu.lifecycle_mode != MumuLifecycleMode.EXTERNAL:
-        return "managed_mumu_not_supported"
+    managed 模式已获批准，但要求显式配置启停管理命令，避免解闸后静默降级。
+    """
+
+    if config.mumu.lifecycle_mode == MumuLifecycleMode.MANAGED and not (
+        config.mumu.start_arguments and config.mumu.stop_arguments
+    ):
+        return "managed_mumu_arguments_required"
     if config.maa_sync.enabled:
         return "maa_sync_not_allowed_in_run_v1"
     if config.maa_update.enabled:
@@ -89,9 +113,9 @@ def validate_run_v1_config(config: AppConfig) -> str | None:
 
 
 def validate_external_plan(plan: ExecutionPlan) -> str | None:
-    """要求精确的 11 阶段 external 默认计划。"""
+    """要求与生命周期模式匹配的精确默认计划（external 11 阶段 / managed 15 阶段）。"""
 
-    if plan.stages != EXTERNAL_RUN_STAGES:
+    if plan.stages not in (EXTERNAL_RUN_STAGES, MANAGED_RUN_STAGES):
         return "external_plan_invalid"
     return None
 
