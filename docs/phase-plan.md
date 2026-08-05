@@ -1,6 +1,6 @@
 # OrchestratoRRR 阶段规划
 
-Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2A、6C2B（含真实冷连接恢复）和 6C2C 均已完成验收，6C3 已完成文档收口。6B2B2B 与 6B2B3C 仍未完成，Phase 6 按已批准的 external-only 范围完成；Phase 7A1 已完成入口契约实现与自动测试，Phase 7 尚未完成。
+Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2A、6C2B（含真实冷连接恢复）和 6C2C 均已完成验收，6C3 已完成文档收口。6B2B3C 已完成 managed 生命周期实现与 15 阶段真实端到端验收，同时解除 MAA 配置同步在 `run` v1 的闸门；6B2B2B 仍未完成。Phase 7A1 已完成入口契约实现与自动测试，Phase 7 尚未完成。
 
 ## Phase 5——AALC Runtime Adapter
 
@@ -30,14 +30,14 @@ Fake AALC 环境和真实 AALC smoke 验收均已完成。成功仅依据 exit 0
 | 6B2B2B | maa-cli 自更新决策 | CLI 自替换与包管理器所有权尚未闭合；继续阻断 |
 | 6B2B3A | MuMu CLI 探针加固与否定证据 | 公开投影脱敏、模块执行警告修复；只读帮助仅证明 RPC/Shell 形状，未发现生命周期管理命令；已完成 |
 | 6B2B3B | 外部管理 MuMu 生命周期模式 | 用户预先启动实例，OrchestratoRRR 只验证 readiness；动态计划安全跳过 stop/start；已完成 |
-| 6B2B3C | managed 实例化生命周期控制 | start/stop 语法、实例选择和长期进程所有权尚未闭合；继续阻断 |
+| 6B2B3C | managed 实例化生命周期控制 | start/stop 语法与实例选择已确认，执行器接线、契约分层与 run 闸门均已完成；15 阶段真实端到端验收通过；当前完成 |
 | 6C1 | 受控 external run CLI 与完整 Fake 验收 | 公开 external-only `run` v1、精确确认、有限 Deadline、入口提权接线与完整 Fake 验收；已完成 |
 | 6C2A | ADB devices 空白分隔兼容修复 | 第一次真实 smoke 在 MuMu readiness 安全停止；修复空格、Tab 与混合分隔并增强安全诊断；已完成 |
 | 6C2B | 修复后 readiness 与受控连接恢复 | 6C2B3 人工 connect 后 readiness 已验证；6C2B4A 完成显式 local TCP connect 的 Fake/自动测试；6C2B4C 完成真实冷连接自动恢复；已完成 |
 | 6C2C | 修复后 external 真实完整工作流 smoke | 11 阶段 external 完整真实 smoke 已通过；AALC 在线业务 UI 因网络原因未验证；已完成 |
 | 6C3 | Phase 6 最终验收、文档收口与合并准备 | 脱敏证据已固化，external-only 范围完成，等待人工审核；当前完成 |
 | Phase 6 external scope | 已批准的 external-only 工作流范围 | Fake、生产 Adapter、冷连接恢复和完整真实 external workflow 均已验收；完成 |
-| Phase 6 managed scope | MuMu managed 生命周期范围 | start/stop/restart 与实例自动选择继续阻断；未完成且不属于当前批准范围 |
+| Phase 6 managed scope | MuMu managed 生命周期范围 | start/stop/restart 与实例自动选择已获批准并完成真实验收；收尾关闭模拟器阶段尚未纳入计划 |
 | Phase 6 overall | Phase 6 按批准范围的状态 | 已批准的 external-only Phase 6 范围完成；不表示所有 MuMu 生命周期能力完成 |
 | 7 | 打包与默认入口 | PyInstaller EXE、无缝替换旧 PS1 入口点 |
 
@@ -49,9 +49,9 @@ Phase 6A 已固化入口权限规划契约：先构建完整计划；只要计�
 
 Phase 6B1 已完成生产投影与安全绑定骨架。默认完整生产计划在 `SYNC_MAA_CONFIG` 明确阻断，且阻断前不构造或执行任何 Runtime Adapter。MuMu 只允许只读 `status()`；start/stop 仍未获准。
 
-Phase 6B2A 已完成旧流程静态契约调查，6B2B1 已完成安全 MAA 同步。Phase 6B2B2A 只实现固定 `maa update` 的 MaaCore/资源更新，默认关闭并要求显式网络授权；未执行真实更新。maa-cli 自更新与旧 hot-update 继续阻断于 6B2B2B。Phase 6B2B3A 的只读帮助证据仅确认 NemuShell RPC/Shell 调用形状，没有发现生命周期命令或安全实例选择器；`runtime_approved=false`。Phase 6B2B3B 提供 external 安全路径：用户预先启动正确实例，OrchestratoRRR 只验证 readiness，不调用 MuMu start/stop/restart；managed 模式仍保留静态 15 阶段，实例化控制继续阻断于 6B2B3C。
+Phase 6B2A 已完成旧流程静态契约调查，6B2B1 已完成安全 MAA 同步。Phase 6B2B2A 只实现固定 `maa update` 的 MaaCore/资源更新，默认关闭并要求显式网络授权；未执行真实更新。maa-cli 自更新与旧 hot-update 继续阻断于 6B2B2B。Phase 6B2B3A 的只读帮助证据仅确认 NemuShell RPC/Shell 调用形状，没有发现生命周期命令或安全实例选择器；`runtime_approved=false`。Phase 6B2B3B 提供 external 安全路径：用户预先启动正确实例，OrchestratoRRR 只验证 readiness，不调用 MuMu start/stop/restart。Phase 6B2B3C 已通过 `MuMuManager.exe control -v <index> launch/shutdown` 确认启停语法与实例选择，完成执行器接线、`ManagedMumuRuntimePort` 契约分层与 run 闸门放开，并修复四个仅在真实执行时暴露的缺陷（Job 句柄关闭连带终止模拟器、readiness 缺少受控 adb connect、投影层不认 STARTED/RESTARTED、停止阶段不认 STOPPED）；详见 `docs/acceptance/phase-6b2b3c-managed-mumu-lifecycle.md`。
 
-Phase 6C1 已提供受控 external-only `run` v1：精确确认、有限 Deadline、MAA Sync/Update 关闭、AALC attempts 为 1，并在 Runner/Stage factory/Adapter 前统一完成 elevation 决策。完整 Fake 验收已通过。第一次真实 external smoke 曾因旧解析器拒绝合法空格分隔的 ADB devices 记录而安全停止；6C2A 修复了解析兼容和脱敏诊断，6C2B4A 增加了受控 local TCP connect，6C2B4C 已完成真实冷连接自动恢复，6C2C 已完成 11 阶段 external 真实完整工作流 smoke。Phase 6C3 现已固化脱敏证据并完成 external-only 收口；6B2B2B、6B2B3C 仍未完成，Phase 7A1 已完成入口契约实现与自动测试，Phase 7 尚未完成，旧 PowerShell 尚不可替换。
+Phase 6C1 已提供受控 `run` v1：精确确认、有限 Deadline、MAA Update 关闭、AALC attempts 为 1，并在 Runner/Stage factory/Adapter 前统一完成 elevation 决策。完整 Fake 验收已通过。第一次真实 external smoke 曾因旧解析器拒绝合法空格分隔的 ADB devices 记录而安全停止；6C2A 修复了解析兼容和脱敏诊断，6C2B4A 增加了受控 local TCP connect，6C2B4C 已完成真实冷连接自动恢复，6C2C 已完成 11 阶段 external 真实完整工作流 smoke。Phase 6C3 已固化脱敏证据并完成 external-only 收口。此后 6B2B3C 解除 managed 阻断并完成 15 阶段真实验收，MAA 配置同步亦已放行；6B2B2B 仍未完成，Phase 7A1 已完成入口契约实现与自动测试，Phase 7 尚未完成，旧 PowerShell 尚不可替换。
 ## Phase 7A1 status
 
 Phase 7A1 closes the source/frozen entry runtime and explicit UAC re-entry
