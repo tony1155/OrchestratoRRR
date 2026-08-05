@@ -124,9 +124,24 @@ def test_managed_mode_with_arguments_is_accepted_by_run_v1() -> None:
     assert validate_run_v1_config(config) is None
 
 
-def test_enabled_sync_is_rejected_by_run_v1() -> None:
+def test_enabled_sync_is_accepted_by_run_v1() -> None:
+    """MAA 配置同步已获批准，并且路径合法时应通过 run v1 闸门。"""
+    config = _external_config(
+        maa_sync=MAASyncConfig(
+            enabled=True,
+            gui_settings_source="X:/fictional/gui.json",
+            gui_tasks_source="X:/fictional/gui.new.json",
+            cli_profile_destination="X:/fictional/cli/profile.json",
+            cli_tasks_destination="X:/fictional/cli/tasks.json",
+        )
+    )
+    assert validate_run_v1_config(config) is None
+
+
+def test_enabled_sync_with_blank_paths_is_still_rejected() -> None:
+    """启用同步但路径为空时，配置校验仍须拒绝——闸门放开后这是安全底线。"""
     config = _external_config(maa_sync=MAASyncConfig(enabled=True))
-    assert validate_run_v1_config(config) == "maa_sync_not_allowed_in_run_v1"
+    assert config.maa_sync.validate() != []
 
 
 def test_enabled_update_is_rejected_by_run_v1() -> None:
@@ -272,7 +287,6 @@ def test_invalid_toml_is_stable_error(tmp_path: Path) -> None:
     ("settings", "error"),
     [
         ({"lifecycle_mode": "managed", "mumu_arguments": False}, "managed_mumu_arguments_required"),
-        ({"sync_enabled": True}, "maa_sync_not_allowed_in_run_v1"),
         ({"update_enabled": True}, "maa_update_not_allowed_in_run_v1"),
         ({"aalc_attempts": 2}, "aalc_retries_not_allowed_in_run_v1"),
     ],

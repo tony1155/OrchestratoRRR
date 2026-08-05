@@ -212,3 +212,91 @@ def test_transform_is_deterministic_and_json_serializable(
     second = transform_gui_configuration(settings_object, tasks_object)
     assert first == second
     json.dumps(first)
+
+
+# ════════════════════════════════════════════════════════════════════
+# 新版 GUI 布局：连接配置与完成后动作
+# ════════════════════════════════════════════════════════════════════
+
+
+def _modern_settings() -> dict[str, object]:
+    """新版布局的 settings：不含扁平 Connect.* 连接键。"""
+    return {
+        "Current": "alpha",
+        "Configurations": {"alpha": {"Infrast.InfrastMode": "Rotation"}},
+    }
+
+
+def _modern_tasks(post_actions: str = "") -> dict[str, object]:
+    """新版布局的 tasks：连接配置位于 Gui.ConnectSettings。"""
+    return {
+        "Current": "tasks",
+        "Configurations": {
+            "tasks": {
+                "TaskQueue": [{"TaskType": "Award", "IsEnable": True}],
+                "Gui": {
+                    "PostActions": post_actions,
+                    "ConnectSettings": {
+                        "AdbPath": "X:/fictional/modern-tool",
+                        "Address": "fake-modern-endpoint",
+                        "Config": "FictionalModernConfig",
+                        "TouchMode": "maatouch",
+                        "EnableAdbLite": True,
+                        "KillAdbOnExit": True,
+                    },
+                },
+            }
+        },
+    }
+
+
+def test_modern_layout_reads_connection_from_gui_connect_settings() -> None:
+    """新版布局须从 ``Gui.ConnectSettings`` 取连接配置。
+
+    回归保护：转换器原本只读扁平 ``Connect.*`` 键，对新版布局会产出空的
+    adb_path/address/config，同步后 MAA 将无法连接模拟器。
+    """
+    profile, _ = transform_gui_configuration(_modern_settings(), _modern_tasks())
+    assert profile["connection"] == {
+        "type": "ADB",
+        "adb_path": "X:/fictional/modern-tool",
+        "address": "fake-modern-endpoint",
+        "config": "FictionalModernConfig",
+    }
+    assert profile["instance_options"]["touch_mode"] == "MaaTouch"
+    assert profile["instance_options"]["adb_lite_enabled"] is True
+    assert profile["instance_options"]["kill_adb_on_exit"] is True
+
+
+def test_legacy_flat_keys_take_precedence_over_modern(
+    settings_object: dict[str, object], tasks_object: dict[str, object]
+) -> None:
+    """旧版扁平键存在时优先采用，已验证的旧布局行为不得改变。"""
+    modern = _modern_tasks()
+    tasks_object["Configurations"]["tasks"]["Gui"] = modern["Configurations"]["tasks"]["Gui"]
+    profile, _ = transform_gui_configuration(settings_object, tasks_object)
+    assert profile["connection"]["adb_path"] == "X:/fictional/tool"
+    assert profile["connection"]["address"] == "fake-local-endpoint"
+
+
+def test_post_actions_exit_arknights_appends_close_down() -> None:
+    """``Gui.PostActions`` 要求退出明日方舟时须追加 CloseDown 任务。"""
+    _, tasks = transform_gui_configuration(_modern_settings(), _modern_tasks("ExitArknights"))
+    assert [task["type"] for task in tasks["tasks"]] == ["Award", "CloseDown"]
+    close_down = tasks["tasks"][-1]
+    assert close_down["params"] == {"enable": True, "client_type": "Official"}
+
+
+def test_post_actions_without_exit_omits_close_down() -> None:
+    """未要求退出游戏时不得追加 CloseDown。"""
+    _, tasks = transform_gui_configuration(_modern_settings(), _modern_tasks("DoNothing"))
+    assert [task["type"] for task in tasks["tasks"]] == ["Award"]
+
+
+def test_legacy_action_after_completed_also_appends_close_down(
+    settings_object: dict[str, object], tasks_object: dict[str, object]
+) -> None:
+    """旧版 ``MainFunction.ActionAfterCompleted`` 同样应触发 CloseDown。"""
+    settings_object["Configurations"]["alpha"]["MainFunction.ActionAfterCompleted"] = "ExitArknights"
+    _, tasks = transform_gui_configuration(settings_object, tasks_object)
+    assert tasks["tasks"][-1]["type"] == "CloseDown"

@@ -69,6 +69,49 @@ def _touch_mode(value: object) -> str:
     return known.get(text.casefold(), text or "MiniTouch")
 
 
+def _connect_settings(task_config: Mapping[str, object]) -> Mapping[str, object]:
+    """取新版布局的 ``Gui.ConnectSettings``；不存在时返回空映射。
+
+    旧版 MAA 将连接配置以扁平 ``Connect.*`` 键存于 settings；新版改存于 tasks 侧
+    ``Gui.ConnectSettings``。两种布局均需支持，否则新版会同步出空连接配置并使
+    MAA 无法连上模拟器。
+    """
+    gui = task_config.get("Gui")
+    if not isinstance(gui, Mapping):
+        return {}
+    settings = gui.get("ConnectSettings")
+    return settings if isinstance(settings, Mapping) else {}
+
+
+def _connect_value(
+    settings: Mapping[str, object],
+    connect: Mapping[str, object],
+    legacy_key: str,
+    modern_key: str,
+) -> object:
+    """优先旧版扁平键，缺失时回退到新版 ``ConnectSettings``。
+
+    旧键优先保证已验证的旧布局行为不变；仅当其不存在或为空串时才采新布局值。
+    """
+    legacy = settings.get(legacy_key)
+    if legacy is not None and _text(legacy).strip():
+        return legacy
+    return connect.get(modern_key)
+
+
+def _post_actions_close_game(settings: Mapping[str, object], task_config: Mapping[str, object]) -> bool:
+    """判定 GUI 是否要求完成后退出明日方舟。
+
+    新版使用 ``Gui.PostActions``（如 ``"ExitArknights"``），旧版使用
+    ``MainFunction.ActionAfterCompleted``。两者任一表达退出游戏即视为真，
+    对应 maa-cli 侧追加 ``CloseDown`` 任务。
+    """
+    gui = task_config.get("Gui")
+    modern = _text(gui.get("PostActions")) if isinstance(gui, Mapping) else ""
+    legacy = _text(settings.get("MainFunction.ActionAfterCompleted"))
+    return any("exitarknights" in value.casefold() for value in (modern, legacy))
+
+
 def _infrast_mode(value: object) -> int:
     text = _text(value).strip().casefold()
     known = {"default": 0, "normal": 0, "rotation": 20000, "custom": 10000, "user_defined": 10000, "userdefined": 10000}
@@ -206,18 +249,19 @@ def transform_gui_configuration(gui_settings: object, gui_tasks: object) -> tupl
     """纯转换两个 GUI 根对象，且不修改输入。"""
     settings = _select_current(gui_settings)
     task_config = _select_current(gui_tasks)
+    connect = _connect_settings(task_config)
     profile: dict[str, object] = {
         "connection": {
             "type": "ADB",
-            "adb_path": _text(settings.get("Connect.AdbPath")),
-            "address": _text(settings.get("Connect.Address")),
-            "config": _text(settings.get("Connect.ConnectConfig")),
+            "adb_path": _text(_connect_value(settings, connect, "Connect.AdbPath", "AdbPath")),
+            "address": _text(_connect_value(settings, connect, "Connect.Address", "Address")),
+            "config": _text(_connect_value(settings, connect, "Connect.ConnectConfig", "Config")),
         },
         "instance_options": {
-            "touch_mode": _touch_mode(settings.get("Connect.TouchMode")),
+            "touch_mode": _touch_mode(_connect_value(settings, connect, "Connect.TouchMode", "TouchMode")),
             "deployment_with_pause": False,
-            "adb_lite_enabled": _bool(settings.get("Connect.AdbLiteEnabled")),
-            "kill_adb_on_exit": _bool(settings.get("Connect.KillAdbOnExit")),
+            "adb_lite_enabled": _bool(_connect_value(settings, connect, "Connect.AdbLiteEnabled", "EnableAdbLite")),
+            "kill_adb_on_exit": _bool(_connect_value(settings, connect, "Connect.KillAdbOnExit", "KillAdbOnExit")),
         },
     }
     queue = task_config.get("TaskQueue")
@@ -227,4 +271,8 @@ def transform_gui_configuration(gui_settings: object, gui_tasks: object) -> tupl
     tasks = [task for task in converted if task is not None]
     if not tasks:
         raise MAATransformError("任务转换结果为空")
+    if _post_actions_close_game(settings, task_config):
+        # GUI 要求完成后退出明日方舟；maa-cli 侧以显式 CloseDown 任务表达。
+        # 不追加则同步后游戏会持续驻留于模拟器中。
+        tasks.append({"name": "CloseDown", "type": "CloseDown", "params": {"enable": True, "client_type": "Official"}})
     return profile, {"tasks": tasks}
