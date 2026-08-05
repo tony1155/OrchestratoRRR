@@ -17,7 +17,6 @@ from autogame_orchestrator.config_loader import load_config
 from autogame_orchestrator.config_model import AppConfig
 from autogame_orchestrator.models import ErrorCode
 from autogame_orchestrator.run_application import (
-    EXTERNAL_RUN_STAGES,
     RUN_CONFIRMATION,
     RunCommandResult,
     RunRequest,
@@ -245,7 +244,7 @@ def execute_default_entry(
         plan = selected.plan_builder(config)
     except Exception:
         return _fail(io, DefaultEntryErrorCode.INTERNAL_ERROR, 8)
-    if validate_external_plan(plan) is not None or plan.stages != EXTERNAL_RUN_STAGES:
+    if validate_external_plan(plan) is not None:
         return _fail(io, DefaultEntryErrorCode.PLAN_INVALID, 2)
 
     for directory, error, probe in (
@@ -257,11 +256,12 @@ def execute_default_entry(
         if directory_error is not None:
             return _fail(io, directory_error, 3)
 
-    io.write("External workflow plan \u2014 real programs may be started.")
+    io.write("Workflow plan \u2014 real programs may be started.")
     for index, stage in enumerate(plan.stages, 1):
         io.write(f"{index}. {stage.value}")
     io.write(
-        "WARNING: This starts real programs, may request administrator privileges, and executes 11 external stages."
+        "WARNING: This starts real programs, may request administrator privileges, "
+        f"and executes {len(plan.stages)} stages."
     )
     io.write("The synthetic isolated smoke is not used by this entry. A mismatched confirmation cancels execution.")
     confirmation = io.read(f"Type {RUN_CONFIRMATION} to continue: ")

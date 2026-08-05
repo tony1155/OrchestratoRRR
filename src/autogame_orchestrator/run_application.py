@@ -94,11 +94,13 @@ def validate_run_request(request: RunRequest) -> str | None:
 
 
 def validate_run_v1_config(config: AppConfig) -> str | None:
-    """限制首版生产运行能力：禁止 MAA 自更新与 AALC 重试。
+    """生产运行的配置闸门：仅禁止尚未闭合安全设计的 MAA 自更新。
 
     managed 模式已获批准，但要求显式配置启停管理命令，避免解闸后静默降级。
     MAA 配置同步已获批准：其路径约束由 ``MAASyncConfig`` 校验（四路径非空、
     源与目标不得重叠），写入为原子替换并具备备份与双目标回滚。
+    AALC 重试已获批准：`AALCConfig` 将 attempts 限制在 1–3，且适配器仅对非零
+    退出与单次尝试超时重试；正常完成、取消、父 Deadline 到期与清理失败均不重试。
     """
 
     if config.mumu.lifecycle_mode == MumuLifecycleMode.MANAGED and not (
@@ -107,8 +109,6 @@ def validate_run_v1_config(config: AppConfig) -> str | None:
         return "managed_mumu_arguments_required"
     if config.maa_update.enabled:
         return "maa_update_not_allowed_in_run_v1"
-    if config.aalc.attempts != 1:
-        return "aalc_retries_not_allowed_in_run_v1"
     return None
 
 

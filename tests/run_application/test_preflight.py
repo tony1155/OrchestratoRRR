@@ -149,10 +149,44 @@ def test_enabled_update_is_rejected_by_run_v1() -> None:
     assert validate_run_v1_config(config) == "maa_update_not_allowed_in_run_v1"
 
 
-@pytest.mark.parametrize("attempts", [2, 3])
-def test_aalc_retry_is_rejected_by_run_v1(attempts: int) -> None:
+@pytest.mark.parametrize("attempts", [1, 2, 3])
+def test_aalc_attempts_within_bounds_are_accepted(attempts: int) -> None:
+    """AALC 重试已获批准：1–3 均应通过闸门。
+
+    适配器仅对非零退出与单次尝试超时重试；正常完成、取消、父 Deadline 到期
+    与清理失败均不重试，因此重试边界已由适配器自身保证。
+    """
     config = _external_config(aalc=AALCConfig(attempts=attempts))
-    assert validate_run_v1_config(config) == "aalc_retries_not_allowed_in_run_v1"
+    assert validate_run_v1_config(config) is None
+
+
+@pytest.mark.parametrize("attempts", [0, 4])
+def test_aalc_attempts_out_of_bounds_are_rejected_by_config(attempts: int) -> None:
+    """超出 1–3 的 attempts 仍须被配置校验拒绝——闸门放开后的安全底线。
+
+    其余字段需保持合法，否则会因空路径等无关原因失败而无法验证 attempts 边界。
+    """
+    config = AALCConfig(
+        executable="X:/fictional/AALC.exe",
+        working_directory="X:/fictional",
+        attempts=attempts,
+        attempt_timeout_seconds=7200,
+        stop_timeout_seconds=10,
+    )
+    assert ErrorCode.CONFIG_SCHEMA_ERROR in config.validate()
+
+
+@pytest.mark.parametrize("attempts", [1, 2, 3])
+def test_aalc_attempts_within_bounds_pass_config_validation(attempts: int) -> None:
+    """1–3 在其余字段合法时应通过配置校验。"""
+    config = AALCConfig(
+        executable="X:/fictional/AALC.exe",
+        working_directory="X:/fictional",
+        attempts=attempts,
+        attempt_timeout_seconds=7200,
+        stop_timeout_seconds=10,
+    )
+    assert config.validate() == []
 
 
 def test_external_v1_config_is_accepted() -> None:
@@ -288,7 +322,6 @@ def test_invalid_toml_is_stable_error(tmp_path: Path) -> None:
     [
         ({"lifecycle_mode": "managed", "mumu_arguments": False}, "managed_mumu_arguments_required"),
         ({"update_enabled": True}, "maa_update_not_allowed_in_run_v1"),
-        ({"aalc_attempts": 2}, "aalc_retries_not_allowed_in_run_v1"),
     ],
 )
 def test_run_v1_gate_stops_before_runtime(tmp_path: Path, settings: dict[str, object], error: str) -> None:

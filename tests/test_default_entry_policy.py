@@ -69,6 +69,31 @@ def _canonical_fixture(tmp_path: Path) -> tuple[Mapping[str, str], object]:
     return environment, paths
 
 
+def _canonical_managed_fixture(tmp_path: Path) -> tuple[Mapping[str, str], object]:
+    """与 `_canonical_fixture` 相同，但 MuMu 为 managed 且配齐启停命令。"""
+    local = tmp_path / "LocalAppData"
+    environment = {"LOCALAPPDATA": str(local)}
+    paths = resolve_default_entry_paths(environment)
+    assert paths is not None
+    generated = write_run_config(tmp_path / "fixture", lifecycle_mode="managed")
+    text = generated.read_text(encoding="utf-8")
+    text = text.replace(
+        f'log_dir = "{(tmp_path / "fixture" / "logs").as_posix()}"',
+        f'log_dir = "{paths.log_directory.as_posix()}"',
+    )
+    text = text.replace(
+        f'report_dir = "{(tmp_path / "fixture" / "reports").as_posix()}"',
+        f'report_dir = "{paths.report_directory.as_posix()}"',
+    )
+    text = text.replace(
+        'log_path_template = "logs/{date}.log"',
+        f'log_path_template = "{(tmp_path / "fixture" / "work" / "{date}.log").as_posix()}"',
+    )
+    paths.config_directory.mkdir(parents=True)
+    paths.config_path.write_text(text, encoding="utf-8")
+    return environment, paths
+
+
 def _dependencies(environment, io: FakeIO, run_executor) -> DefaultEntryDependencies:
     return DefaultEntryDependencies(
         environment=environment,
@@ -295,3 +320,60 @@ def test_invalid_deadline_precedes_filesystem_and_config(tmp_path: Path) -> None
     )
     assert result.error_code == DefaultEntryErrorCode.DEADLINE_INVALID
     assert not local.exists()
+
+
+def test_managed_plan_is_accepted_and_stage_count_is_not_hardcoded(tmp_path: Path) -> None:
+    """`start` 命令须接受 managed 的 15 阶段计划，并按实际阶段数输出。
+
+    回归保护：入口曾额外硬校验 `plan.stages != EXTERNAL_RUN_STAGES`，使 managed
+    配置一律以 PLAN_INVALID 拒绝；警告文案也写死为「11 external stages」。
+    """
+    environment, paths = _canonical_managed_fixture(tmp_path)
+    io = FakeIO([RUN_CONFIRMATION, ""])
+    calls = []
+
+    def fake_run(request):
+        calls.append(request)
+        return RunCommandResult(0, "success", "OK", "synthetic-managed-run")
+
+    result = execute_default_entry(dependencies=_dependencies(environment, io, fake_run))
+
+    assert result.error_code == "OK"
+    assert len(calls) == 1
+    assert len([line for line in io.messages if line[:1].isdigit()]) == 15
+    assert any("15 stages" in message for message in io.messages)
+    assert not any("11 external stages" in message for message in io.messages)
+
+
+def test_managed_plan_without_arguments_is_rejected_before_execution(tmp_path: Path) -> None:
+    """managed 未配齐时入口必须在执行前拒绝。
+
+    本修固的 managed 配置 executable 为空，会先被默认入口的路径策略检查拦下
+    （managed 要求给出绝对路径），早于 run v1 闸门；两者均属预期的安全拦截点。
+    关键断言是“不得执行工作流”。
+    """
+    local = tmp_path / "LocalAppData"
+    environment = {"LOCALAPPDATA": str(local)}
+    paths = resolve_default_entry_paths(environment)
+    assert paths is not None
+    generated = write_run_config(tmp_path / "fixture", lifecycle_mode="managed", mumu_arguments=False)
+    text = generated.read_text(encoding="utf-8")
+    text = text.replace(
+        f'log_dir = "{(tmp_path / "fixture" / "logs").as_posix()}"',
+        f'log_dir = "{paths.log_directory.as_posix()}"',
+    )
+    text = text.replace(
+        f'report_dir = "{(tmp_path / "fixture" / "reports").as_posix()}"',
+        f'report_dir = "{paths.report_directory.as_posix()}"',
+    )
+    paths.config_directory.mkdir(parents=True)
+    paths.config_path.write_text(text, encoding="utf-8")
+    io = FakeIO([""])
+    result = execute_default_entry(
+        dependencies=_dependencies(environment, io, lambda request: pytest.fail("workflow must not run"))
+    )
+    assert result.error_code in {
+        DefaultEntryErrorCode.PATH_POLICY_INVALID,
+        DefaultEntryErrorCode.RUN_V1_GATE_FAILED,
+    }
+    assert result.exit_code != 0
