@@ -393,11 +393,46 @@ phase_7c_reinstall_completed=true
 phase_7c_installed_artifact_audit_completed=true
 phase_7c_program_port_reinstall_completed=true
 phase_7c_program_port_installed_artifact_audit_completed=true
+phase_7c_managed_target_rebuild_completed=true
+phase_7c_managed_target_artifact_audit_completed=true
 phase_7c_real_workflow_retry_completed=false
 phase_7c_completed=false
 phase_7e_completed=false
 phase_7_completed=false
 legacy_powershell_replacement_ready=false
+
+## Phase 7C managed-target rebuild and artifact audit
+
+The onedir artifact was rebuilt from `main` at `de04a35` with a clean working
+tree, using the version-controlled `scripts/build-package.ps1` and
+`packaging/OrchestratoRRR.spec` (PyInstaller 6.21.0). The build script's own
+post-conditions passed: the EXE, `_internal`, and the bundled RunReport schema
+were all generated.
+
+Artifact audit:
+
+- `dist/OrchestratoRRR/OrchestratoRRR.exe`, 7,507,690 bytes,
+  sha256 `9e26b5c635c5edc29614192260e35ad4658bd441015396e7f4ced98b2eaa6bde`
+- `_internal`: 105 files, 21,133,209 bytes
+- `_internal/autogame_orchestrator/_resources/run-report-v1.schema.json` present
+  (3,936 bytes)
+- The string `maa_update_not_allowed_in_run_v1` is absent from the bundle,
+  confirming the lifted gate is present in the artifact rather than only in
+  source
+
+Packaged non-business checks against the real local configuration
+(`maa_update.enabled = true`):
+
+- `version` returns `OrchestratoRRR 0.1.0`
+- `validate --check-paths` returns `Validation OK.`, which the previous artifact
+  would have rejected at the run gate
+- `plan` projects the managed 15-stage plan with `update_maa` at position 3
+
+No business program, UAC elevation, ADB, or TCP connection was exercised by
+this audit. `phase_7c_managed_target_rebuild_completed=true` and
+`phase_7c_managed_target_artifact_audit_completed=true`. The real packaged
+managed workflow retry remains gated by
+PHASE_7C_REAL_WORKFLOW_RETRY_AUTHORIZATION.
 
 ## Phase 7C scope change: managed 15-stage retry
 
