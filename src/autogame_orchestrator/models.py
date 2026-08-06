@@ -105,6 +105,11 @@ class StageName(StrEnum):
     The ordering below reflects the *real lifecycle* contract:
     SRP must be stopped, verified-stopped, then MuMu stopped/verified,
     *then* MuMu restarted before MAA/AALC can run.
+
+    ``SHUTDOWN_MUMU`` is the managed-only teardown after AALC: it leaves no
+    emulator running once the workflow is done. It is distinct from
+    ``STOP_MUMU``, which is the mid-workflow stop before the restart, because
+    a plan may not repeat a stage.
     """
 
     VALIDATE_CONFIG = "validate_config"
@@ -121,6 +126,7 @@ class StageName(StrEnum):
     WAIT_MUMU_ADB_READY_AFTER_RESTART = "wait_mumu_adb_ready_after_restart"
     RUN_MAA = "run_maa"
     RUN_AALC = "run_aalc"
+    SHUTDOWN_MUMU = "shutdown_mumu"
     WRITE_RUN_REPORT = "write_run_report"
 
 

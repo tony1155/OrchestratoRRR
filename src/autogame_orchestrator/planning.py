@@ -28,6 +28,7 @@ _DEFAULT_PLAN: tuple[StageName, ...] = (
     StageName.WAIT_MUMU_ADB_READY_AFTER_RESTART,
     StageName.RUN_MAA,
     StageName.RUN_AALC,
+    StageName.SHUTDOWN_MUMU,
     StageName.WRITE_RUN_REPORT,
 )
 

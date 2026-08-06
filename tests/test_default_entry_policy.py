@@ -340,8 +340,8 @@ def test_managed_plan_is_accepted_and_stage_count_is_not_hardcoded(tmp_path: Pat
 
     assert result.error_code == "OK"
     assert len(calls) == 1
-    assert len([line for line in io.messages if line[:1].isdigit()]) == 15
-    assert any("15 stages" in message for message in io.messages)
+    assert len([line for line in io.messages if line[:1].isdigit()]) == 16
+    assert any("16 stages" in message for message in io.messages)
     assert not any("11 external stages" in message for message in io.messages)
 
 

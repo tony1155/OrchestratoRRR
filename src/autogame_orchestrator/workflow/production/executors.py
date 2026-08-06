@@ -93,10 +93,12 @@ class ProductionStageExecutor:
         if self._config.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL and stage in {
             StageName.STOP_MUMU,
             StageName.START_MUMU,
+            StageName.SHUTDOWN_MUMU,
         }:
             blockers = {
                 StageName.STOP_MUMU: "mumu_stop_not_approved",
                 StageName.START_MUMU: "mumu_start_not_approved",
+                StageName.SHUTDOWN_MUMU: "mumu_shutdown_not_approved",
             }
             return _instant(
                 stage,
@@ -111,6 +113,7 @@ class ProductionStageExecutor:
             StageName.WAIT_MUMU_ADB_READY_AFTER_RESTART,
             StageName.STOP_MUMU,
             StageName.START_MUMU,
+            StageName.SHUTDOWN_MUMU,
         }:
             return self._run_mumu(context)
         if stage == StageName.RUN_STARRAIL:
@@ -224,7 +227,13 @@ class ProductionStageExecutor:
             )
         mumu = self._mumu()
         managed = self._config.mumu.lifecycle_mode == MumuLifecycleMode.MANAGED
-        lifecycle_stages = {StageName.ENSURE_MUMU_RUNNING, StageName.START_MUMU, StageName.STOP_MUMU}
+        stop_stages = {StageName.STOP_MUMU, StageName.SHUTDOWN_MUMU}
+        lifecycle_stages = {
+            StageName.ENSURE_MUMU_RUNNING,
+            StageName.START_MUMU,
+            StageName.STOP_MUMU,
+            StageName.SHUTDOWN_MUMU,
+        }
         if managed and self._stage in lifecycle_stages:
             if not isinstance(mumu, ManagedMumuRuntimePort):
                 return _instant(
@@ -233,7 +242,7 @@ class ProductionStageExecutor:
                     ErrorCode.WORKFLOW_STAGE_BLOCKED,
                     {"blocker": "mumu_lifecycle_port_unavailable"},
                 )
-            if self._stage == StageName.STOP_MUMU:
+            if self._stage in stop_stages:
                 result = mumu.stop(context.deadline, context.cancel)
             else:
                 result = mumu.start(context.deadline, context.cancel)
@@ -246,7 +255,11 @@ class ProductionStageExecutor:
             result,
             lifecycle_mode=self._config.mumu.lifecycle_mode,
             ensure_running=self._stage == StageName.ENSURE_MUMU_RUNNING,
-            expect_stopped=self._stage in {StageName.STOP_MUMU, StageName.VERIFY_MUMU_STOPPED},
+            expect_stopped=self._stage in {
+                StageName.STOP_MUMU,
+                StageName.VERIFY_MUMU_STOPPED,
+                StageName.SHUTDOWN_MUMU,
+            },
         )
 
     def _verify_starrail_postcondition(self) -> StageReport:

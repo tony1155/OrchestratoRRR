@@ -46,6 +46,7 @@ def build_execution_plan(
             StageName.VERIFY_MUMU_STOPPED,
             StageName.START_MUMU,
             StageName.WAIT_MUMU_ADB_READY_AFTER_RESTART,
+            StageName.SHUTDOWN_MUMU,
         }
         selected = tuple(stage for stage in selected if stage not in removed)
     requires_administrator = (

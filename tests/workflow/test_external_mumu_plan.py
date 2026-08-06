@@ -39,14 +39,19 @@ REMOVED_STAGES = (
     StageName.WAIT_MUMU_ADB_READY_AFTER_RESTART,
 )
 
+# SHUTDOWN_MUMU 也只属于 managed：它是 AALC 之后的收尾关闭，external 模式下
+# 编排器不拥有模拟器生命周期，故同样被移除。它不在 REMOVED_STAGES 里是因为
+# 后者断言的是静态计划中连续的 [8:12] 区段，而 SHUTDOWN_MUMU 位于索引 14。
+MANAGED_ONLY_TEARDOWN = StageName.SHUTDOWN_MUMU
+
 
 def _external_config(**changes: object) -> AppConfig:
     config = AppConfig(mumu=MuMuConfig(lifecycle_mode=MumuLifecycleMode.EXTERNAL))
     return replace(config, **changes)
 
 
-def test_static_build_plan_remains_fifteen_stages() -> None:
-    assert len(build_plan()) == 15
+def test_static_build_plan_remains_sixteen_stages() -> None:
+    assert len(build_plan()) == 16
 
 
 def test_static_build_plan_order_is_unchanged() -> None:
@@ -57,8 +62,19 @@ def test_managed_execution_plan_uses_static_plan() -> None:
     assert build_execution_plan(AppConfig()).stages == build_plan()
 
 
-def test_managed_execution_plan_has_fifteen_stages() -> None:
-    assert len(build_execution_plan(AppConfig()).stages) == 15
+def test_managed_execution_plan_has_sixteen_stages() -> None:
+    assert len(build_execution_plan(AppConfig()).stages) == 16
+
+
+def test_managed_plan_ends_with_shutdown_before_report() -> None:
+    """收尾关闭必须紧邻报告之前：跑完不留模拟器，但报告仍是最后一步。"""
+    stages = build_execution_plan(AppConfig()).stages
+    assert stages[-2:] == (MANAGED_ONLY_TEARDOWN, StageName.WRITE_RUN_REPORT)
+
+
+def test_external_plan_omits_shutdown_stage() -> None:
+    """external 模式不拥有模拟器生命周期，不得出现收尾关闭阶段。"""
+    assert MANAGED_ONLY_TEARDOWN not in build_execution_plan(_external_config()).stages
 
 
 def test_external_execution_plan_has_exact_order() -> None:
