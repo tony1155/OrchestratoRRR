@@ -94,21 +94,26 @@ def validate_run_request(request: RunRequest) -> str | None:
 
 
 def validate_run_v1_config(config: AppConfig) -> str | None:
-    """生产运行的配置闸门：仅禁止尚未闭合安全设计的 MAA 自更新。
+    """生产运行的配置闸门：managed 模式仍需显式启停命令。
 
     managed 模式已获批准，但要求显式配置启停管理命令，避免解闸后静默降级。
     MAA 配置同步已获批准：其路径约束由 ``MAASyncConfig`` 校验（四路径非空、
     源与目标不得重叠），写入为原子替换并具备备份与双目标回滚。
     AALC 重试已获批准：`AALCConfig` 将 attempts 限制在 1–3，且适配器仅对非零
     退出与单次尝试超时重试；正常完成、取消、父 Deadline 到期与清理失败均不重试。
+
+    MAA 自更新已解闸：``MAAUpdateConfig`` 仍禁止 self/hot-update/install/run/task
+    子命令、要求 ``arguments[0] == "update"``，并要求 ``allow_network``。上游
+    ``maa update`` 的解压环节非事务性（先 ``ensure_clean()`` 清空目标目录再逐
+    文件解压，无暂存目录、无完成标记、无回滚），但官方 Windows 发布包将
+    ``MaaCore.dll`` 排在所有资源条目之后，中断时动态库通常尚未落盘，下一次
+    ``maa update`` 会因读不到版本而重装；MAA GUI 覆盖安装为第二道兜底。
     """
 
     if config.mumu.lifecycle_mode == MumuLifecycleMode.MANAGED and not (
         config.mumu.start_arguments and config.mumu.stop_arguments
     ):
         return "managed_mumu_arguments_required"
-    if config.maa_update.enabled:
-        return "maa_update_not_allowed_in_run_v1"
     return None
 
 
