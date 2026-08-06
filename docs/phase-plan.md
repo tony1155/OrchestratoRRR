@@ -1,6 +1,6 @@
 # OrchestratoRRR 阶段规划
 
-Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2A、6C2B（含真实冷连接恢复）和 6C2C 均已完成验收，6C3 已完成文档收口。6B2B3C 已完成 managed 生命周期实现与 15 阶段真实端到端验收，同时解除 MAA 配置同步在 `run` v1 的闸门；6B2B2B 仍未完成。Phase 7A1 已完成入口契约实现与自动测试，Phase 7 尚未完成。
+Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2A、6C2B（含真实冷连接恢复）和 6C2C 均已完成验收，6C3 已完成文档收口。6B2B3C 已完成 managed 生命周期实现与 15 阶段真实端到端验收，同时解除 MAA 配置同步在 `run` v1 的闸门。6B2B2B 已解除 MAA 自更新闸门（`run` 不再以 maa_update_not_allowed_in_run_v1 阻断），真实打包工作流验收留待 Phase 7C。Phase 7A1 已完成入口契约实现与自动测试，Phase 7C 的真实重试目标已从 external 11 阶段改为 managed 15 阶段，Phase 7 尚未完成。
 
 ## Phase 5——AALC Runtime Adapter
 
@@ -399,9 +399,31 @@ phase_7e_completed=false
 phase_7_completed=false
 legacy_powershell_replacement_ready=false
 
-The next phase is PHASE_7C_AUTHORIZED_REAL_PACKAGED_EXTERNAL_WORKFLOW, gated by
+## Phase 7C scope change: managed 15-stage retry
+
+The Phase 7C real-workflow retry now targets the managed 15-stage plan instead
+of the external 11-stage plan. The earlier external-only wording predates
+Phase 6B2B3C, which unlocked the managed MuMu lifecycle and passed a real
+15-stage end-to-end acceptance from source. The local configuration has used
+`lifecycle_mode = "managed"` since then, and Phase 7E will replace the legacy
+PowerShell entry with an entry that also runs managed. Auditing an external
+run would therefore validate a configuration that is no longer the operational
+one.
+
+The MAA self-update gate was also lifted, so `UPDATE_MAA` now executes for
+real rather than returning an immediate `executed=false` success. Installed
+MaaCore is v6.14.2 while the MAA GUI is v6.16.2, so this retry is expected to
+perform an actual download and extraction.
+
+Audit scope for the retry: RunReport, JSONL, all 15 stages, real `UPDATE_MAA`
+execution, and business-program cleanup. The external 11-stage plan remains
+supported in code and covered by automatic tests; only the real packaged
+retry target changed.
+
+The next phase is PHASE_7C_AUTHORIZED_REAL_PACKAGED_MANAGED_WORKFLOW, gated by
 PHASE_7C_REAL_WORKFLOW_RETRY_AUTHORIZATION. It must not begin without separate
 explicit authorization. The required order is: separately authorize the
-repaired real packaged external workflow retry; audit its RunReport, JSONL,
-all 11 stages, and business-program cleanup; then enter Phase 7E only after
-Phase 7C succeeds. The legacy PowerShell entry remains retained.
+repaired real packaged managed workflow retry; audit its RunReport, JSONL,
+all 15 stages, real UPDATE_MAA execution, and business-program cleanup; then
+enter Phase 7E only after Phase 7C succeeds. The legacy PowerShell entry
+remains retained.
