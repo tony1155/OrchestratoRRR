@@ -1,6 +1,6 @@
 # OrchestratoRRR 阶段规划
 
-Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2A、6C2B（含真实冷连接恢复）和 6C2C 均已完成验收，6C3 已完成文档收口。6B2B3C 已完成 managed 生命周期实现与 15 阶段真实端到端验收，同时解除 MAA 配置同步在 `run` v1 的闸门。6B2B2B 已解除 MAA 自更新闸门（`run` 不再以 maa_update_not_allowed_in_run_v1 阻断），真实打包工作流验收留待 Phase 7C。Phase 7A1 已完成入口契约实现与自动测试，Phase 7C 的真实重试目标已从 external 11 阶段改为 managed 15 阶段，Phase 7 尚未完成。
+Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2A、6C2B（含真实冷连接恢复）和 6C2C 均已完成验收，6C3 已完成文档收口。6B2B3C 已完成 managed 生命周期实现与 15 阶段真实端到端验收，同时解除 MAA 配置同步在 `run` v1 的闸门。6B2B2B 已解除 MAA 自更新闸门（`run` 不再以 maa_update_not_allowed_in_run_v1 阻断），真实打包工作流验收留待 Phase 7C。Phase 7A1 已完成入口契约实现与自动测试，Phase 7C 的真实重试目标已从 external 11 阶段改为 managed 16 阶段（新增 SHUTDOWN_MUMU 收尾关闭），Phase 7 尚未完成。
 
 ## Phase 5——AALC Runtime Adapter
 
@@ -395,11 +395,40 @@ phase_7c_program_port_reinstall_completed=true
 phase_7c_program_port_installed_artifact_audit_completed=true
 phase_7c_managed_target_rebuild_completed=true
 phase_7c_managed_target_artifact_audit_completed=true
+phase_7c_managed16_rebuild_completed=true
+phase_7c_managed16_artifact_audit_completed=true
 phase_7c_real_workflow_retry_completed=false
 phase_7c_completed=false
 phase_7e_completed=false
 phase_7_completed=false
 legacy_powershell_replacement_ready=false
+
+## Phase 7C managed 16-stage rebuild and artifact audit
+
+新增 `SHUTDOWN_MUMU` 收尾阶段（`a4eaab3`）后重建制品，基线为 `main` 的
+`a4eaab3`，工作区干净，仍用受版本控制的 `scripts/build-package.ps1` 与
+`packaging/OrchestratoRRR.spec`（PyInstaller 6.21.0）。构建脚本自带的三项后置
+校验（EXE、`_internal`、内置 RunReport schema）均通过。
+
+制品审计：
+
+- `dist/OrchestratoRRR/OrchestratoRRR.exe`，7,507,985 字节，
+  sha256 `266c00a378cc3864c53937f226c599eba10fc8ac4f1d56dc6f963bd7111ddfde`
+- `_internal`：105 个文件，21,133,235 字节
+- 内置 `run-report-v1.schema.json` 的 stage 枚举已含 `shutdown_mumu`。该枚举是
+  硬编码的，未修正时 RunReport 无法通过 schema 校验，且因 schema 会被打包
+  进 EXE（见 spec 的 datas），影响不限于测试
+
+打包态非业务检查（针对真实 local 配置，managed 模式）：
+
+- `version` 返回 `OrchestratoRRR 0.1.0`
+- `validate --check-paths` 返回 `Validation OK.`
+- `plan` 投影出 managed 16 阶段，`shutdown_mumu` 位于第 15 位、`write_run_report`
+  仍为最后一位
+
+本次审计未执行任何业务程序、未提权、未触发 ADB 或 TCP 连接。
+`phase_7c_managed16_rebuild_completed=true` 与
+`phase_7c_managed16_artifact_audit_completed=true`。
 
 ## Phase 7C managed-target rebuild and artifact audit
 
@@ -450,15 +479,24 @@ real rather than returning an immediate `executed=false` success. Installed
 MaaCore is v6.14.2 while the MAA GUI is v6.16.2, so this retry is expected to
 perform an actual download and extraction.
 
-Audit scope for the retry: RunReport, JSONL, all 15 stages, real `UPDATE_MAA`
-execution, and business-program cleanup. The external 11-stage plan remains
-supported in code and covered by automatic tests; only the real packaged
-retry target changed.
+Audit scope for the retry: RunReport, JSONL, all 16 stages, real `UPDATE_MAA`
+execution, `SHUTDOWN_MUMU` teardown (no emulator left running), and
+business-program cleanup. The external 11-stage plan remains supported in code
+and covered by automatic tests; only the real packaged retry target changed.
+
+The stage count changed from 15 to 16 on 2026-08-06 (`a4eaab3`) with the new
+`SHUTDOWN_MUMU` teardown. The motivation was empirical: after run `f4be5315`
+LimbusCompany was still running, because AALC cannot close the game in emulator
+mode. Its `exit_game` targets the Windows process `LimbusCompany.exe` while the
+actual game is the Android app `com.ProjectMoon.LimbusCompany` inside MuMu, so
+the action was a silent no-op. Teardown therefore belongs to the orchestrator,
+which already owns the emulator lifecycle and whose `MuMuManager control -v 0
+shutdown` is verified working.
 
 The next phase is PHASE_7C_AUTHORIZED_REAL_PACKAGED_MANAGED_WORKFLOW, gated by
 PHASE_7C_REAL_WORKFLOW_RETRY_AUTHORIZATION. It must not begin without separate
 explicit authorization. The required order is: separately authorize the
 repaired real packaged managed workflow retry; audit its RunReport, JSONL,
-all 15 stages, real UPDATE_MAA execution, and business-program cleanup; then
-enter Phase 7E only after Phase 7C succeeds. The legacy PowerShell entry
-remains retained.
+all 16 stages, real UPDATE_MAA execution, SHUTDOWN_MUMU teardown, and
+business-program cleanup; then enter Phase 7E only after Phase 7C succeeds.
+The legacy PowerShell entry remains retained.
