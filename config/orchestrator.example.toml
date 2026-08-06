@@ -60,12 +60,35 @@ backup_enabled = true
 max_source_bytes = 4194304
 requires_administrator = false
 
+# [maa_update] 默认关闭（模捷保守值），但 `run` 入口已解闸：置 enabled = true 且
+# allow_network = true 即可真正执行 UPDATE_MAA 阶段。
+#
+# 上游行为（核对 maa-cli 基线 de9c4d9）：安装环节非事务性。maa_core.rs 的
+# pre_install_hook 先调用 ensure_clean() 将 lib/ 与 resource/ 整体 remove_dir_all
+# 后重建空目录，再直接往正式目录逐文件解压；无暂存目录、无完成标记、无回滚。
+# 因此解压中途被中断时，旧安装已被删除，尚未解压到的条目直接缺失
+# （而不是回退到旧版）。
+#
+# 中断在实践中可自愈，靠两道兜底：
+#   1. 官方 Windows 发布包将 MaaCore.dll 排在所有 resource/ 条目之后（核对
+#      v6.9.5–v6.14.2 共 11 个包均如此；v6.14.2 中 resource/ 位于 508-9350，
+#      MaaCore.dll 位于 9362）。中断时动态库大概率尚未落盘，find_library()
+#      找不到它，core_version() 返回 Err，下一次 maa update 会重新安装。
+#   2. MAA GUI 覆盖安装可人工修复。
+#   注：第 1 道建立在发布包的打包顺序上，而非安装器的显式保证；打包顺序
+#   变动或非 Windows 平台可能不适用。
+#
+# timeout_seconds 取 3600 而非 1800：官方整包约 254 MiB、共 9367 个归档条目
+# （其中 8843 个在 resource/ 下），较大的预算可降低被强行终止的概率。
+#
+# 仍生效的约束：MAAUpdateConfig 禁止 self/hot-update/install/run/task 子命令，
+# 要求 arguments[0] == "update"，且 enabled 时必须 allow_network = true。
 [maa_update]
 enabled = false
 allow_network = false
 requires_administrator = false
 arguments = ["update"]
-timeout_seconds = 1800
+timeout_seconds = 3600
 
 [aalc]
 executable = "C:\\path\\to\\AALC.exe"

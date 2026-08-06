@@ -144,9 +144,15 @@ def test_enabled_sync_with_blank_paths_is_still_rejected() -> None:
     assert config.maa_sync.validate() != []
 
 
-def test_enabled_update_is_rejected_by_run_v1() -> None:
+def test_enabled_update_is_accepted_by_run_v1() -> None:
+    """MAA 自更新已解闸：启用且允许网络时不再被配置闸门拦下。"""
     config = _external_config(maa_update=MAAUpdateConfig(enabled=True, allow_network=True))
-    assert validate_run_v1_config(config) == "maa_update_not_allowed_in_run_v1"
+    assert validate_run_v1_config(config) is None
+
+
+def test_enabled_update_without_network_is_rejected_by_config() -> None:
+    """解闸后的安全底线：enabled 仍需 allow_network，否则 MAAUpdateConfig 自身拒绝。"""
+    assert MAAUpdateConfig(enabled=True, allow_network=False).validate() != []
 
 
 @pytest.mark.parametrize("attempts", [1, 2, 3])
@@ -321,7 +327,6 @@ def test_invalid_toml_is_stable_error(tmp_path: Path) -> None:
     ("settings", "error"),
     [
         ({"lifecycle_mode": "managed", "mumu_arguments": False}, "managed_mumu_arguments_required"),
-        ({"update_enabled": True}, "maa_update_not_allowed_in_run_v1"),
     ],
 )
 def test_run_v1_gate_stops_before_runtime(tmp_path: Path, settings: dict[str, object], error: str) -> None:

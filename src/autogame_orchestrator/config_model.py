@@ -420,13 +420,26 @@ class MAASyncConfig:
 
 @dataclass(frozen=True)
 class MAAUpdateConfig:
-    """仅允许 MaaCore/资源 update 的安全配置。"""
+    """仅允许 MaaCore/资源 update 的安全配置。
+
+    默认关闭，且在 `run` 入口仍被闸门阻断。阻断理由与安全余量：
+
+    maa-cli 的下载环节是安全的（``.partial`` 临时文件 + ``rename``，并带校验和），
+    但解压环节非原子：``maa-installer`` 的 ``extract.rs`` 逐文件 ``File::create`` +
+    ``io::copy`` 原地覆盖，未使用该项目自有的 ``atomic_fs``，且两个安装器
+    （maa_core / resource）均无备份与回滚。因此解压中途被中止时，资源目录会
+    停在“部分新版 + 一个被截断文件 + 部分旧版”的混杂状态；若该资源目录与
+    MAA GUI 共用，坏状态会同时注入 GUI。
+
+    默认超时取 3600 而非 1800：官方整包为 260 MB 量级、解压为数千文件，较大的
+    预算可降低被超时强行终止而留下坏资源的概率。超时并非安全保证，仅为降低风险。
+    """
 
     enabled: bool = False
     allow_network: bool = False
     requires_administrator: bool = False
     arguments: tuple[str, ...] = ("update",)
-    timeout_seconds: int = 1800
+    timeout_seconds: int = 3600
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []

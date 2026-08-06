@@ -127,3 +127,19 @@ def test_loader_rejects_wrong_types(field: str, value: object) -> None:
 )
 def test_loader_rejects_unapproved_fields(field: str) -> None:
     assert _parse_maa_update({field: "forbidden"}) == (None, [ErrorCode.CONFIG_SCHEMA_ERROR])
+
+
+def test_default_timeout_leaves_margin_for_large_archive_extraction() -> None:
+    """默认超时须留出足够余量，降低解压中途被强杀而留下坏资源的概率。
+
+    maa-cli 的安装环节非事务性：`maa_core.rs` 的 pre_install_hook 先用
+    `ensure_clean()` 将 lib/ 与 resource/ 整体删除（`maa-dirs` 的 remove_dir_all
+    后重建空目录），再直接往正式目录逐文件解压，无暂存目录、无完成标记、
+    无回滚。官方 Windows 整包约 254 MiB、共 9367 个归档条目（其中 8843 个在
+    resource/ 下），1800 秒偏紧；取 3600 以降低被超时强杀的概率。
+
+    中断后的恢复依赖两道兜底：官方包将 MaaCore.dll 排在所有资源条目之后
+    （本机核对 v6.9.5–v6.14.2 共 11 个包均如此），中断时动态库通常尚未落盘，
+    core_version() 读不出版本，下一次 maa update 会重装；其次是 MAA GUI 覆盖安装。
+    """
+    assert MAAUpdateConfig().timeout_seconds >= 3600
