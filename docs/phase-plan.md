@@ -500,3 +500,75 @@ repaired real packaged managed workflow retry; audit its RunReport, JSONL,
 all 16 stages, real UPDATE_MAA execution, SHUTDOWN_MUMU teardown, and
 business-program cleanup; then enter Phase 7E only after Phase 7C succeeds.
 The legacy PowerShell entry remains retained.
+
+## Phase 7C 首次真实 16 阶段运行：报告成功但收尾未生效
+
+首次授权的真实打包 managed 16 阶段运行（run_id `8f96fb14-2576-454c-9bef-e6a625d5cb74`，
+2026-08-07 09:03:50Z 起，历时 43 分 48 秒）RunReport 报 `status=success`、
+`error_code=OK`，16 个阶段全部 `success`。但运行结束后 MuMu 仍在运行：
+TCP 16384 为 OPEN，`MuMuVMMHeadless` 常驻，`MuMuManager info -v 0` 甚至 60 秒超时。
+因此本次运行不足以翻转 `phase_7c_real_workflow_retry_completed`。
+
+定位依据是阶段耗时与 `changed` 标志的对照：
+
+| 阶段 | duration_ms | changed | 含义 |
+|---|---|---|---|
+| 9 `stop_mumu` | 3157 | true | 真的执行了停止命令 |
+| 15 `shutdown_mumu` | 78 | false | 走了幂等短路，命令从未执行 |
+
+`stop()` 中返回 `changed=false` 且 `error_code=OK` 的只有开头的「已 stopped → 幂等」
+分支，故 `MuMuManager control -v 0 shutdown` 根本没有被调用。
+
+根因是 `status()` 把 `PORT_CLOSED` 与 `DEVICE_NOT_FOUND` 一同映射为 `STOPPED`。
+MuMu 的 ADB 是网络设备（`127.0.0.1:16384`），不像 USB 设备会自动出现；宿主 ADB
+server 一旦重启就会忘掉网络设备注册，必须重新 `adb connect` 才能列出。AALC 退出时
+重启了 ADB server，于是 readiness probe 的 TCP 探测通过（端口 OPEN），但
+`adb devices -l` 返回空列表，`select_adb_device` 在 `select_device` 步骤抛出
+`DEVICE_NOT_FOUND`，被误判成「已停止」。实测复现：TCP 16384 为 OPEN 而
+`adb devices` 列不出目标 serial，手动 `adb connect` 后设备才出现。
+
+修复（`243d061`）改动三处：
+
+- `status()` 只以 `PORT_CLOSED` 作为 `STOPPED` 的证据。`DEVICE_NOT_FOUND` 落到方法
+  末尾的 `NOT_READY` 分支，因为端口开着恰恰说明进程还活着，只是 ADB 未注册
+- `_wait_stopped()` 的停止确认同样只接受 `PORT_CLOSED`。否则执行 shutdown 命令后若
+  ADB server 恰好为空，会立刻误判成功返回，而 VM 其实还在；只认 `PORT_CLOSED` 时
+  这种情况会诚实地等到 `STOP_TIMEOUT`
+- `stop()` 的幂等返回补上 `diagnostics=st.diagnostics`。事故报告第 15 阶段缺少
+  `probe_error` / `probe_step` 字段正是因为该分支丢弃了内层 probe 诊断
+
+影响面已核对：`start()` 仅在 `READY` 时短路，不受影响；`ensure_external_ready()` 有
+独立映射，`DEVICE_NOT_FOUND` 走 fallthrough 返回 `NOT_READY`，不经过 `STOPPED`，
+故 EXTERNAL 路径行为不变。该缺陷能通过 1390 个测试是因为 `_FakeProbe(refused=True)`
+只产生 `PORT_CLOSED`，`DEVICE_NOT_FOUND` 路径此前无任何覆盖；现补三个回归测试并逐项
+验证「移除修复即变红」。
+
+修复在真实事故态下验证：`status()` 返回 `not_ready` / `READINESS_FAILED`，诊断为
+`probe_error=DEVICE_NOT_FOUND`、`probe_step=select_device`；`stop()` 返回
+`changed=true`、耗时 2.70 秒，随后 TCP 16384 转为 CLOSED，`MuMuVMMHeadless`
+（事故时占 1702 MB）在 20 秒内的三次采样中均已消失，`is_process_started` 与
+`is_android_started` 双双为 false，`MuMuManager info -v 0` 恢复为即时响应。
+
+## Phase 7C 修复后重建与制品审计
+
+制品自 `main` 的 `243d061` 干净工作区重建，仍用受版本控制的
+`scripts/build-package.ps1` 与 `packaging/OrchestratoRRR.spec`（PyInstaller 6.21.0），
+构建脚本自带的三项后置校验均通过。
+
+- `dist/OrchestratoRRR/OrchestratoRRR.exe`，7,507,942 字节，
+  sha256 `e3fc7f29ad04a89210680fdc7624b6342a312668441bbca87de6c87c633a6028`
+- `_internal`：105 个文件，21,133,235 字节
+
+字节码级核验（从 PYZ 取出 `runtime.mumu` 后反汇编，而非只看源码）：
+`MumuAdapter.status` 与 `MumuAdapter._wait_stopped` 均只引用 `PORT_CLOSED`，
+`DEVICE_NOT_FOUND` 引用数为 0，确认修复进入了制品而非仅存在于源码。
+
+打包态非业务检查：`version` 返回 `OrchestratoRRR 0.1.0`；
+`validate --check-paths` 返回 `Validation OK.`；`plan` 投影出 managed 16 阶段，
+`shutdown_mumu` 位于第 15 位、`write_run_report` 仍为最后一位。本次审计未执行任何
+业务程序、未提权、未触发 ADB 或 TCP 连接。
+
+下一步需要重跑一次真实 16 阶段运行。判定收尾是否真正生效的判据不是阶段
+`outcome=success`（事故运行同样全绿），而是第 15 阶段的
+`changed=true` 且 `duration_ms` 在秒级；若再次出现 `changed=false` 加毫秒级耗时，
+说明仍有未堵住的误判路径。`phase_7c_real_workflow_retry_completed` 保持 false。
