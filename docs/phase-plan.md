@@ -572,3 +572,123 @@ server 一旦重启就会忘掉网络设备注册，必须重新 `adb connect` �
 `outcome=success`（事故运行同样全绿），而是第 15 阶段的
 `changed=true` 且 `duration_ms` 在秒级；若再次出现 `changed=false` 加毫秒级耗时，
 说明仍有未堵住的误判路径。`phase_7c_real_workflow_retry_completed` 保持 false。
+
+
+## 设计缺口记录：shutdown_mumu 在上游失败时被 SKIP
+
+**发现时机**：run `e28e5ba3`（2026-08-07 19:08 起，30 分钟）MAA 阶段超时后，
+`run_aalc`、`shutdown_mumu` 均标记为 SKIPPED，编排器结束后模拟器仍在运行
+（事后实测 TCP 16384 仍 OPEN）。
+
+**缺口描述**：`shutdown_mumu` 目前是普通流水线阶段——前置阶段失败即 SKIP，
+没有任何「一定执行」保证。而它的实际语义是收尾清理（类似 try/finally）：
+无论 MAA 超时、AALC 崩溃、还是任何其他中途失败，都应当关闭模拟器。
+
+对比参照：`write_run_report` 已经具备「不管上游怎样都执行」的行为
+（本次 `run_maa` 超时后报告仍被正常写出）。`shutdown_mumu` 应获得相同保证。
+
+**复现条件**：任何导致 `run_maa` 或 `run_aalc` 以非 success 结果结束的情况。
+本次情形是 MAA Recruit 陷入导航循环，撞上 `maa.timeout_seconds = 1800` 上限。
+
+**受影响场景**：无人值守模式（睡觉时全自动）下，中途失败会让模拟器整夜驻留，
+既占 3 GB 以上内存，也会使 `MuMuManager info -v 0` 卡死（此前实测超时 60s+）。
+
+**临时缓解**：失败后手动关闭模拟器（MuMuManager control -v 0 shutdown）。
+
+**修复方向**（待专项处理，此处仅记录）：
+- 在 `coordinator.py` / `runner.py` 增加 finally 语义，失败路径同样触发关闭逻辑
+- 或在 `ExecutionPlan` 中为阶段引入 `always_run` 标志，调度器跳过前检查该标志
+- 需同时决定：`always_run` 阶段自身失败时如何影响 run 级 `error_code`
+
+---
+
+## run e28e5ba3 事故调查：MAA Recruit 导航循环导致阶段超时
+
+**结论概要**：MAA 未崩溃、未卡死，是被编排器按 1800 秒上限主动终止
+（`termination_reason: timeout`、`source_error_code: PROCESS_TIMEOUT`、
+`exit_code: 1`、`duration_ms: 1800062`）。根因是 Recruit（公开招募）阶段的
+页面导航长时间不生效，耗掉 27 分钟，Infrast 只跑了不到 3 分钟即被中止。
+Mall、两个 Fight、Award、CloseDown 完全未执行。
+
+**阶段耗时对比**（对照上一轮成功的 run `8f96fb14`）：
+
+| 阶段 | 8f96fb14 | e28e5ba3 |
+| --- | --- | --- |
+| run_starrail | 576.4 s OK | 2.0 s OK（当日 17:14 已清完，无任务可跑） |
+| start_mumu | 15.0 s OK | 45.6 s OK |
+| run_maa | 836.0 s OK | 1800.1 s TIMEOUT |
+| run_aalc | 1162.8 s OK | SKIPPED |
+| shutdown_mumu | 0.1 s OK（假成功，见 DEVICE_NOT_FOUND 事故） | SKIPPED |
+
+**MAA 内部任务链时间线**（`maa-cli/state/debug/asst.log`）：
+
+```
+19:09:40  StartUp
+19:10:48  Recruit     ← 停留 26 分 59 秒
+19:37:47  Infrast     ← 仅约 1 分 50 秒后被杀
+19:39:36  进程被编排器终止
+```
+
+**循环机制**：
+
+```
+RecruitBegin (JustReturn，逐项尝试 next)
+  → QuickSwitch@ToRecruit@Open   点开小房子下拉菜单
+  → QuickSwitch@ToRecruit@Entry  点下拉菜单里的公开招募图标
+  → Entry 的 next 逐项不匹配 → #back 返回调用方
+  → 回到 RecruitBegin，重新开始
+```
+
+单圈约 3.3 秒，`QuickSwitch@ToRecruit@Entry` 的 `exec_times` 从 3 递增到 485。
+`max_times` 为 2147483647，MAA 自身永不放弃，只能靠编排器超时中止。
+
+**唯一出口**：`RecruitFlag`（`algorithm: OcrDetect`、`text: ["公开招募"]`、
+`roi: [50,100,230,100]`、`action: Stop`）。
+
+**OCR 证据（关键）**：循环期间该 roi 内被识别到的文本与出口所需文本不是同一元素。
+
+| 时段 | 识别文本 | 绝对 x | 宽度 | 次数 |
+| --- | --- | --- | --- | --- |
+| 19:10-19:37 循环中 | 招募 | 243 | 36 | 479 |
+| 19:37:30 单次 | 公开招募 | 132 | 101 | 1 |
+
+页面标题「公开招募」占 x=132~233；循环期间读到的「招募」起始于 x=243，
+在标题右侧，是下拉菜单自身的标签文本。两者都落在 roi（x=50~280）内，
+但只有前者能匹配 `text: ["公开招募"]`。
+
+即：27 分钟内模拟器始终没有真正进入公开招募页，点击下拉菜单图标未生效。
+19:37:30 该次点击终于生效，`RecruitFlag` 立刻触发 Stop，Recruit 链结束，
+19:37:47 进入 Infrast。循环期间同时高频出现的杂字符 OCR（`&` / `x`，
+abs 约 (960,630)，合计 400 余次）为噪点误识别，非有效状态。
+
+**关联上游 issue**：MAA #16910「进入自动公招流程后一直卡在公招界面不操作」
+（2026-05-28 closed），报告的循环链路是
+`RecruitBegin@QuickSwitch@ToRecruit@Entry@LoadingText`，修复见 commit
+`6ed2275`，随 v6.11.0-beta.2 发布，改动是把 `next` 数组里的 `#self` 与
+`@Entry@LoadingText` 形式替换为显式任务名加通用 `LoadingText`/`LoadingIcon`。
+
+本地已含该补丁：`resource/tasks/UiTheme/QuickSwitch.json` 中
+`QuickSwitch@ToRecruit@Entry` 的 `next` 为
+`["QuickSwitch@ToRecruit@Entry", "LoadingText", "LoadingIcon", "#back"]`，
+与该 commit 的 `+` 侧逐字一致。实测版本 maa-cli v0.7.5 / MaaCore v6.16.5，
+均远高于 v6.11.0-beta.2。
+
+**今日失效与 #16910 不同**：#16910 修的是 LoadingText 子任务无法跳出的子循环；
+今日是外层导航（点击图标 → 页面切换）长时间不生效，导致 `#back` 反复回到
+`RecruitBegin`。日志中无 ConnectFailed、无 offline、无 TaskChainError，
+ADB 截图调用全程 `ret 0`（平均 182 ms），故不是连接问题。
+
+**疑似诱因（未验证）**：
+- 点击虽通过 minitouch 发出且坐标落在匹配 rect 内，但安卓侧未响应为页面切换
+- 模拟器刚由 `start_mumu` 冷启动（本次耗时 45.6 秒，明显高于常见的约 15 秒），
+  可能仍处于资源紧张、UI 响应迟滞状态
+- 该现象具偶发性：上一轮 `8f96fb14` 同一配置下 MAA 全流程仅 836 秒
+
+**对编排器的影响与可行动作**：识别与点击逻辑属 MaaCore，编排器层面无法直接修复。
+增大 `maa.timeout_seconds` 只能提高从偶发迟滞中自行恢复的概率，
+不能解决导航持续不生效的情形，且会延后失败暴露时间。是否调整待观察复现频率。
+
+**后续观察点**：
+1. 复现频率——若多轮中仅偶发一次，倾向归因于冷启动后 UI 迟滞
+2. `start_mumu` 耗时与 MAA 卡顿是否相关（本次 45.6 s vs 上轮 15.0 s）
+3. 手动运行 MAA 时观察公开招募页标题区域显示是否正常
