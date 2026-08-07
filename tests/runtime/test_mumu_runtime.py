@@ -313,6 +313,23 @@ def test_status_stopped() -> None:
         assert result.error_code == MumuRuntimeErrorCode.OK
 
 
+def test_status_device_not_found_is_not_stopped() -> None:
+    """DEVICE_NOT_FOUND 不得映射为 STOPPED：TCP 端口是开着的，模拟器还活着。
+
+    回归保护：MuMu 的 ADB 是网络设备（``127.0.0.1:16384``），宿主 ADB server
+    一旦重启就会忘掉网络设备注册，必须重新 ``adb connect`` 才能列出。此时
+    probe 的 TCP 探测通过（端口 OPEN），但 ``adb devices -l`` 是空列表，
+    ``select_adb_device`` 抛 DEVICE_NOT_FOUND。若把它当成 STOPPED，
+    ``stop()`` 会走幂等短路，``MuMuManager shutdown`` 永不执行，
+    表现为阶段报告 success 但模拟器仍在运行。
+    """
+    adapter = _make_adapter()
+    with patch.object(adapter, "_create_probe", return_value=_FakeProbe(not_found=True)):
+        result = adapter.status(Deadline.after(5.0))
+    assert result.status == MumuRuntimeStatus.NOT_READY
+    assert result.error_code == MumuRuntimeErrorCode.READINESS_FAILED
+
+
 def test_status_offline() -> None:
     adapter = _make_adapter()
     with patch.object(adapter, "_create_probe", return_value=_FakeProbe(offline=True)):
@@ -396,12 +413,14 @@ class _FakeProbe:
         self,
         ready: bool = False,
         refused: bool = False,
+        not_found: bool = False,
         offline: bool = False,
         unauthorized: bool = False,
         timed_out: bool = False,
     ) -> None:
         self._ready = ready
         self._refused = refused
+        self._not_found = not_found
         self._offline = offline
         self._unauthorized = unauthorized
         self._timed_out = timed_out
@@ -414,6 +433,10 @@ class _FakeProbe:
         if self._refused:
             return ProbeResult.from_monotonic(
                 "test", ProbeStatus.UNAVAILABLE, ProbeErrorCode.PORT_CLOSED, time.monotonic()
+            )
+        if self._not_found:
+            return ProbeResult.from_monotonic(
+                "test", ProbeStatus.NOT_READY, ProbeErrorCode.DEVICE_NOT_FOUND, time.monotonic()
             )
         if self._offline:
             return ProbeResult.from_monotonic(
@@ -533,6 +556,60 @@ def test_stop_idempotent_no_args_needed() -> None:
         assert result.status == MumuRuntimeStatus.STOPPED
         assert result.error_code == MumuRuntimeErrorCode.OK
         assert result.changed is False
+
+
+def test_stop_does_not_short_circuit_on_device_not_found() -> None:
+    """DEVICE_NOT_FOUND 时 ``stop()`` 必须执行停止命令，不得幂等短路。
+
+    回归保护：真实事故 run_id ``8f96fb14``，第 15 阶段 ``shutdown_mumu``
+    仅耗时 78 ms 且 ``changed=false``，report 判定 success，但模拟器仍在跑。
+    根因是 AALC 退出时重启了 ADB server，probe 返回 DEVICE_NOT_FOUND，
+    被 ``status()`` 误判成 STOPPED，``stop()`` 因此直接短路返回。
+    """
+    adapter = _make_adapter()
+    with (
+        patch.object(adapter, "_create_probe", return_value=_FakeProbe(not_found=True)),
+        patch.object(
+            adapter,
+            "_run_manager_command",
+            return_value={
+                "ok": False,
+                "status": MumuRuntimeStatus.FAILED,
+                "error_code": MumuRuntimeErrorCode.COMMAND_EXIT_NONZERO,
+                "diag": {},
+            },
+        ) as mock_cmd,
+    ):
+        result = adapter.stop(Deadline.after(5.0))
+    mock_cmd.assert_called_once()
+    assert result.status != MumuRuntimeStatus.STOPPED
+
+
+def test_stop_confirmation_requires_port_closed() -> None:
+    """停止确认只接受 PORT_CLOSED；DEVICE_NOT_FOUND 不构成已停止的证据。
+
+    回归保护：``_wait_stopped`` 曾把 DEVICE_NOT_FOUND 也当作停止确认。
+    执行 shutdown 命令后若 ADB server 恰好为空，会立刻误判成功返回，
+    而 VM 进程其实还在。改为只认 PORT_CLOSED 后，这种情况会诚实地
+    等到 STOP_TIMEOUT，而不是谎报 success。
+    """
+    adapter = _make_adapter()
+    with (
+        patch.object(adapter, "_create_probe", return_value=_FakeProbe(not_found=True)),
+        patch.object(
+            adapter,
+            "_run_manager_command",
+            return_value={
+                "ok": True,
+                "status": MumuRuntimeStatus.STOPPED,
+                "error_code": MumuRuntimeErrorCode.OK,
+                "diag": {},
+            },
+        ),
+    ):
+        result = adapter.stop(Deadline.after(0.4))
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert result.error_code == MumuRuntimeErrorCode.STOP_TIMEOUT
 
 
 def test_restart_refused_no_stop_args() -> None:

@@ -124,7 +124,13 @@ class MumuAdapter:
                 changed=False,
                 diagnostics=_safe_probe_diagnostics(result),
             )
-        if result.error_code in (ProbeErrorCode.PORT_CLOSED, ProbeErrorCode.DEVICE_NOT_FOUND):
+        # 只有 PORT_CLOSED 才是「已停止」的证据。DEVICE_NOT_FOUND 不是：
+        # MuMu 的 ADB 是网络设备（127.0.0.1:16384），宿主 ADB server 一旦重启
+        # 就会忘掉网络设备注册，此时 TCP 端口仍 OPEN（模拟器活着）但
+        # `adb devices -l` 是空列表，probe 在 select_device 步骤抛 DEVICE_NOT_FOUND。
+        # 把它当成 STOPPED 会让 stop() 走幂等短路，shutdown 命令永不执行。
+        # DEVICE_NOT_FOUND 落到本方法末尾的 NOT_READY 分支。
+        if result.error_code == ProbeErrorCode.PORT_CLOSED:
             return MumuRuntimeResult.from_monotonic(
                 MumuAction.STATUS,
                 MumuRuntimeStatus.STOPPED,
@@ -288,6 +294,7 @@ class MumuAdapter:
                 MumuRuntimeErrorCode.OK,
                 started_at,
                 changed=False,
+                diagnostics=st.diagnostics,
             )
 
         # 未配置停止命令 → 拒绝
@@ -526,7 +533,11 @@ class MumuAdapter:
             probe = self._create_probe()
             result = probe.probe(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
 
-            if result.error_code in (ProbeErrorCode.PORT_CLOSED, ProbeErrorCode.DEVICE_NOT_FOUND):
+            # 停止确认只接受 PORT_CLOSED。DEVICE_NOT_FOUND 不构成已停止的证据：
+            # 执行 shutdown 后若宿主 ADB server 恰好为空，会立刻误判成功返回，
+            # 而 VM 进程其实还在。只认 PORT_CLOSED 时这种情况会诚实地等到
+            # STOP_TIMEOUT，而不是谎报 success。
+            if result.error_code == ProbeErrorCode.PORT_CLOSED:
                 return MumuRuntimeResult.from_monotonic(
                     MumuAction.STOP, MumuRuntimeStatus.STOPPED, MumuRuntimeErrorCode.OK, started_at, changed=True
                 )
