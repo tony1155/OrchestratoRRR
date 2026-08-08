@@ -2,13 +2,18 @@
 
 ## 当前状态 / Project status
 
-**Phase 7 进行中，尚未完成。** 本分支反映截至 6B2B3C 的已验收能力：
+**Phase 7C 已完成；Phase 7E（旧 PowerShell 入口替换）尚未完成。**
+本分支反映截至 7C 的已验收能力：
 
 - 已完成并经真实端到端验收：Phase 0–5 全部适配器、Phase 6 完整工作流编排、
   managed MuMu 生命周期（自动启停模拟器）、MAA 配置同步、PyInstaller onedir
-  打包与默认入口。最近一次 15 阶段完整工作流验收为一次通过、无重试。
-- 未完成：Phase 7 收口（7E 旧 PowerShell 入口替换），6B2B2B（maa-cli 自更新）
-  仍阻断，交互式 `start` 命令仍为 external-only。
+  打包与默认入口、MAA 自更新（6B2B2B）、16 阶段完整工作流含收尾关闭模拟器
+  （`SHUTDOWN_MUMU`）。最近两次 16 阶段验收均一次通过、无重试、
+  `shutdown_mumu changed=True`（run `7f524e53` / `faabbcef`）。
+- 未完成：Phase 7E（旧 PowerShell 入口替换）；交互式 `start` 命令仍为
+  external-only。
+- 已知问题：`shutdown_mumu` 在上游阶段失败时会被跳过（`always_run` 缺口，
+  已记录未修）；MAA Recruit 偶发导航循环（上游 MaaCore 问题）。
 - 已知问题与未完成项以各阶段验收文档为准，最新一份为
   `docs/acceptance/phase-6b2b3c-managed-mumu-lifecycle.md`。
 
