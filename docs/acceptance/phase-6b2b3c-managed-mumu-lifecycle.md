@@ -245,39 +245,58 @@ wait_mumu_adb_ready_after_restart    266ms
 
 ## 未完成项与已知问题
 
-1. **收尾不关闭模拟器。** managed 计划在第 11 阶段重启模拟器后，直至
-   `WRITE_RUN_REPORT` 无任何关闭阶段，故正常收尾时模拟器保持运行。补齐需
-   新增阶段名（计划禁止重复阶段），属独立范围，未纳入本阶段。
-2. **收尾出现半开状态。** 最终轮结束后 `is_process_started=true` 而
-   `is_android_started=false`，adb 无设备。成因未确证，未下结论。
-3. **`MuMuNxDevice` 外壳进程孤儿堆积。** 复核实测：`MuMuNxDevice.exe` 共 36 个，
-   其中 35 个的父进程已不存在，合计占用约 3577 MB，最早创建时间早于本阶段
-   三天。同期 `MuMuVMM*` 进程为 0，即虚拟机本身已被正常关闭，泄漏仅发生在
-   外壳/设备进程层。
+1. ~~**收尾不关闭模拟器。**~~ **已修（`a4eaab3`，2026-08-07）。** 新增
+   `SHUTDOWN_MUMU` 收尾阶段（第 16 阶段）。run `7f524e53` 与 `faabbcef`
+   两轮真实验收均报告 `shutdown_mumu diagnostics: changed=True`，ADB 端口
+   16384 物理核实 CLOSED，player 进程消失。**已关闭。**
+2. ~~**收尾出现半开状态。**~~ **已修（`243d061`，2026-08-07）。** 根因定位为
+   `_wait_stopped()` 将 `DEVICE_NOT_FOUND` 误映射为 `STOPPED`（ADB 服务重启
+   后设备注册丢失，不代表模拟器已停止）。修复后停止路径只认 `PORT_CLOSED`；
+   新增三条回归用例，移除修复均变红。**已关闭。**
+3. **`MuMuNxDevice` 孤儿泄漏——根因已查清，操作纪律已确定（2026-08-08）。**
 
-   编排器仅调用 `MuMuManager.exe control -v <index> shutdown` 且命令返回
-   `errcode 0`，该指令亦是社区在 StarRailCopilot #921/#934 中验证有效的新版
-   关闭方式（旧的 `MuMuNxMain.exe api -v 0 shutdown_player` 在新版上会将窗口
-   拉到前台且关闭失败，本项目未使用该方式）。MuMuManager 未提供清理外壳残留
-   的接口。
+   **根因**：`MuMuNxMain`（监工）负责回收 player，回收时需调用 `OpenProcess`
+   请求含 `PROCESS_QUERY_INFORMATION(0x400)` 的权限。Windows 完整性策略
+   对「MEDIUM 请求者 → HIGH 目标」全有或全无地拒绝，监工失去管理能力，
+   player 留存为孤儿。
 
-   成因未确证：未检索到与「外壳进程孤儿堆积」直接对应的公开讨论；已知新版
-   MuMu 架构中 `MuMuNxDevice.exe` 是相对独立的外壳层，但其在父进程退出后
-   继续存活的机制未经验证，不下结论。
+   **2×2 实证矩阵**（全部通过直接测试填完）：
 
-   判定：非编排器缺陷，命令用法正确，且不影响工作流成功判定。长期不重启
-   宿主机时会持续累积占用，需要时可按「父进程已不存在」条件安全清理。若后续
-   决定由编排器兜底清理，须先确认清理条件不会误伤在用实例。
+   | 监工完整性 | player 完整性 | 结果 |
+   | --- | --- | --- |
+   | MEDIUM | MEDIUM | 不漏 |
+   | HIGH | HIGH | 不漏 |
+   | **MEDIUM** | **HIGH** | **漏（直接测试确认）** |
+
+   混搭仅在「桌面开 MuMu UI（MEDIUM 监工在场）+ 运行提权编排器（HIGH player）」
+   组合下出现，即历史 40 个孤儿产生的实际路径。
+
+   **操作纪律（零代码改动）**：跑编排器前不从桌面开 MuMu UI。让
+   `MuMuManager` 自己拉起监工，监工与 player 完整性一致，回收正常。
+   run `faabbcef` 干净基线验收已证实（players born 2 / reaped 2 / leaked 0）。
+
+   **清杀孤儿方式**：只申请 `PROCESS_TERMINATE(0x0001)` 直调
+   `TerminateProcess()`，无需提权。`Stop-Process` / `taskkill /F` 均含
+   `0x400` 位，对 HIGH 孤儿一律失败。
+
+   判定：编排器命令用法正确（`MuMuManager control -v 0 shutdown`），
+   不写孤儿清理逻辑进编排器（越界操作别人进程树）。**根因已关闭，
+   操作纪律文档化。**
 4. **提权子进程使用了非 venv 解释器。** 进程链显示提权重启使用
    `D:\Anaconda\python.exe` 而非 venv 解释器，尽管 `detect_entry_runtime()`
-   经验证返回正确的 `sys.executable`。与本阶段故障无因果关系（绕过提权直接
-   调用 `start()` 同样可复现原缺陷），待独立排查。
-5. **AALC 无重试余量。** `run` v1 强制 `attempts=1`，游戏侧卡死时只能等到
-   `attempt_timeout_seconds` 到期。曾观察到一次 Limbus 卡死导致 AALC 图像
-   匹配相似度全面偏低（0.13–0.62）而无法完成；该轮非本阶段验收轮。
+   经验证返回正确的 `sys.executable`。打包 EXE 不受影响；源码模式现象
+   原因已知（venv stub + 真实解释器父子关系），不影响功能，待独立排查。
+5. ~~**AALC 无重试余量。**~~ **已修（`d922782` / `de04a35`，2026-08-07）。**
+   解除 managed 16 阶段闸门，`configured_attempts` 可在配置中设置。
+   run `faabbcef` 验收确认 `attempts_started=1 successful_attempt_number=1`
+   正常完成。**已关闭。**
 6. **`plan` CLI 输出与实际执行计划不一致。** `plan` 命令使用静态
    `build_plan()`，恒显示 15 阶段；`run` 使用 `build_execution_plan(config)`
-   按 lifecycle_mode 动态生成。external 配置下两者不同，易误导。
+   按 lifecycle_mode 动态生成，external 配置下两者不同，易误导。未修。
+7. **`shutdown_mumu` 上游失败时被跳过（`always_run` 缺口）。** 若
+   `run_maa` 或 `run_aalc` 失败，`SHUTDOWN_MUMU` 会被 SKIP，模拟器留着
+   不关。三条候选修法已记录在 `2bd4e1c` commit message，未实施。正常
+   流程不触发，但属已知真实风险。
 
 ## 结论
 

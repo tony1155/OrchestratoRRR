@@ -397,8 +397,8 @@ phase_7c_managed_target_rebuild_completed=true
 phase_7c_managed_target_artifact_audit_completed=true
 phase_7c_managed16_rebuild_completed=true
 phase_7c_managed16_artifact_audit_completed=true
-phase_7c_real_workflow_retry_completed=false
-phase_7c_completed=false
+phase_7c_real_workflow_retry_completed=true
+phase_7c_completed=true
 phase_7e_completed=false
 phase_7_completed=false
 legacy_powershell_replacement_ready=false
@@ -692,3 +692,166 @@ ADB 截图调用全程 `ret 0`（平均 182 ms），故不是连接问题。
 1. 复现频率——若多轮中仅偶发一次，倾向归因于冷启动后 UI 迟滞
 2. `start_mumu` 耗时与 MAA 卡顿是否相关（本次 45.6 s vs 上轮 15.0 s）
 3. 手动运行 MAA 时观察公开招募页标题区域显示是否正常
+
+---
+
+## 7C REV2：第三次真实 managed 16 阶段验收（run `7f524e53`）
+
+**运行时间（本地 UTC+8）**：2026-08-08 00:57:52 → 01:43:54，总耗时 2761983 ms（46:01）
+
+**状态**：`status=success` / `error_code=OK` / `mode=workflow_external`
+
+关键阶段耗时：
+
+| 阶段 | outcome | duration_ms | 关键 diagnostics |
+| --- | --- | --- | --- |
+| update_maa | success | 8797 | executed=True exit_code=0 |
+| ensure_mumu_running | success | 17188 | action=start changed=True lifecycle_mode=managed |
+| run_starrail | success | 2327 | completion_mode=log_success |
+| stop_mumu | success | 3016 | action=stop changed=True lifecycle_mode=managed |
+| start_mumu | success | 14202 | action=start changed=True lifecycle_mode=managed |
+| run_maa | success | 1420608 | exit_code=0 termination_reason=normal_exit |
+| run_aalc | success | 1290625 | attempts_started=1 successful_attempt_number=1 |
+| **shutdown_mumu** | **success** | **2718** | **action=stop changed=True lifecycle_mode=managed** |
+
+**验收结论**：`shutdown_mumu` diagnostics `changed=True`，首次拿到此验收点。
+ADB 端口 16384 物理核实 CLOSED，`MuMuVMMHeadless` 进程已消失。
+
+`phase_7c_real_workflow_retry_completed` 标志位在本轮后翻 true，
+`phase_7c_completed` 同步翻 true。
+
+---
+
+## 7C REV3：第四次真实 managed 16 阶段验收（run `faabbcef`）— 干净基线
+
+**运行时间（本地 UTC+8）**：2026-08-08 14:16:00 → 15:03:35，总耗时 2854844 ms（47:34）
+
+**状态**：`status=success` / `error_code=OK` / `mode=workflow_external`
+
+**前置条件**：运行前所有 MuMu 进程（40 个 `MuMuNxDevice` + 1 个 `MuMuNxMain`）
+已于 14:06 手动清空，基线归零（空闲内存 32.95 GB，TCP 16384 CLOSED）。
+
+关键阶段耗时：
+
+| 阶段 | outcome | duration_ms | 关键 diagnostics |
+| --- | --- | --- | --- |
+| update_maa | success | 6452 | executed=True exit_code=0 |
+| ensure_mumu_running | success | 14032 | action=start changed=True lifecycle_mode=managed |
+| run_starrail | success | 576219 | completion_mode=log_success（真实完整跑完） |
+| stop_mumu | success | 2875 | action=stop changed=True lifecycle_mode=managed |
+| start_mumu | success | 13953 | action=start changed=True lifecycle_mode=managed |
+| run_maa | success | 1309108 | exit_code=0 termination_reason=normal_exit |
+| run_aalc | success | 926954 | attempts_started=1 successful_attempt_number=1 |
+| **shutdown_mumu** | **success** | **2734** | **action=stop changed=True lifecycle_mode=managed** |
+
+**进程监控数据**（`mumu_monitor.py` 1 秒轮询，覆盖全程）：
+
+```
+14:16:10  BORN  MuMuNxDevice  pid=44552  HIGH  ppid=3388   （player A）
+14:16:14  BORN  MuMuVMMHeadless pid=42528
+14:26:00  DIED  MuMuNxDevice  pid=44552  lived=589.5s      ← stop_mumu 14:25:57 回收 ✓
+14:26:05  BORN  MuMuNxDevice  pid=50740  HIGH  ppid=19292  （player B）
+14:26:08  BORN  MuMuVMMHeadless pid=49124
+14:48:18  BORN  MuMuManager   pid=59736  HIGH             （MAA 更新期间短暂出现）
+14:48:19  DIED  MuMuManager   pid=59736  lived=1.6s
+15:03:34  DIED  MuMuNxDevice  pid=50740  lived=2249.9s     ← shutdown_mumu 15:03:32 回收 ✓
+15:03:34  DIED  MuMuVMMHeadless pid=49124 lived=2246.7s
+```
+
+**players born 2 / reaped 2 / leaked 0**
+
+MAA 任务链耗时：StartUp 80s / Recruit **42s（正常，卡顿未复现）** /
+Infrast 143s / Mall 126s / Fight 877s / Award 34s
+
+**验收结论**：零 player 残留，两个 player 均被正确回收，`shutdown_mumu changed=True`。
+干净基线下编排器全流程完全符合预期。
+
+---
+
+## MuMuNxDevice 孤儿泄漏根因实证（2026-08-08）
+
+### 调查历程摘要
+
+历史积累的 40 个 `MuMuNxDevice` 孤儿（工作集 4.10 GB，私有 5.40 GB，
+最早 2026-08-03 19:33）均为 **HIGH 完整性级别**，其存续期间
+`MuMuNxMain pid=35312` 为 **MEDIUM 完整性级别**（桌面快捷方式启动）。
+
+完整性检测实验排除了以下假设：
+- PPL（Protected Process Light）：`level=0x00 type=None`，否
+- MuMu 自定义 ACL / 安全描述符：非提权启动的 player 全部放行 → 标准 Windows 完整性隔离
+- 看门狗进程（`MuMuRemoteService`）：Stopped / Disabled
+- 进程退出竞态：RACE 组与 SAFE 组均 0 泄漏（竞态未复现）
+- 提权本身：run `faabbcef` 干净基线全流程，HIGH 监工 + HIGH player → **0 泄漏**
+
+权限矩阵实测（41 个孤儿，MEDIUM shell 请求 HIGH 进程）：
+`PROCESS_TERMINATE(0x0001)` OK；`PROCESS_QUERY_LIMITED_INFORMATION(0x1000)` OK；
+`PROCESS_QUERY_INFORMATION(0x0400)` → **DENIED(5)**；含 0x400 的所有组合全部 DENIED；
+`Read_CONTROL` / `ALL_ACCESS` DENIED。
+
+### Cell 3 直接测试（2026-08-08 16:05）
+
+前置条件：MEDIUM 监工 `pid=39976`（由本会话 MEDIUM shell 启动，
+参数 `--from-shortcut`，不自动拉 VM），player 基线 0。
+
+测试方式：通过 `ShellExecuteW(runas)` 自我提权（`ConsentPromptBehaviorAdmin=0`，
+静默提权），提权子进程以 HIGH 完整性调用 `MuMuManager control -v 0 launch`，
+10 秒后 `shutdown`，等待最多 60 秒观察是否回收。
+
+结果：
+
+```
+child_integrity          = HIGH
+main_pids                = [39976]
+main_integrity           = {'39976': 'MEDIUM'}
+player_pid               = 61292
+player_integrity         = HIGH
+player_born_after_s      = 0.2
+player_reaped_after_s    = None     （60 秒内未回收）
+player_still_alive       = True
+leaked_pids              = [61292]
+cell tested: main=MEDIUM + player=HIGH
+is cell 3   = True
+verdict     = LEAK
+```
+
+### 根因定性
+
+`MuMuNxMain`（监工）负责回收 player。回收时需调用 `OpenProcess()` 申请句柄，
+若申请中包含 `PROCESS_QUERY_INFORMATION(0x400)`，Windows 完整性策略对
+"MEDIUM 请求者 → HIGH 目标"全有或全无地拒绝（`ERROR_ACCESS_DENIED=5`），
+监工失去管理能力，player 留存为孤儿。
+
+### 2×2 验证矩阵（全部填完）
+
+| 监工完整性 | player 完整性 | 结果 | 验证方式 |
+| --- | --- | --- | --- |
+| MEDIUM | MEDIUM | 不漏 | 实测 10+ 次（非提权 shell 全程） |
+| HIGH | HIGH | 不漏 | run `faabbcef`（47 分钟完整流程） |
+| MEDIUM | HIGH | **漏** | **cell3_test 直接实测（pid=61292）** |
+
+### 产生历史孤儿的路径
+
+```
+2026-08-03 19:15  从桌面启动 MuMu UI → MuMuNxMain pid=35312 MEDIUM（常驻）
+2026-08-03 ~ 2026-08-08  每次运行提权编排器 → MuMuManager HIGH → player HIGH
+stop_mumu / shutdown_mumu 调 shutdown → MEDIUM 监工尝试回收 HIGH player
+→ OpenProcess 0x400 被拒 → player 不退出 → 孤儿积累至 40 个
+2026-08-08 14:06  手动以 PROCESS_TERMINATE(0x0001) only 全部清杀，回收 4.25 GB
+```
+
+### 正确的清杀方式
+
+只申请 `PROCESS_TERMINATE(0x0001)`，直调 `TerminateProcess()`，
+**无需提权**，非提权 MEDIUM shell 即可。
+`Stop-Process` / `taskkill /F` 均带 `0x400` 位，对 HIGH 孤儿一律 DENIED，
+**不可用**。
+
+### 操作纪律（方案一，零代码改动）
+
+**跑编排器前不要从桌面开 MuMu UI。**
+
+让 `MuMuManager` 自己拉起监工：监工与 player 由同一个 HIGH 进程创建，
+完整性一致，回收正常。编排器跑完后 MuMu 已被 `shutdown_mumu` 关闭；
+如需手动看 MuMu，等跑完再从桌面开，不影响下次编排器运行
+（空闲监工会在几分钟内自动退出）。
+
