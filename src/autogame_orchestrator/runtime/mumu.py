@@ -44,6 +44,12 @@ _PROBE_STEP_ALLOWLIST = {
     "none",
 }
 _CONNECT_STATUS_ALLOWLIST = {"not_attempted", "connected", "already_connected", "failed"}
+_CONNECT_DIAGNOSTIC_KEYS = (
+    "adb_connect_attempted",
+    "adb_connect_status",
+    "adb_connect_error",
+    "readiness_rechecked_after_connect",
+)
 
 
 def _safe_probe_diagnostics(result: ProbeResult) -> dict[str, JsonValue]:
@@ -67,6 +73,15 @@ def _safe_probe_diagnostics(result: ProbeResult) -> dict[str, JsonValue]:
     rechecked = result.diagnostics.get("readiness_rechecked_after_connect")
     if isinstance(rechecked, bool):
         safe["readiness_rechecked_after_connect"] = rechecked
+    return safe
+
+
+def _safe_wait_diagnostics(
+    last_result: ProbeResult | None,
+    connect_diagnostics: dict[str, JsonValue],
+) -> dict[str, JsonValue]:
+    safe = _safe_probe_diagnostics(last_result) if last_result is not None else {}
+    safe.update(connect_diagnostics)
     return safe
 
 
@@ -211,6 +226,7 @@ class MumuAdapter:
     def start(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
         """启动 MuMu 并在 Deadline 内等待 readiness。"""
         started_at = time.monotonic()
+        operation_deadline = Deadline.at(started_at + deadline.clamp_timeout(self._start_timeout))
 
         # 检查取消
         if cancel is not None and cancel.is_cancelled:
@@ -230,13 +246,50 @@ class MumuAdapter:
             )
 
         # 已 ready → 幂等
-        st = self.status(deadline, cancel)
+        st = self.status(operation_deadline, cancel)
         if st.status == MumuRuntimeStatus.READY:
             return MumuRuntimeResult.from_monotonic(
                 MumuAction.START,
                 MumuRuntimeStatus.STARTED,
                 MumuRuntimeErrorCode.OK,
                 started_at,
+                changed=False,
+                diagnostics=st.diagnostics,
+            )
+        if st.status == MumuRuntimeStatus.CANCELLED:
+            return MumuRuntimeResult.from_monotonic(
+                MumuAction.START,
+                MumuRuntimeStatus.CANCELLED,
+                MumuRuntimeErrorCode.CANCELLED,
+                started_at,
+                changed=False,
+                diagnostics=st.diagnostics,
+            )
+        if st.status == MumuRuntimeStatus.TIMEOUT or operation_deadline.expired:
+            return MumuRuntimeResult.from_monotonic(
+                MumuAction.START,
+                MumuRuntimeStatus.TIMEOUT,
+                MumuRuntimeErrorCode.START_TIMEOUT,
+                started_at,
+                changed=False,
+                diagnostics=st.diagnostics,
+            )
+        if st.status == MumuRuntimeStatus.FAILED:
+            return MumuRuntimeResult.from_monotonic(
+                MumuAction.START,
+                MumuRuntimeStatus.FAILED,
+                st.error_code,
+                started_at,
+                changed=False,
+                diagnostics=st.diagnostics,
+            )
+        if st.status == MumuRuntimeStatus.NOT_READY:
+            return self._wait_readiness(
+                MumuAction.START,
+                MumuRuntimeStatus.STARTED,
+                started_at,
+                operation_deadline,
+                cancel,
                 changed=False,
             )
 
@@ -252,7 +305,12 @@ class MumuAdapter:
             )
 
         # 执行启动管理命令
-        cmd_result = self._run_manager_command(self._start_args, deadline, cancel, MumuRuntimeErrorCode.START_TIMEOUT)
+        cmd_result = self._run_manager_command(
+            self._start_args,
+            operation_deadline,
+            cancel,
+            MumuRuntimeErrorCode.START_TIMEOUT,
+        )
         if not cmd_result["ok"]:
             return MumuRuntimeResult.from_monotonic(
                 MumuAction.START,
@@ -264,11 +322,19 @@ class MumuAdapter:
             )
 
         # 轮询 readiness
-        return self._wait_readiness(MumuAction.START, MumuRuntimeStatus.STARTED, started_at, deadline, cancel)
+        return self._wait_readiness(
+            MumuAction.START,
+            MumuRuntimeStatus.STARTED,
+            started_at,
+            operation_deadline,
+            cancel,
+            changed=True,
+        )
 
     def stop(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
         """停止 MuMu 并在 Deadline 内确认停止。"""
         started_at = time.monotonic()
+        operation_deadline = Deadline.at(started_at + deadline.clamp_timeout(self._stop_timeout))
 
         if cancel is not None and cancel.is_cancelled:
             return MumuRuntimeResult.from_monotonic(
@@ -286,12 +352,39 @@ class MumuAdapter:
             )
 
         # 已 stopped → 幂等
-        st = self.status(deadline, cancel)
+        st = self.status(operation_deadline, cancel)
         if st.status == MumuRuntimeStatus.STOPPED:
             return MumuRuntimeResult.from_monotonic(
                 MumuAction.STOP,
                 MumuRuntimeStatus.STOPPED,
                 MumuRuntimeErrorCode.OK,
+                started_at,
+                changed=False,
+                diagnostics=st.diagnostics,
+            )
+        if st.status == MumuRuntimeStatus.CANCELLED:
+            return MumuRuntimeResult.from_monotonic(
+                MumuAction.STOP,
+                MumuRuntimeStatus.CANCELLED,
+                MumuRuntimeErrorCode.CANCELLED,
+                started_at,
+                changed=False,
+                diagnostics=st.diagnostics,
+            )
+        if st.status == MumuRuntimeStatus.TIMEOUT or operation_deadline.expired:
+            return MumuRuntimeResult.from_monotonic(
+                MumuAction.STOP,
+                MumuRuntimeStatus.TIMEOUT,
+                MumuRuntimeErrorCode.STOP_TIMEOUT,
+                started_at,
+                changed=False,
+                diagnostics=st.diagnostics,
+            )
+        if st.status == MumuRuntimeStatus.FAILED:
+            return MumuRuntimeResult.from_monotonic(
+                MumuAction.STOP,
+                MumuRuntimeStatus.FAILED,
+                st.error_code,
                 started_at,
                 changed=False,
                 diagnostics=st.diagnostics,
@@ -309,7 +402,12 @@ class MumuAdapter:
             )
 
         # 执行停止管理命令
-        cmd_result = self._run_manager_command(self._stop_args, deadline, cancel, MumuRuntimeErrorCode.STOP_TIMEOUT)
+        cmd_result = self._run_manager_command(
+            self._stop_args,
+            operation_deadline,
+            cancel,
+            MumuRuntimeErrorCode.STOP_TIMEOUT,
+        )
         if not cmd_result["ok"]:
             return MumuRuntimeResult.from_monotonic(
                 MumuAction.STOP,
@@ -321,7 +419,7 @@ class MumuAdapter:
             )
 
         # 轮询停止确认
-        return self._wait_stopped(started_at, deadline, cancel)
+        return self._wait_stopped(started_at, operation_deadline, cancel)
 
     def restart(self, deadline: Deadline, cancel: CancellationToken | None = None) -> MumuRuntimeResult:
         """重启 MuMu：先 stop，再 start，共享同一个 Deadline。"""
@@ -409,6 +507,20 @@ class MumuAdapter:
                 "error_code": MumuRuntimeErrorCode.INVALID_CONFIGURATION,
                 "diag": {"reason": "管理命令参数为空"},
             }
+        if cancel is not None and cancel.is_cancelled:
+            return {
+                "ok": False,
+                "status": MumuRuntimeStatus.CANCELLED,
+                "error_code": MumuRuntimeErrorCode.CANCELLED,
+                "diag": {},
+            }
+        if deadline.expired:
+            return {
+                "ok": False,
+                "status": MumuRuntimeStatus.TIMEOUT,
+                "error_code": timeout_code,
+                "diag": {},
+            }
 
         try:
             with tempfile.TemporaryDirectory(prefix="mumu-mgr-") as tmp_dir:
@@ -482,24 +594,50 @@ class MumuAdapter:
         started_at: float,
         deadline: Deadline,
         cancel: CancellationToken | None,
+        *,
+        changed: bool,
     ) -> MumuRuntimeResult:
         """轮询直到 readiness 或 deadline 到期。
 
         使用 ``ensure_ready()`` 而非只读 ``probe()``：新启动的模拟器尚未被 adb 登记，
         必须经一次受控 ``adb connect`` 才能出现在设备列表中；仅靠只读探测会永远等不到就绪。
         """
+        last_probe_result: ProbeResult | None = None
+        connect_diagnostics: dict[str, JsonValue] = {}
+        controlled_connect_attempted = False
+
         while not deadline.expired:
             if cancel is not None and cancel.is_cancelled:
                 return MumuRuntimeResult.from_monotonic(
-                    action, MumuRuntimeStatus.CANCELLED, MumuRuntimeErrorCode.CANCELLED, started_at, changed=True
+                    action,
+                    MumuRuntimeStatus.CANCELLED,
+                    MumuRuntimeErrorCode.CANCELLED,
+                    started_at,
+                    changed=changed,
+                    diagnostics=_safe_wait_diagnostics(last_probe_result, connect_diagnostics),
                 )
 
             probe = self._create_probe()
-            result = probe.ensure_ready(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
+            if controlled_connect_attempted:
+                result = probe.probe(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
+            else:
+                result = probe.ensure_ready(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
+                safe_result = _safe_probe_diagnostics(result)
+                if safe_result.get("adb_connect_attempted") is True:
+                    controlled_connect_attempted = True
+                    connect_diagnostics = {
+                        key: safe_result[key] for key in _CONNECT_DIAGNOSTIC_KEYS if key in safe_result
+                    }
+            last_probe_result = result
 
             if result.status == ProbeStatus.READY:
                 return MumuRuntimeResult.from_monotonic(
-                    action, success_status, MumuRuntimeErrorCode.OK, started_at, changed=True
+                    action,
+                    success_status,
+                    MumuRuntimeErrorCode.OK,
+                    started_at,
+                    changed=changed,
+                    diagnostics=_safe_wait_diagnostics(last_probe_result, connect_diagnostics),
                 )
 
             wait_sec = min(_POLL_INTERVAL, deadline.remaining_seconds)
@@ -507,19 +645,30 @@ class MumuAdapter:
                 cancelled = cancel.wait(timeout_seconds=wait_sec)
                 if cancelled:
                     return MumuRuntimeResult.from_monotonic(
-                        action, MumuRuntimeStatus.CANCELLED, MumuRuntimeErrorCode.CANCELLED, started_at, changed=True
+                        action,
+                        MumuRuntimeStatus.CANCELLED,
+                        MumuRuntimeErrorCode.CANCELLED,
+                        started_at,
+                        changed=changed,
+                        diagnostics=_safe_wait_diagnostics(last_probe_result, connect_diagnostics),
                     )
             else:
                 time.sleep(wait_sec)
 
         return MumuRuntimeResult.from_monotonic(
-            action, MumuRuntimeStatus.TIMEOUT, MumuRuntimeErrorCode.START_TIMEOUT, started_at, changed=True
+            action,
+            MumuRuntimeStatus.TIMEOUT,
+            MumuRuntimeErrorCode.START_TIMEOUT,
+            started_at,
+            changed=changed,
+            diagnostics=_safe_wait_diagnostics(last_probe_result, connect_diagnostics),
         )
 
     def _wait_stopped(
         self, started_at: float, deadline: Deadline, cancel: CancellationToken | None
     ) -> MumuRuntimeResult:
         """轮询直到端口关闭或设备消失。"""
+        last_probe_result: ProbeResult | None = None
         while not deadline.expired:
             if cancel is not None and cancel.is_cancelled:
                 return MumuRuntimeResult.from_monotonic(
@@ -528,10 +677,12 @@ class MumuAdapter:
                     MumuRuntimeErrorCode.CANCELLED,
                     started_at,
                     changed=True,
+                    diagnostics=_safe_wait_diagnostics(last_probe_result, {}),
                 )
 
             probe = self._create_probe()
             result = probe.probe(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
+            last_probe_result = result
 
             # 停止确认只接受 PORT_CLOSED。DEVICE_NOT_FOUND 不构成已停止的证据：
             # 执行 shutdown 后若宿主 ADB server 恰好为空，会立刻误判成功返回，
@@ -552,10 +703,16 @@ class MumuAdapter:
                         MumuRuntimeErrorCode.CANCELLED,
                         started_at,
                         changed=True,
+                        diagnostics=_safe_wait_diagnostics(last_probe_result, {}),
                     )
             else:
                 time.sleep(wait_sec)
 
         return MumuRuntimeResult.from_monotonic(
-            MumuAction.STOP, MumuRuntimeStatus.TIMEOUT, MumuRuntimeErrorCode.STOP_TIMEOUT, started_at, changed=True
+            MumuAction.STOP,
+            MumuRuntimeStatus.TIMEOUT,
+            MumuRuntimeErrorCode.STOP_TIMEOUT,
+            started_at,
+            changed=True,
+            diagnostics=_safe_wait_diagnostics(last_probe_result, {}),
         )

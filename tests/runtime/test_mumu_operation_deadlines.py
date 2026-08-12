@@ -1,0 +1,455 @@
+"""Regression tests for bounded MuMu lifecycle operation deadlines."""
+
+from __future__ import annotations
+
+import json
+import socket
+import sys
+import threading
+import time
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from autogame_orchestrator.models import StageName
+from autogame_orchestrator.probes.adb_client import AdbClient, AdbClientConfig
+from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeResult, ProbeStatus
+from autogame_orchestrator.probes.mumu_readiness import MumuReadinessProbe
+from autogame_orchestrator.process import CancellationToken, Deadline
+from autogame_orchestrator.runtime.models import (
+    MumuAction,
+    MumuRuntimeErrorCode,
+    MumuRuntimeResult,
+    MumuRuntimeStatus,
+)
+from autogame_orchestrator.runtime.mumu import MumuAdapter
+from autogame_orchestrator.workflow.production.projection import project_mumu
+
+_FAKE_ADB = str(Path(__file__).resolve().parent.parent / "fakes" / "fake_adb.py")
+
+
+def _status(status: MumuRuntimeStatus, error: MumuRuntimeErrorCode) -> MumuRuntimeResult:
+    return MumuRuntimeResult.from_monotonic(
+        MumuAction.STATUS,
+        status,
+        error,
+        time.monotonic(),
+        changed=False,
+    )
+
+
+def _manager_success() -> dict[str, object]:
+    return {
+        "ok": True,
+        "status": MumuRuntimeStatus.STARTED,
+        "error_code": MumuRuntimeErrorCode.OK,
+        "diag": {},
+    }
+
+
+def _adapter(
+    tmp_path: Path,
+    *,
+    start_timeout: float = 0.08,
+    stop_timeout: float = 0.08,
+) -> MumuAdapter:
+    manager = tmp_path / "manager.exe"
+    manager.write_text("fake", encoding="utf-8")
+    return MumuAdapter(
+        executable=manager,
+        start_arguments=("control", "-v", "0", "launch"),
+        stop_arguments=("control", "-v", "0", "shutdown"),
+        adb_executable=Path(sys.executable),
+        adb_serial="127.0.0.1:16384",
+        start_timeout_seconds=start_timeout,
+        stop_timeout_seconds=stop_timeout,
+    )
+
+
+class _NeverReadyProbe:
+    def __init__(self) -> None:
+        self.ensure_calls = 0
+        self.probe_calls = 0
+        self.deadlines: list[Deadline] = []
+        self.remaining_seen: list[float] = []
+
+    def _not_ready(self, deadline: Deadline) -> ProbeResult:
+        self.deadlines.append(deadline)
+        self.remaining_seen.append(deadline.remaining_seconds)
+        return ProbeResult.from_monotonic(
+            "mumu_readiness",
+            ProbeStatus.NOT_READY,
+            ProbeErrorCode.ANDROID_NOT_BOOTED,
+            time.monotonic(),
+            {
+                "step": "adb_boot_completed",
+                "serial": "private-serial",
+                "stdout_trimmed": "private-output",
+            },
+        )
+
+    def ensure_ready(
+        self,
+        host: str,
+        port: int,
+        serial: str | None,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        self.ensure_calls += 1
+        return self._not_ready(deadline)
+
+    def probe(
+        self,
+        host: str,
+        port: int,
+        serial: str | None,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        self.probe_calls += 1
+        return self._not_ready(deadline)
+
+
+class _ReadyProbe(_NeverReadyProbe):
+    def ensure_ready(
+        self,
+        host: str,
+        port: int,
+        serial: str | None,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        self.ensure_calls += 1
+        self.deadlines.append(deadline)
+        return ProbeResult.ready("mumu_readiness")
+
+
+class _ConnectOnceThenMissingProbe:
+    def __init__(self) -> None:
+        self.ensure_calls = 0
+        self.probe_calls = 0
+
+    def ensure_ready(
+        self,
+        host: str,
+        port: int,
+        serial: str | None,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        self.ensure_calls += 1
+        return ProbeResult.from_monotonic(
+            "mumu_readiness",
+            ProbeStatus.FAILED,
+            ProbeErrorCode.ADB_CONNECT_FAILED,
+            time.monotonic(),
+            {
+                "step": "adb_connect",
+                "adb_connect_attempted": True,
+                "adb_connect_status": "failed",
+                "adb_connect_error": "ADB_CONNECT_FAILED",
+                "readiness_rechecked_after_connect": False,
+                "serial": "private-serial",
+                "stdout_trimmed": "private-output",
+            },
+        )
+
+    def probe(
+        self,
+        host: str,
+        port: int,
+        serial: str | None,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        self.probe_calls += 1
+        return ProbeResult.from_monotonic(
+            "mumu_readiness",
+            ProbeStatus.UNAVAILABLE,
+            ProbeErrorCode.DEVICE_NOT_FOUND,
+            time.monotonic(),
+            {
+                "step": "select_device",
+                "serial": "private-serial",
+                "stderr_trimmed": "private-output",
+            },
+        )
+
+
+def _run_start(adapter: MumuAdapter, probe: object, parent_seconds: float = 7200.0) -> MumuRuntimeResult:
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.STOPPED, MumuRuntimeErrorCode.OK),
+        ),
+        patch.object(adapter, "_run_manager_command", return_value=_manager_success()),
+        patch.object(adapter, "_create_probe", return_value=probe),
+    ):
+        return adapter.start(Deadline.after(parent_seconds))
+
+
+def test_start_timeout_does_not_inherit_long_workflow_deadline(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path, start_timeout=0.08)
+    probe = _NeverReadyProbe()
+
+    started = time.monotonic()
+    result = _run_start(adapter, probe)
+    elapsed = time.monotonic() - started
+
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert result.error_code == MumuRuntimeErrorCode.START_TIMEOUT
+    assert elapsed < 0.8
+
+
+def test_blocked_adb_command_is_bounded_by_start_deadline(tmp_path: Path) -> None:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    adapter = _adapter(tmp_path, start_timeout=0.2)
+    probe = MumuReadinessProbe(
+        AdbClient(
+            AdbClientConfig(
+                executable=Path(sys.executable),
+                base_arguments=(_FAKE_ADB, "--mode", "sleep_forever"),
+            )
+        )
+    )
+
+    try:
+        started = time.monotonic()
+        with (
+            patch.object(
+                adapter,
+                "status",
+                return_value=_status(MumuRuntimeStatus.STOPPED, MumuRuntimeErrorCode.OK),
+            ),
+            patch.object(adapter, "_run_manager_command", return_value=_manager_success()),
+            patch.object(adapter, "_create_probe", return_value=probe),
+            patch.object(adapter, "_adb_port", port),
+        ):
+            result = adapter.start(Deadline.after(7200.0))
+        elapsed = time.monotonic() - started
+    finally:
+        listener.close()
+
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert result.error_code == MumuRuntimeErrorCode.START_TIMEOUT
+    assert result.diagnostics["probe_step"] == "adb_devices"
+    assert result.diagnostics["probe_error"] == "ADB_TIMEOUT"
+    assert elapsed < 2.0
+
+
+def test_start_budget_is_created_once_and_never_refreshed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.005)
+    adapter = _adapter(tmp_path, start_timeout=0.06)
+    probe = _NeverReadyProbe()
+
+    result = _run_start(adapter, probe)
+
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert probe.ensure_calls >= 3
+    assert len({id(item) for item in probe.deadlines}) == 1
+    assert probe.remaining_seen[0] > probe.remaining_seen[-1]
+
+
+def test_stop_timeout_is_bounded_independently_of_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.005)
+    adapter = _adapter(tmp_path, stop_timeout=0.06)
+    probe = _NeverReadyProbe()
+
+    started = time.monotonic()
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.READY, MumuRuntimeErrorCode.OK),
+        ),
+        patch.object(adapter, "_run_manager_command", return_value=_manager_success()),
+        patch.object(adapter, "_create_probe", return_value=probe),
+    ):
+        result = adapter.stop(Deadline.after(7200.0))
+    elapsed = time.monotonic() - started
+
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert result.error_code == MumuRuntimeErrorCode.STOP_TIMEOUT
+    assert elapsed < 0.8
+
+
+def test_timeout_preserves_last_safe_probe_and_connect_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.005)
+    adapter = _adapter(tmp_path, start_timeout=0.06)
+    probe = _ConnectOnceThenMissingProbe()
+
+    result = _run_start(adapter, probe)
+    report = project_mumu(StageName.ENSURE_MUMU_RUNNING, result, ensure_running=True)
+    serialized = json.dumps(dict(report.diagnostics))
+
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert result.diagnostics["probe_status"] == "unavailable"
+    assert result.diagnostics["probe_error"] == "DEVICE_NOT_FOUND"
+    assert result.diagnostics["probe_step"] == "select_device"
+    assert result.diagnostics["adb_connect_attempted"] is True
+    assert result.diagnostics["adb_connect_status"] == "failed"
+    assert result.diagnostics["readiness_rechecked_after_connect"] is False
+    assert probe.ensure_calls == 1
+    assert probe.probe_calls >= 1
+    for forbidden in ("serial", "stdout", "stderr", "private-serial", "private-output"):
+        assert forbidden not in serialized
+
+
+def test_ready_start_remains_idempotent_and_skips_manager(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path)
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.READY, MumuRuntimeErrorCode.OK),
+        ),
+        patch.object(adapter, "_run_manager_command") as manager,
+    ):
+        result = adapter.start(Deadline.after(7200.0))
+
+    assert result.status == MumuRuntimeStatus.STARTED
+    assert result.error_code == MumuRuntimeErrorCode.OK
+    assert result.changed is False
+    manager.assert_not_called()
+
+
+def test_cold_start_launches_manager_once_and_becomes_ready(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path)
+    probe = _ReadyProbe()
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.STOPPED, MumuRuntimeErrorCode.OK),
+        ),
+        patch.object(adapter, "_run_manager_command", return_value=_manager_success()) as manager,
+        patch.object(adapter, "_create_probe", return_value=probe),
+    ):
+        result = adapter.start(Deadline.after(7200.0))
+
+    assert result.status == MumuRuntimeStatus.STARTED
+    assert result.error_code == MumuRuntimeErrorCode.OK
+    assert result.changed is True
+    manager.assert_called_once()
+    assert probe.ensure_calls == 1
+
+
+def test_initial_not_ready_waits_without_relaunching_manager(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path)
+    probe = _ReadyProbe()
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.NOT_READY, MumuRuntimeErrorCode.READINESS_FAILED),
+        ),
+        patch.object(adapter, "_run_manager_command") as manager,
+        patch.object(adapter, "_create_probe", return_value=probe),
+    ):
+        result = adapter.start(Deadline.after(7200.0))
+
+    assert result.status == MumuRuntimeStatus.STARTED
+    assert result.error_code == MumuRuntimeErrorCode.OK
+    assert result.changed is False
+    manager.assert_not_called()
+    assert probe.ensure_calls == 1
+
+
+def test_readiness_wait_honors_cancellation(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path, start_timeout=5.0)
+    probe = _NeverReadyProbe()
+    cancel = CancellationToken()
+
+    def cancel_soon() -> None:
+        time.sleep(0.05)
+        cancel.cancel()
+
+    worker = threading.Thread(target=cancel_soon, daemon=True)
+    worker.start()
+    started = time.monotonic()
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.STOPPED, MumuRuntimeErrorCode.OK),
+        ),
+        patch.object(adapter, "_run_manager_command", return_value=_manager_success()),
+        patch.object(adapter, "_create_probe", return_value=probe),
+    ):
+        result = adapter.start(Deadline.after(7200.0), cancel)
+    worker.join(timeout=1.0)
+    elapsed = time.monotonic() - started
+
+    assert result.status == MumuRuntimeStatus.CANCELLED
+    assert result.error_code == MumuRuntimeErrorCode.CANCELLED
+    assert elapsed < 1.0
+
+
+@pytest.mark.parametrize(
+    ("initial_status", "initial_error", "expected_status", "expected_error"),
+    [
+        (
+            MumuRuntimeStatus.CANCELLED,
+            MumuRuntimeErrorCode.CANCELLED,
+            MumuRuntimeStatus.CANCELLED,
+            MumuRuntimeErrorCode.CANCELLED,
+        ),
+        (
+            MumuRuntimeStatus.TIMEOUT,
+            MumuRuntimeErrorCode.READINESS_FAILED,
+            MumuRuntimeStatus.TIMEOUT,
+            MumuRuntimeErrorCode.START_TIMEOUT,
+        ),
+        (
+            MumuRuntimeStatus.FAILED,
+            MumuRuntimeErrorCode.READINESS_FAILED,
+            MumuRuntimeStatus.FAILED,
+            MumuRuntimeErrorCode.READINESS_FAILED,
+        ),
+    ],
+)
+def test_start_does_not_launch_when_initial_status_is_terminal(
+    tmp_path: Path,
+    initial_status: MumuRuntimeStatus,
+    initial_error: MumuRuntimeErrorCode,
+    expected_status: MumuRuntimeStatus,
+    expected_error: MumuRuntimeErrorCode,
+) -> None:
+    adapter = _adapter(tmp_path)
+    with (
+        patch.object(adapter, "status", return_value=_status(initial_status, initial_error)),
+        patch.object(adapter, "_run_manager_command") as manager,
+    ):
+        result = adapter.start(Deadline.after(7200.0))
+
+    assert (result.status, result.error_code) == (expected_status, expected_error)
+    manager.assert_not_called()
+
+
+def test_shorter_parent_deadline_takes_priority(tmp_path: Path) -> None:
+    adapter = _adapter(tmp_path, start_timeout=120.0)
+    probe = _NeverReadyProbe()
+
+    started = time.monotonic()
+    result = _run_start(adapter, probe, parent_seconds=0.05)
+    elapsed = time.monotonic() - started
+
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert elapsed < 0.8
+    assert probe.remaining_seen
+    assert max(probe.remaining_seen) <= 0.06
