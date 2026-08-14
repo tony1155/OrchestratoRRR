@@ -6,6 +6,7 @@ from pathlib import Path
 
 from autogame_orchestrator.config_loader import load_config
 from autogame_orchestrator.models import ErrorCode
+from tests.run_application.helpers import write_run_config
 
 
 def test_load_valid_config(valid_config: Path) -> None:
@@ -15,6 +16,43 @@ def test_load_valid_config(valid_config: Path) -> None:
     assert cfg.orchestrator.log_dir == "logs"
     assert cfg.mumu.executable != ""
     assert cfg.aalc.attempts == 3
+
+
+def test_legacy_aalc_section_is_optional(valid_config: Path, tmp_path: Path) -> None:
+    text = valid_config.read_text(encoding="utf-8")
+    without_aalc = tmp_path / "without-aalc.toml"
+    without_aalc.write_text(text.split("\n[aalc]\n", 1)[0] + "\n", encoding="utf-8")
+
+    cfg, errs = load_config(without_aalc)
+
+    assert errs == []
+    assert cfg is not None
+
+
+def test_invalid_legacy_aalc_values_do_not_block_load(valid_config: Path, tmp_path: Path) -> None:
+    text = valid_config.read_text(encoding="utf-8").replace("attempts = 3", "attempts = 0", 1)
+    invalid_legacy = tmp_path / "invalid-legacy-aalc.toml"
+    invalid_legacy.write_text(text, encoding="utf-8")
+
+    cfg, errs = load_config(invalid_legacy)
+
+    assert errs == []
+    assert cfg is not None
+
+
+def test_missing_legacy_aalc_path_does_not_block_path_check(tmp_path: Path) -> None:
+    config_path = write_run_config(tmp_path)
+    text = config_path.read_text(encoding="utf-8")
+    text = text.replace(
+        (tmp_path / "aalc-placeholder.exe").as_posix(),
+        (tmp_path / "missing-aalc.exe").as_posix(),
+    )
+    config_path.write_text(text, encoding="utf-8")
+
+    cfg, errs = load_config(config_path, check_paths=True)
+
+    assert errs == []
+    assert cfg is not None
 
 
 def test_config_file_not_found() -> None:

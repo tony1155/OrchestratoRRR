@@ -49,7 +49,7 @@ def test_isolated_workflow_reuses_formal_external_runner_and_reports(tmp_path: P
     assert result.report.status == RunStatus.SUCCESS
     assert result.report.error_code == ErrorCode.OK
     assert tuple(item.stage for item in result.report.stages) == EXTERNAL_RUN_STAGES
-    assert len(result.report.stages) == 11
+    assert len(result.report.stages) == 10
     assert all(item.outcome == OutcomeKind.SUCCESS and item.error_code == ErrorCode.OK for item in result.report.stages)
 
     sync_stage = result.report.stages[1]
@@ -62,9 +62,8 @@ def test_isolated_workflow_reuses_formal_external_runner_and_reports(tmp_path: P
     for index in (6, 7):
         assert result.report.stages[index].diagnostics["owned_process_cleaned"] is True
     assert result.report.stages[8].diagnostics["owned_process_cleaned"] is True
-    assert result.report.stages[9].diagnostics["configured_attempts"] == 1
-    assert result.report.stages[9].diagnostics["attempts_executed"] == 1
-    assert result.report.stages[9].diagnostics["successful_attempt"] == 1
+    assert result.report.stages[8].stage.value == "run_maa"
+    assert result.report.stages[9].stage.value == "write_run_report"
 
     ledger = result.ledger
     assert ledger.elevation_is_elevated_calls == 0
@@ -80,8 +79,8 @@ def test_isolated_workflow_reuses_formal_external_runner_and_reports(tmp_path: P
     assert ledger.starrail_run_calls == 1
     assert ledger.maa_factory_calls == 1
     assert ledger.maa_run_calls == 1
-    assert ledger.aalc_factory_calls == 1
-    assert ledger.aalc_run_calls == 1
+    assert ledger.aalc_factory_calls == 0
+    assert ledger.aalc_run_calls == 0
     assert ledger.maa_sync_factory_calls == 0
     assert ledger.maa_update_factory_calls == 0
     assert ledger.forbidden_calls == 0
@@ -96,7 +95,7 @@ def test_isolated_workflow_reuses_formal_external_runner_and_reports(tmp_path: P
     assert payload["mode"] == "workflow_isolated"
     log_records = [json.loads(line) for line in logs[0].read_text(encoding="utf-8").splitlines()]
     assert sum(record["event"] == "workflow.start" for record in log_records) == 1
-    assert sum(record["event"] == "workflow.stage.finished" for record in log_records) == 11
+    assert sum(record["event"] == "workflow.stage.finished" for record in log_records) == 10
     assert all(str(workspace) not in json.dumps(record, ensure_ascii=False) for record in log_records)
     assert str(workspace) not in reports[0].read_text(encoding="utf-8")
 
@@ -117,7 +116,7 @@ def test_isolated_command_is_hidden_but_runs_formal_source_path(tmp_path: Path) 
 
     assert result.exit_code == 0
     assert result.stdout.strip() == (
-        "Isolated workflow completed: status=success error_code=OK mode=workflow_isolated stages=11 forbidden_calls=0"
+        "Isolated workflow completed: status=success error_code=OK mode=workflow_isolated stages=10 forbidden_calls=0"
     )
 
     help_result = runner.invoke(app, ["--help"])

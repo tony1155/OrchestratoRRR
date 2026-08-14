@@ -39,7 +39,6 @@ EXTERNAL_RUN_STAGES = (
     StageName.STOP_STARRAIL,
     StageName.VERIFY_STARRAIL_STOPPED,
     StageName.RUN_MAA,
-    StageName.RUN_AALC,
     StageName.WRITE_RUN_REPORT,
 )
 
@@ -58,7 +57,6 @@ MANAGED_RUN_STAGES = (
     StageName.START_MUMU,
     StageName.WAIT_MUMU_ADB_READY_AFTER_RESTART,
     StageName.RUN_MAA,
-    StageName.RUN_AALC,
     StageName.SHUTDOWN_MUMU,
     StageName.WRITE_RUN_REPORT,
 )

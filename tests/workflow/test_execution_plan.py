@@ -14,8 +14,18 @@ def test_default_plan_preserves_existing_order() -> None:
     assert build_execution_plan(AppConfig()).stages == build_plan()
 
 
-def test_default_plan_has_all_sixteen_stages() -> None:
-    assert len(build_execution_plan(AppConfig()).stages) == 16
+def test_default_plan_has_fifteen_stages() -> None:
+    assert len(build_execution_plan(AppConfig()).stages) == 15
+
+
+def test_default_plan_ends_with_maa_shutdown_and_report() -> None:
+    stages = build_execution_plan(AppConfig()).stages
+    assert StageName.RUN_AALC not in stages
+    assert stages[-3:] == (
+        StageName.RUN_MAA,
+        StageName.SHUTDOWN_MUMU,
+        StageName.WRITE_RUN_REPORT,
+    )
 
 
 def test_execution_plan_is_frozen() -> None:
@@ -62,9 +72,9 @@ def test_requires_administrator_is_strict_bool(value: object) -> None:
         ExecutionPlan((StageName.VALIDATE_CONFIG, StageName.WRITE_RUN_REPORT), value)  # type: ignore[arg-type]
 
 
-def test_aalc_requirement_is_derived() -> None:
+def test_legacy_aalc_requirement_is_ignored() -> None:
     config = AppConfig(aalc=AALCConfig(requires_administrator=True))
-    assert build_execution_plan(config).requires_administrator is True
+    assert build_execution_plan(config).requires_administrator is False
 
 
 def test_aalc_without_requirement_does_not_require_administrator() -> None:

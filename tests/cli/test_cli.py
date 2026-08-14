@@ -64,7 +64,8 @@ def test_plan_valid_config(valid_config: Path) -> None:
     assert "stop_mumu" in result.stdout
     assert "start_mumu" in result.stdout
     assert "run_maa" in result.stdout
-    assert "run_aalc" in result.stdout
+    assert "shutdown_mumu" in result.stdout
+    assert "run_aalc" not in result.stdout
 
 
 def test_plan_correct_order(valid_config: Path) -> None:

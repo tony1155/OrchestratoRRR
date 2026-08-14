@@ -141,7 +141,7 @@ def test_plan_and_validate_do_not_call_mumu_ensure(tmp_path: Path) -> None:
         StageExecutionContext("validate-test", StageName.VALIDATE_CONFIG, Deadline.after(30), CancellationToken())
     )
 
-    assert len(plan.stages) == 11
+    assert len(plan.stages) == 10
     assert report.outcome == OutcomeKind.SUCCESS
     assert (mumu.calls, mumu.ensure_calls) == (0, 0)
 
@@ -152,11 +152,11 @@ def test_external_complete_fake_workflow_succeeds(tmp_path: Path) -> None:
     report, _ = _run(config, runtime_factories)
 
     assert (report.status, report.error_code) == (RunStatus.SUCCESS, ErrorCode.OK)
-    assert len(report.stages) == 11
+    assert len(report.stages) == 10
     assert tuple(stage.stage for stage in report.stages) == build_execution_plan(config).stages
     assert all(stage.outcome == OutcomeKind.SUCCESS for stage in report.stages)
-    assert counts == Counter({"mumu": 1, "starrail": 1, "maa": 1, "aalc": 1})
-    assert (mumu.calls, starrail.calls, maa.calls, aalc.calls) == (2, 1, 1, 1)
+    assert counts == Counter({"mumu": 1, "starrail": 1, "maa": 1})
+    assert (mumu.calls, starrail.calls, maa.calls, aalc.calls) == (2, 1, 1, 0)
     assert (mumu.ensure_calls, mumu.status_calls) == (1, 1)
 
 
@@ -175,13 +175,14 @@ def test_external_success_report_omits_lifecycle_stage(tmp_path: Path, stage: St
     assert stage not in {item.stage for item in report.stages}
 
 
-def test_external_success_reaches_maa_and_aalc(tmp_path: Path) -> None:
+def test_external_success_reaches_maa_without_aalc(tmp_path: Path) -> None:
     runtime_factories, _, _, _, maa, aalc = _factories()
     report, _ = _run(_external_config(tmp_path), runtime_factories)
     assert report.status == RunStatus.SUCCESS
     assert maa.calls == 1
-    assert aalc.calls == 1
-    assert report.stages[-2].stage == StageName.RUN_AALC
+    assert aalc.calls == 0
+    assert report.stages[-2].stage == StageName.RUN_MAA
+    assert report.stages[-1].stage == StageName.WRITE_RUN_REPORT
 
 
 def test_external_success_never_exposes_lifecycle_methods(tmp_path: Path) -> None:
@@ -246,7 +247,7 @@ def test_external_starrail_failure_never_runs_later_adapter(tmp_path: Path) -> N
     assert (mumu.calls, starrail.calls, maa.calls, aalc.calls) == (2, 1, 0, 0)
 
 
-def test_external_maa_failure_skips_aalc_without_restart(tmp_path: Path) -> None:
+def test_external_maa_failure_does_not_run_later_adapters(tmp_path: Path) -> None:
     runtime_factories, _, mumu, _, maa, aalc = _factories(maa_status=MAARunStatus.FAILED)
     report, _ = _run(_external_config(tmp_path), runtime_factories)
     assert report.stages[8].stage == StageName.RUN_MAA

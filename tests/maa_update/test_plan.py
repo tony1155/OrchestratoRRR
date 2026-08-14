@@ -33,8 +33,8 @@ def test_disabled_update_does_not_require_administrator() -> None:
     assert build_execution_plan(config).requires_administrator is False
 
 
-def test_aalc_administrator_rule_is_preserved() -> None:
-    assert build_execution_plan(AppConfig(aalc=AALCConfig(requires_administrator=True))).requires_administrator is True
+def test_legacy_aalc_administrator_rule_is_ignored() -> None:
+    assert build_execution_plan(AppConfig(aalc=AALCConfig(requires_administrator=True))).requires_administrator is False
 
 
 def test_no_requirement_does_not_require_administrator() -> None:

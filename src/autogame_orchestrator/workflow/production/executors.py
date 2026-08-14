@@ -10,7 +10,6 @@ from autogame_orchestrator.maa_sync.models import MAASyncStatus
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, StageName, StageReport
 from autogame_orchestrator.workflow.contracts import StageExecutionContext
 from autogame_orchestrator.workflow.production.ports import (
-    AALCRunPort,
     MAARunPort,
     MAASyncPort,
     MAAUpdatePort,
@@ -19,7 +18,6 @@ from autogame_orchestrator.workflow.production.ports import (
     StarRailRunPort,
 )
 from autogame_orchestrator.workflow.production.projection import (
-    project_aalc,
     project_maa,
     project_mumu,
     project_starrail,
@@ -57,7 +55,6 @@ class ProductionStageExecutor:
         *,
         starrail: Callable[[], StarRailRunPort],
         maa: Callable[[], MAARunPort],
-        aalc: Callable[[], AALCRunPort],
         mumu: Callable[[], MumuRuntimePort],
         maa_sync: Callable[[], MAASyncPort],
         maa_update: Callable[[], MAAUpdatePort],
@@ -67,7 +64,6 @@ class ProductionStageExecutor:
         self._state = state
         self._starrail = starrail
         self._maa = maa
-        self._aalc = aalc
         self._mumu = mumu
         self._maa_sync = maa_sync
         self._maa_update = maa_update
@@ -126,8 +122,6 @@ class ProductionStageExecutor:
             return self._verify_starrail_postcondition()
         if stage == StageName.RUN_MAA:
             return project_maa(stage, self._maa().run(context.deadline, context.cancel))
-        if stage == StageName.RUN_AALC:
-            return project_aalc(stage, self._aalc().run(context.deadline, context.cancel))
         return _instant(stage, OutcomeKind.FAILURE, ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED)
 
     def _run_maa_sync(self, context: StageExecutionContext) -> StageReport:
@@ -255,7 +249,8 @@ class ProductionStageExecutor:
             result,
             lifecycle_mode=self._config.mumu.lifecycle_mode,
             ensure_running=self._stage == StageName.ENSURE_MUMU_RUNNING,
-            expect_stopped=self._stage in {
+            expect_stopped=self._stage
+            in {
                 StageName.STOP_MUMU,
                 StageName.VERIFY_MUMU_STOPPED,
                 StageName.SHUTDOWN_MUMU,

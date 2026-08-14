@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from autogame_orchestrator.config_model import AALCConfig, AppConfig
+from autogame_orchestrator.config_model import AppConfig, MAASyncConfig
 from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.models import RunReport
 from autogame_orchestrator.workflow.coordinator import WorkflowCoordinator
@@ -32,7 +32,7 @@ class RecordingRunnerFactory:
 
 
 def config(requires_administrator: bool) -> AppConfig:
-    return AppConfig(aalc=AALCConfig(requires_administrator=requires_administrator))
+    return AppConfig(maa_sync=MAASyncConfig(enabled=True, requires_administrator=requires_administrator))
 
 
 def launch_spec() -> ElevationLaunchSpec:

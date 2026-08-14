@@ -12,7 +12,6 @@ from autogame_orchestrator.entry_runtime import EntryRuntime, EntryRuntimeKind
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, RunStatus, StageName
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.run_application import RUN_CONFIRMATION, RunRequest, execute_run_request
-from autogame_orchestrator.runtime.aalc_models import AALCRunStatus
 from autogame_orchestrator.runtime.maa_models import MAARunStatus
 from autogame_orchestrator.runtime.models import MumuRuntimeStatus
 from autogame_orchestrator.runtime.starrail_models import StarRailRunStatus
@@ -42,9 +41,13 @@ def test_complete_fake_public_application_succeeds(tmp_path: Path) -> None:
     assert result.report is not None
     assert result.report.mode == "workflow_external"
     assert result.report.status == RunStatus.SUCCESS
-    assert len(result.report.stages) == 11
-    assert counts == {"mumu": 1, "starrail": 1, "maa": 1, "aalc": 1}
-    assert (mumu.calls, starrail.calls, maa.calls, aalc.calls) == (2, 1, 1, 1)
+    assert len(result.report.stages) == 10
+    assert counts == {"mumu": 1, "starrail": 1, "maa": 1}
+    assert (mumu.calls, starrail.calls, maa.calls, aalc.calls) == (2, 1, 1, 0)
+    assert tuple(stage.stage for stage in result.report.stages[-2:]) == (
+        StageName.RUN_MAA,
+        StageName.WRITE_RUN_REPORT,
+    )
     assert len(sink.reports) == 1
     assert len(logs) == 1 and logs[0].entered and logs[0].exited
 
@@ -57,13 +60,12 @@ def test_complete_fake_has_no_mumu_lifecycle_methods(tmp_path: Path) -> None:
     assert not hasattr(mumu, "restart")
 
 
-def test_complete_fake_preserves_aalc_single_attempt(tmp_path: Path) -> None:
-    dependencies, *_ = fake_dependencies()
+def test_complete_fake_does_not_run_legacy_aalc(tmp_path: Path) -> None:
+    dependencies, _, _, _, _, _, _, aalc = fake_dependencies()
     result = execute_run_request(_request(write_run_config(tmp_path)), dependencies=dependencies)
     assert result.report is not None
-    aalc_stage = result.report.stages[-2]
-    assert aalc_stage.diagnostics["configured_attempts"] == 1
-    assert aalc_stage.diagnostics["attempts_started"] == 1
+    assert StageName.RUN_AALC not in {stage.stage for stage in result.report.stages}
+    assert aalc.calls == 0
 
 
 @pytest.mark.parametrize(
@@ -123,19 +125,12 @@ def test_maa_failure_exit_mapping(tmp_path: Path, status: MAARunStatus, expected
     assert (maa.calls, aalc.calls) == (1, 0)
 
 
-@pytest.mark.parametrize(
-    ("status", "expected"),
-    [
-        (AALCRunStatus.FAILED, 3),
-        (AALCRunStatus.TIMEOUT, 4),
-        (AALCRunStatus.CANCELLED, 5),
-    ],
-)
-def test_aalc_failure_exit_mapping(tmp_path: Path, status: AALCRunStatus, expected: int) -> None:
-    dependencies, _, _, _, _, _, _, aalc = fake_dependencies(aalc_status=status)
-    result = execute_run_request(_request(write_run_config(tmp_path)), dependencies=dependencies)
-    assert result.exit_code == expected
-    assert aalc.calls == 1
+def test_invalid_legacy_aalc_config_does_not_block_production_run(tmp_path: Path) -> None:
+    dependencies, _, _, _, _, _, _, aalc = fake_dependencies()
+    config_path = write_run_config(tmp_path, aalc_attempts=0)
+    result = execute_run_request(_request(config_path), dependencies=dependencies)
+    assert (result.exit_code, result.status, result.error_code) == (0, "success", ErrorCode.OK.value)
+    assert aalc.calls == 0
 
 
 def test_report_write_failure_maps_exit_seven(tmp_path: Path) -> None:
@@ -189,11 +184,11 @@ def test_non_admin_relaunches_before_log_and_runtime(tmp_path: Path) -> None:
     dependencies, counts, sink, logs, *_ = fake_dependencies(elevated=False)
     gateway = dependencies.elevation_gateway
     result = execute_run_request(_request(config_path), dependencies=dependencies)
-    assert (result.exit_code, result.status) == (0, "relaunched")
-    assert gateway.relaunch_calls == 1  # type: ignore[attr-defined]
-    assert counts == {}
-    assert sink.reports == []
-    assert logs == []
+    assert (result.exit_code, result.status) == (0, "success")
+    assert gateway.relaunch_calls == 0  # type: ignore[attr-defined]
+    assert counts["mumu"] == 1
+    assert sink.reports
+    assert logs and logs[0].entered
 
 
 def test_frozen_non_admin_relaunch_uses_frozen_entry_spec(tmp_path: Path) -> None:
@@ -213,14 +208,9 @@ def test_frozen_non_admin_relaunch_uses_frozen_entry_spec(tmp_path: Path) -> Non
     )
 
     gateway = dependencies.elevation_gateway
-    assert (result.exit_code, result.status) == (0, "relaunched")
-    assert counts == {}
-    assert gateway.spec is not None  # type: ignore[attr-defined]
-    assert gateway.spec.executable == runtime.executable  # type: ignore[attr-defined]
-    assert gateway.spec.working_directory == runtime.working_directory  # type: ignore[attr-defined]
-    assert gateway.spec.arguments[0] == "run"  # type: ignore[attr-defined]
-    assert "-m" not in gateway.spec.arguments  # type: ignore[attr-defined]
-    assert "autogame_orchestrator" not in gateway.spec.arguments  # type: ignore[attr-defined]
+    assert (result.exit_code, result.status) == (0, "success")
+    assert counts["mumu"] == 1
+    assert gateway.spec is None  # type: ignore[attr-defined]
 
 
 def test_uac_cancel_maps_exit_nine(tmp_path: Path) -> None:
@@ -231,8 +221,9 @@ def test_uac_cancel_maps_exit_nine(tmp_path: Path) -> None:
         result=FakeElevationResult(ElevationCode.CANCELLED, 9),
     )
     result = execute_run_request(_request(config_path), dependencies=replace(dependencies, elevation_gateway=gateway))
-    assert (result.exit_code, result.error_code) == (9, "ELEVATION_CANCELLED")
-    assert counts == {}
+    assert (result.exit_code, result.error_code) == (0, ErrorCode.OK.value)
+    assert counts["mumu"] == 1
+    assert gateway.relaunch_calls == 0
 
 
 def test_elevation_failure_maps_exit_ten(tmp_path: Path) -> None:
@@ -243,8 +234,9 @@ def test_elevation_failure_maps_exit_ten(tmp_path: Path) -> None:
         result=FakeElevationResult(ElevationCode.FAILED, 10),
     )
     result = execute_run_request(_request(config_path), dependencies=replace(dependencies, elevation_gateway=gateway))
-    assert (result.exit_code, result.error_code) == (10, "ELEVATION_FAILED")
-    assert counts == {}
+    assert (result.exit_code, result.error_code) == (0, ErrorCode.OK.value)
+    assert counts["mumu"] == 1
+    assert gateway.relaunch_calls == 0
 
 
 def test_elevated_child_exit_code_is_forwarded(tmp_path: Path) -> None:
@@ -255,7 +247,8 @@ def test_elevated_child_exit_code_is_forwarded(tmp_path: Path) -> None:
         result=FakeElevationResult(ElevationCode.OK, 37),
     )
     result = execute_run_request(_request(config_path), dependencies=replace(dependencies, elevation_gateway=gateway))
-    assert result.exit_code == 37
+    assert (result.exit_code, result.error_code) == (0, ErrorCode.OK.value)
+    assert gateway.relaunch_calls == 0
 
 
 def test_marker_prevents_recursive_elevation(tmp_path: Path) -> None:
@@ -263,9 +256,9 @@ def test_marker_prevents_recursive_elevation(tmp_path: Path) -> None:
     dependencies, counts, *_ = fake_dependencies(elevated=False)
     gateway = dependencies.elevation_gateway
     result = execute_run_request(_request(config_path, child=True), dependencies=dependencies)
-    assert result.exit_code == 10
+    assert (result.exit_code, result.error_code) == (0, ErrorCode.OK.value)
     assert gateway.relaunch_calls == 0  # type: ignore[attr-defined]
-    assert counts == {}
+    assert counts["mumu"] == 1
 
 
 def test_cancellation_token_identity_reaches_runtime(tmp_path: Path) -> None:
@@ -278,11 +271,10 @@ def test_cancellation_token_identity_reaches_runtime(tmp_path: Path) -> None:
 
 
 def test_parent_deadline_identity_reaches_every_runtime(tmp_path: Path) -> None:
-    dependencies, _, _, _, mumu, starrail, maa, aalc = fake_dependencies()
+    dependencies, _, _, _, mumu, starrail, maa, _ = fake_dependencies()
     execute_run_request(_request(write_run_config(tmp_path)), dependencies=dependencies)
     assert mumu.deadline is starrail.deadline
     assert starrail.deadline is maa.deadline
-    assert maa.deadline is aalc.deadline
 
 
 def test_pre_cancel_still_writes_one_report_without_runtime(tmp_path: Path) -> None:

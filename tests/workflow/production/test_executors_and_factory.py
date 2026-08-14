@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from autogame_orchestrator.config_model import AppConfig, MuMuConfig, MumuLifecycleMode
-from autogame_orchestrator.models import ErrorCode, OutcomeKind, StageName
+from autogame_orchestrator.models import ErrorCode, OutcomeKind, RunStatus, StageName
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.runtime.models import MumuRuntimeStatus
@@ -43,6 +43,40 @@ class CountingFactory:
     def __call__(self):
         self.counts[self.name] += 1
         return self.value
+
+
+class SequencedManagedMumu(FakeMumuPort):
+    def __init__(self) -> None:
+        super().__init__(mumu_result(MumuRuntimeStatus.READY))
+        self._start_results = [
+            mumu_result(MumuRuntimeStatus.STARTED),
+            mumu_result(MumuRuntimeStatus.STARTED),
+        ]
+        self._status_results = [
+            mumu_result(MumuRuntimeStatus.READY),
+            mumu_result(MumuRuntimeStatus.STOPPED),
+            mumu_result(MumuRuntimeStatus.READY),
+        ]
+        self._stop_results = [
+            mumu_result(MumuRuntimeStatus.STOPPED),
+            mumu_result(MumuRuntimeStatus.STOPPED),
+        ]
+        self.events: list[str] = []
+
+    def start(self, deadline=None, cancel=None):
+        self.events.append("start")
+        self.result = self._start_results.pop(0)
+        return super().start(deadline, cancel)
+
+    def status(self, deadline, cancel=None):
+        self.events.append("status")
+        self.result = self._status_results.pop(0)
+        return super().status(deadline, cancel)
+
+    def stop(self, deadline, cancel=None):
+        self.events.append("stop")
+        self.result = self._stop_results.pop(0)
+        return super().stop(deadline, cancel)
 
 
 def factories(
@@ -241,25 +275,48 @@ def test_verify_starrail_uses_no_process_scanner() -> None:
     assert counts == Counter()
 
 
-@pytest.mark.parametrize("stage", [StageName.RUN_MAA, StageName.RUN_AALC])
+@pytest.mark.parametrize("stage", [StageName.RUN_MAA])
 def test_run_adapters_receive_same_budget(stage: StageName) -> None:
     maa = FakeRunPort(maa_result())
-    aalc = FakeRunPort(aalc_result())
     deadline = Deadline.after(30)
     token = CancellationToken()
-    runtime_factories, _ = factories(maa=maa, aalc=aalc)
+    runtime_factories, _ = factories(maa=maa)
     execute(AppConfig(), stage, runtime_factories, deadline=deadline, cancel=token)
-    port = maa if stage == StageName.RUN_MAA else aalc
-    assert port.deadline is deadline
-    assert port.cancel is token
-    assert port.calls == 1
+    assert maa.deadline is deadline
+    assert maa.cancel is token
+    assert maa.calls == 1
 
 
-def test_aalc_attempt_count_is_not_modified() -> None:
-    runtime_factories, _ = factories(aalc=FakeRunPort(aalc_result()))
+def test_legacy_aalc_stage_is_not_registered_or_invoked() -> None:
+    aalc = FakeRunPort(aalc_result())
+    runtime_factories, counts = factories(aalc=aalc)
     report, _ = execute(AppConfig(), StageName.RUN_AALC, runtime_factories)
-    assert report.diagnostics["configured_attempts"] == 3
-    assert report.diagnostics["attempts_started"] == 1
+    assert (report.outcome, report.error_code) == (
+        OutcomeKind.FAILURE,
+        ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED,
+    )
+    assert aalc.calls == 0
+    assert counts["aalc"] == 0
+
+
+def test_managed_success_keeps_final_shutdown_after_maa(tmp_path: Path) -> None:
+    config = valid_config(tmp_path)
+    mumu = SequencedManagedMumu()
+    runtime_factories, counts = factories(mumu=mumu)
+    factory = build_production_executor_factory(config, runtime_factories=runtime_factories)
+    report = WorkflowRunner(build_execution_plan(config), factory, MemorySink()).run(deadline=Deadline.after(30))
+
+    stages = tuple(item.stage for item in report.stages)
+    assert report.status == RunStatus.SUCCESS
+    assert stages[-3:] == (
+        StageName.RUN_MAA,
+        StageName.SHUTDOWN_MUMU,
+        StageName.WRITE_RUN_REPORT,
+    )
+    assert StageName.RUN_AALC not in stages
+    assert mumu.stop_calls == 2
+    assert mumu.events[-1] == "stop"
+    assert counts["aalc"] == 0
 
 
 def test_runtime_is_constructed_at_most_once_per_factory() -> None:

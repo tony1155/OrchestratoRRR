@@ -92,7 +92,6 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     all_errors.extend(cfg_ma[1])
     all_errors.extend(cfg_ms[1])
     all_errors.extend(cfg_up[1])
-    all_errors.extend(cfg_al[1])
 
     if all_errors:
         return None, all_errors
@@ -104,7 +103,7 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
         maa=cfg_ma[0],  # type: ignore[arg-type]
         maa_sync=cfg_ms[0],  # type: ignore[arg-type]
         maa_update=cfg_up[0],  # type: ignore[arg-type]
-        aalc=cfg_al[0],  # type: ignore[arg-type]
+        aalc=cfg_al[0] if cfg_al[0] is not None else AALCConfig(),
     )
 
     validation_errors = config.validate()
@@ -392,6 +391,8 @@ def _parse_maa_update(raw: object) -> tuple[MAAUpdateConfig | None, list[ErrorCo
 
 def _parse_aalc(raw: object) -> tuple[AALCConfig | None, list[ErrorCode]]:
     errors: list[ErrorCode] = []
+    if raw is None:
+        return AALCConfig(), []
     if not isinstance(raw, dict):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return None, errors

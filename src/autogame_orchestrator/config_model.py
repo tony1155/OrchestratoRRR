@@ -490,7 +490,6 @@ class AppConfig:
         errors.extend(self.maa.validate())
         errors.extend(self.maa_sync.validate())
         errors.extend(self.maa_update.validate())
-        errors.extend(self.aalc.validate())
         return errors
 
     def check_paths(self) -> list[ErrorCode]:
@@ -499,7 +498,6 @@ class AppConfig:
         errors.extend(self.starrail.check_paths())
         errors.extend(self.maa.check_paths())
         errors.extend(self.maa_sync.check_paths())
-        errors.extend(self.aalc.check_paths())
         return errors
 
     def check_default_entry_paths(
@@ -547,8 +545,6 @@ class AppConfig:
         require_absolute("starrail.log_path_template", self.starrail.log_path_template.replace("{date}", "2000-01-01"))
         require_absolute("maa.executable", self.maa.executable)
         require_absolute("maa.working_directory", self.maa.working_directory)
-        require_absolute("aalc.executable", self.aalc.executable)
-        require_absolute("aalc.working_directory", self.aalc.working_directory)
         sync_paths = (
             ("maa_sync.gui_settings_source", self.maa_sync.gui_settings_source),
             ("maa_sync.gui_tasks_source", self.maa_sync.gui_tasks_source),

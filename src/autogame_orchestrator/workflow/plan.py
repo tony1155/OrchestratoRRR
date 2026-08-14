@@ -50,16 +50,12 @@ def build_execution_plan(
         }
         selected = tuple(stage for stage in selected if stage not in removed)
     requires_administrator = (
-        (StageName.RUN_AALC in selected and config.aalc.requires_administrator is True)
-        or (
-            StageName.SYNC_MAA_CONFIG in selected
-            and config.maa_sync.enabled is True
-            and config.maa_sync.requires_administrator is True
-        )
-        or (
-            StageName.UPDATE_MAA in selected
-            and config.maa_update.enabled is True
-            and config.maa_update.requires_administrator is True
-        )
+        StageName.SYNC_MAA_CONFIG in selected
+        and config.maa_sync.enabled is True
+        and config.maa_sync.requires_administrator is True
+    ) or (
+        StageName.UPDATE_MAA in selected
+        and config.maa_update.enabled is True
+        and config.maa_update.requires_administrator is True
     )
     return ExecutionPlan(stages=selected, requires_administrator=requires_administrator)

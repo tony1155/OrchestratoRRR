@@ -71,7 +71,7 @@ def test_app_config_aggregates_errors() -> None:
         aalc=AALCConfig(attempts=0),
     )
     errs = cfg.validate()
-    assert len(errs) >= 2
+    assert len(errs) >= 1
 
 
 def test_default_app_config_is_valid() -> None:
