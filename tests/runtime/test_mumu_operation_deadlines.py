@@ -178,7 +178,81 @@ class _ConnectOnceThenMissingProbe:
         )
 
 
-def _run_start(adapter: MumuAdapter, probe: object, parent_seconds: float = 7200.0) -> MumuRuntimeResult:
+class _ScriptedReadinessProbe:
+    def __init__(self, ensure_results: tuple[ProbeResult, ...], readonly_result: ProbeResult) -> None:
+        self.ensure_results = ensure_results
+        self.readonly_result = readonly_result
+        self.ensure_calls = 0
+        self.probe_calls = 0
+        self.connect_attempts = 0
+        self.ensure_probe_counts: list[int] = []
+
+    def ensure_ready(
+        self,
+        host: str,
+        port: int,
+        serial: str | None,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        self.ensure_calls += 1
+        self.ensure_probe_counts.append(self.probe_calls)
+        result = self.ensure_results[min(self.ensure_calls - 1, len(self.ensure_results) - 1)]
+        if result.diagnostics.get("adb_connect_attempted") is True:
+            self.connect_attempts += 1
+        return result
+
+    def probe(
+        self,
+        host: str,
+        port: int,
+        serial: str | None,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        self.probe_calls += 1
+        return self.readonly_result
+
+
+def _connect_attempt(
+    status: ProbeStatus,
+    error: ProbeErrorCode,
+    *,
+    step: str,
+    connect_status: str,
+    rechecked: bool,
+) -> ProbeResult:
+    return ProbeResult.from_monotonic(
+        "mumu_readiness",
+        status,
+        error,
+        time.monotonic(),
+        {
+            "step": step,
+            "adb_connect_attempted": True,
+            "adb_connect_status": connect_status,
+            "adb_connect_error": "OK" if connect_status == "connected" else error.value,
+            "readiness_rechecked_after_connect": rechecked,
+        },
+    )
+
+
+def _missing_device() -> ProbeResult:
+    return ProbeResult.from_monotonic(
+        "mumu_readiness",
+        ProbeStatus.UNAVAILABLE,
+        ProbeErrorCode.DEVICE_NOT_FOUND,
+        time.monotonic(),
+        {"step": "select_device"},
+    )
+
+
+def _run_start(
+    adapter: MumuAdapter,
+    probe: object,
+    parent_seconds: float = 7200.0,
+    cancel: CancellationToken | None = None,
+) -> MumuRuntimeResult:
     with (
         patch.object(
             adapter,
@@ -188,7 +262,7 @@ def _run_start(adapter: MumuAdapter, probe: object, parent_seconds: float = 7200
         patch.object(adapter, "_run_manager_command", return_value=_manager_success()),
         patch.object(adapter, "_create_probe", return_value=probe),
     ):
-        return adapter.start(Deadline.after(parent_seconds))
+        return adapter.start(Deadline.after(parent_seconds), cancel)
 
 
 def test_start_timeout_does_not_inherit_long_workflow_deadline(tmp_path: Path) -> None:
@@ -453,3 +527,189 @@ def test_shorter_parent_deadline_takes_priority(tmp_path: Path) -> None:
     assert elapsed < 0.8
     assert probe.remaining_seen
     assert max(probe.remaining_seen) <= 0.06
+
+
+def test_controlled_connect_retries_after_early_connected_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._CONTROLLED_CONNECT_RETRY_INTERVAL", 0.01)
+    adapter = _adapter(tmp_path, start_timeout=0.08)
+    probe = _ScriptedReadinessProbe(
+        (
+            _connect_attempt(
+                ProbeStatus.UNAVAILABLE,
+                ProbeErrorCode.DEVICE_NOT_FOUND,
+                step="select_device",
+                connect_status="connected",
+                rechecked=True,
+            ),
+            _connect_attempt(
+                ProbeStatus.READY,
+                ProbeErrorCode.OK,
+                step="adb_boot_completed",
+                connect_status="connected",
+                rechecked=True,
+            ),
+        ),
+        _missing_device(),
+    )
+
+    result = _run_start(adapter, probe)
+
+    assert result.status == MumuRuntimeStatus.STARTED
+    assert result.error_code == MumuRuntimeErrorCode.OK
+    assert probe.connect_attempts == 2
+    assert probe.ensure_calls == 2
+    assert probe.ensure_probe_counts[0] == 0
+    assert probe.ensure_probe_counts[1] > 0
+
+
+def test_controlled_connect_failures_use_cooldown_instead_of_spam(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._CONTROLLED_CONNECT_RETRY_INTERVAL", 0.015)
+    adapter = _adapter(tmp_path, start_timeout=0.08)
+    failed = _connect_attempt(
+        ProbeStatus.FAILED,
+        ProbeErrorCode.ADB_CONNECT_FAILED,
+        step="adb_connect",
+        connect_status="failed",
+        rechecked=False,
+    )
+    probe = _ScriptedReadinessProbe((failed,), _missing_device())
+
+    result = _run_start(adapter, probe)
+
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert result.error_code == MumuRuntimeErrorCode.START_TIMEOUT
+    assert probe.connect_attempts >= 2
+    assert probe.connect_attempts <= 7
+    assert probe.probe_calls >= probe.ensure_calls * 2
+
+
+def test_established_readiness_stops_further_connect_attempts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    adapter = _adapter(tmp_path, start_timeout=0.08)
+    probe = _ScriptedReadinessProbe(
+        (
+            _connect_attempt(
+                ProbeStatus.NOT_READY,
+                ProbeErrorCode.ANDROID_NOT_BOOTED,
+                step="adb_boot_completed",
+                connect_status="connected",
+                rechecked=True,
+            ),
+        ),
+        ProbeResult.ready("mumu_readiness"),
+    )
+
+    result = _run_start(adapter, probe)
+
+    assert result.status == MumuRuntimeStatus.STARTED
+    assert probe.connect_attempts == 1
+    assert probe.ensure_calls == 1
+    assert probe.probe_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "error", "step"),
+    [
+        (ProbeStatus.NOT_READY, ProbeErrorCode.DEVICE_OFFLINE, "adb_get_state"),
+        (ProbeStatus.NOT_READY, ProbeErrorCode.ANDROID_NOT_BOOTED, "adb_boot_completed"),
+        (ProbeStatus.TIMEOUT, ProbeErrorCode.ADB_TIMEOUT, "adb_devices"),
+        (ProbeStatus.UNAVAILABLE, ProbeErrorCode.PORT_CLOSED, "tcp_probe"),
+    ],
+)
+def test_noneligible_states_do_not_schedule_controlled_connect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: ProbeStatus,
+    error: ProbeErrorCode,
+    step: str,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    adapter = _adapter(tmp_path, start_timeout=0.02)
+    noneligible = ProbeResult.from_monotonic(
+        "mumu_readiness",
+        status,
+        error,
+        time.monotonic(),
+        {
+            "step": step,
+            "adb_connect_attempted": False,
+            "adb_connect_status": "not_attempted",
+            "adb_connect_error": "none",
+            "readiness_rechecked_after_connect": False,
+        },
+    )
+    probe = _ScriptedReadinessProbe((noneligible,), noneligible)
+
+    result = _run_start(adapter, probe)
+
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert probe.connect_attempts == 0
+
+
+def test_connect_retry_stays_within_start_operation_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._CONTROLLED_CONNECT_RETRY_INTERVAL", 0.005)
+    adapter = _adapter(tmp_path, start_timeout=0.06)
+    failed = _connect_attempt(
+        ProbeStatus.FAILED,
+        ProbeErrorCode.ADB_CONNECT_FAILED,
+        step="adb_connect",
+        connect_status="failed",
+        rechecked=False,
+    )
+    probe = _ScriptedReadinessProbe((failed,), _missing_device())
+
+    started = time.monotonic()
+    result = _run_start(adapter, probe, parent_seconds=7200.0)
+    elapsed = time.monotonic() - started
+
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert result.error_code == MumuRuntimeErrorCode.START_TIMEOUT
+    assert elapsed < 0.8
+
+
+def test_connect_retry_honors_cancellation_during_cooldown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._CONTROLLED_CONNECT_RETRY_INTERVAL", 1.0)
+    adapter = _adapter(tmp_path, start_timeout=5.0)
+    failed = _connect_attempt(
+        ProbeStatus.FAILED,
+        ProbeErrorCode.ADB_CONNECT_FAILED,
+        step="adb_connect",
+        connect_status="failed",
+        rechecked=False,
+    )
+    probe = _ScriptedReadinessProbe((failed,), _missing_device())
+    cancel = CancellationToken()
+
+    def cancel_soon() -> None:
+        time.sleep(0.03)
+        cancel.cancel()
+
+    worker = threading.Thread(target=cancel_soon, daemon=True)
+    worker.start()
+    started = time.monotonic()
+    result = _run_start(adapter, probe, cancel=cancel)
+    worker.join(timeout=1.0)
+    elapsed = time.monotonic() - started
+
+    assert result.status == MumuRuntimeStatus.CANCELLED
+    assert result.error_code == MumuRuntimeErrorCode.CANCELLED
+    assert elapsed < 0.8

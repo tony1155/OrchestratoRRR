@@ -34,6 +34,7 @@ from autogame_orchestrator.runtime.models import (
 
 _POLL_INTERVAL = 0.3  # readiness 轮询间隔（秒）
 _CommandResult = dict[str, Any]  # _run_manager_command 返回类型
+_CONTROLLED_CONNECT_RETRY_INTERVAL = 3.0  # cooldown between controlled local adb connects
 _PROBE_STEP_ALLOWLIST = {
     "tcp_probe",
     "adb_devices",
@@ -604,7 +605,8 @@ class MumuAdapter:
         """
         last_probe_result: ProbeResult | None = None
         connect_diagnostics: dict[str, JsonValue] = {}
-        controlled_connect_attempted = False
+        next_controlled_connect_at = 0.0
+        connect_established = False
 
         while not deadline.expired:
             if cancel is not None and cancel.is_cancelled:
@@ -618,16 +620,22 @@ class MumuAdapter:
                 )
 
             probe = self._create_probe()
-            if controlled_connect_attempted:
+            if connect_established or time.monotonic() < next_controlled_connect_at:
                 result = probe.probe(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
             else:
                 result = probe.ensure_ready(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
                 safe_result = _safe_probe_diagnostics(result)
                 if safe_result.get("adb_connect_attempted") is True:
-                    controlled_connect_attempted = True
                     connect_diagnostics = {
                         key: safe_result[key] for key in _CONNECT_DIAGNOSTIC_KEYS if key in safe_result
                     }
+                    connect_status = safe_result.get("adb_connect_status")
+                    connect_established = connect_status in {"connected", "already_connected"} and not (
+                        safe_result.get("probe_error") == ProbeErrorCode.DEVICE_NOT_FOUND.value
+                        and safe_result.get("probe_step") == "select_device"
+                    )
+                    if not connect_established:
+                        next_controlled_connect_at = time.monotonic() + _CONTROLLED_CONNECT_RETRY_INTERVAL
             last_probe_result = result
 
             if result.status == ProbeStatus.READY:
