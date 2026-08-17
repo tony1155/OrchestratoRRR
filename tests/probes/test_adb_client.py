@@ -308,3 +308,96 @@ def test_connect_arguments_are_exact_and_diagnostics_are_safe(tmp_path: Path) ->
     rendered = json.dumps(dict(result.diagnostics)) + repr(result)
     for forbidden in ("127.0.0.1", "16384", "target", "stdout", "stderr"):
         assert forbidden not in rendered
+
+
+def test_disconnect_success() -> None:
+    result = _make_client("normal").disconnect("127.0.0.1", 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.READY
+    assert result.error_code == ProbeErrorCode.OK
+    assert result.diagnostics == {"disconnect_status": "disconnected"}
+
+
+@pytest.mark.parametrize(
+    ("mode", "error_code"),
+    [
+        ("disconnect_failed", ProbeErrorCode.ADB_DISCONNECT_FAILED),
+        ("disconnect_unknown", ProbeErrorCode.ADB_DISCONNECT_FAILED),
+        ("disconnect_nonzero", ProbeErrorCode.ADB_EXIT_NONZERO),
+    ],
+)
+def test_disconnect_failure_is_fail_closed(mode: str, error_code: ProbeErrorCode) -> None:
+    result = _make_client(mode).disconnect("127.0.0.1", 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.FAILED
+    assert result.error_code == error_code
+    assert result.diagnostics == {"disconnect_status": "failed"}
+
+
+@pytest.mark.parametrize("host", ["localhost", "0.0.0.0", "::1", "127.0.0.1;echo"])
+def test_disconnect_non_local_host_is_rejected_without_starting(
+    host: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _make_client("normal")
+
+    def _unexpected(*args: object, **kwargs: object) -> ProbeResult:
+        raise AssertionError("process must not start")
+
+    monkeypatch.setattr(client, "_run_adb_command", _unexpected)
+    result = client.disconnect(host, 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.FAILED
+    assert result.error_code == ProbeErrorCode.NON_LOCAL_ADDRESS_REJECTED
+
+
+def test_disconnect_arguments_are_exact_and_diagnostics_are_safe(tmp_path: Path) -> None:
+    args_file = tmp_path / "args.json"
+    result = _make_client("normal", args_file).disconnect("127.0.0.1", 16384, Deadline.after(5.0))
+    assert result.status == ProbeStatus.READY
+    assert json.loads(args_file.read_text(encoding="utf-8")) == ["disconnect", "127.0.0.1:16384"]
+    rendered = json.dumps(dict(result.diagnostics)) + repr(result)
+    for forbidden in ("127.0.0.1", "16384", "target", "stdout", "stderr"):
+        assert forbidden not in rendered
+
+
+def test_recycle_local_endpoint_disconnects_then_connects() -> None:
+    result = _make_client("connect_success").recycle_local_endpoint(
+        "127.0.0.1",
+        16384,
+        Deadline.after(5.0),
+    )
+    assert result.status == ProbeStatus.READY
+    assert result.error_code == ProbeErrorCode.OK
+    assert result.diagnostics == {
+        "disconnect_status": "disconnected",
+        "connect_status": "connected",
+    }
+
+
+def test_recycle_local_endpoint_still_connects_after_disconnect_failure() -> None:
+    result = _make_client("disconnect_failed").recycle_local_endpoint(
+        "127.0.0.1",
+        16384,
+        Deadline.after(5.0),
+    )
+    assert result.status == ProbeStatus.READY
+    assert result.error_code == ProbeErrorCode.OK
+    assert result.diagnostics == {
+        "disconnect_status": "failed",
+        "connect_status": "connected",
+    }
+
+
+def test_recycle_local_endpoint_timeout_does_not_refresh_parent_budget() -> None:
+    started = time.monotonic()
+    result = _make_client("sleep_forever").recycle_local_endpoint(
+        "127.0.0.1",
+        16384,
+        Deadline.after(0.2),
+    )
+    elapsed = time.monotonic() - started
+    assert result.status == ProbeStatus.TIMEOUT
+    assert result.error_code == ProbeErrorCode.ADB_TIMEOUT
+    assert result.diagnostics == {
+        "disconnect_status": "failed",
+        "connect_status": "not_attempted",
+    }
+    assert elapsed < 1.0

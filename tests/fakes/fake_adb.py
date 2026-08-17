@@ -95,6 +95,18 @@ def _cmd_connect(mode: str) -> None:
         print("connected to target")
 
 
+def _cmd_disconnect(mode: str) -> None:
+    if mode == "disconnect_failed":
+        print("failed to disconnect target")
+    elif mode == "disconnect_nonzero":
+        print("cannot disconnect target", file=sys.stderr)
+        sys.exit(1)
+    elif mode == "disconnect_unknown":
+        print("disconnect request completed")
+    else:
+        print("disconnected target")
+
+
 def _generate_large_stdout() -> None:
     """生成约 2 MiB 的 stdout 输出。"""
     chunk = b"X" * 65536
@@ -178,6 +190,8 @@ def main() -> None:
         _cmd_boot_completed(mode)
     elif cmd.startswith("connect "):
         _cmd_connect(mode)
+    elif cmd.startswith("disconnect "):
+        _cmd_disconnect(mode)
     elif cmd == "devices -l":
         _cmd_devices(mode)
     else:

@@ -316,6 +316,33 @@ def _offline_device() -> ProbeResult:
     )
 
 
+def _endpoint_recovery(
+    status: ProbeStatus = ProbeStatus.READY,
+    error: ProbeErrorCode = ProbeErrorCode.OK,
+    *,
+    disconnect_status: str = "disconnected",
+    connect_status: str = "connected",
+) -> ProbeResult:
+    if status == ProbeStatus.READY:
+        return ProbeResult.ready(
+            "adb_endpoint_recycle",
+            {
+                "disconnect_status": disconnect_status,
+                "connect_status": connect_status,
+            },
+        )
+    return ProbeResult.from_monotonic(
+        "adb_endpoint_recycle",
+        status,
+        error,
+        time.monotonic(),
+        {
+            "disconnect_status": disconnect_status,
+            "connect_status": connect_status,
+        },
+    )
+
+
 def _run_start(
     adapter: MumuAdapter,
     probe: object,
@@ -698,6 +725,7 @@ def test_transient_offline_recovers_without_managed_restart(
             return_value=_status(MumuRuntimeStatus.NOT_READY, MumuRuntimeErrorCode.READINESS_FAILED),
         ),
         patch.object(adapter, "_run_manager_command") as manager,
+        patch.object(adapter, "_recover_offline_endpoint") as endpoint_recovery,
         patch.object(adapter, "_create_probe", return_value=probe),
     ):
         result = adapter.start(Deadline.after(7200.0))
@@ -707,6 +735,7 @@ def test_transient_offline_recovers_without_managed_restart(
     assert result.diagnostics["offline_recovery_attempted"] is False
     assert result.diagnostics["offline_recovery_count"] == 0
     manager.assert_not_called()
+    endpoint_recovery.assert_not_called()
 
 
 def test_persistent_offline_restarts_managed_instance_once_then_becomes_ready(
@@ -744,6 +773,7 @@ def test_persistent_offline_restarts_managed_instance_once_then_becomes_ready(
         ),
         patch.object(adapter, "_run_manager_command", side_effect=manager_success),
         patch.object(adapter, "_wait_stopped", side_effect=stopped),
+        patch.object(adapter, "_recover_offline_endpoint", return_value=_endpoint_recovery()) as endpoint_recovery,
         patch.object(adapter, "_create_probe", return_value=probe),
     ):
         result = adapter.start(Deadline.after(7200.0))
@@ -755,6 +785,65 @@ def test_persistent_offline_restarts_managed_instance_once_then_becomes_ready(
     assert result.diagnostics["offline_recovery_status"] == "completed"
     assert len(manager_deadlines) == 2
     assert len(stop_deadlines) == 1
+    endpoint_recovery.assert_called_once()
+
+
+def test_stale_offline_transport_recycles_before_and_after_single_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real incident shape: a MuMu restart alone leaves the host transport offline."""
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._OFFLINE_RECOVERY_GRACE_SECONDS", 0.008)
+    adapter = _adapter(tmp_path, start_timeout=0.3)
+    probe = _OfflineProbe()
+    manager_deadlines: list[Deadline] = []
+    stop_deadlines: list[Deadline] = []
+    endpoint_deadlines: list[Deadline] = []
+
+    def manager_success(arguments, deadline, cancel, timeout_code):
+        manager_deadlines.append(deadline)
+        return _manager_success()
+
+    def stopped(started_at, deadline, cancel):
+        stop_deadlines.append(deadline)
+        return MumuRuntimeResult.from_monotonic(
+            MumuAction.STOP,
+            MumuRuntimeStatus.STOPPED,
+            MumuRuntimeErrorCode.OK,
+            started_at,
+            changed=True,
+        )
+
+    def recycle_endpoint(deadline, cancel):
+        endpoint_deadlines.append(deadline)
+        if len(endpoint_deadlines) == 2:
+            probe.ready = True
+        return _endpoint_recovery()
+
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.NOT_READY, MumuRuntimeErrorCode.READINESS_FAILED),
+        ),
+        patch.object(adapter, "_run_manager_command", side_effect=manager_success),
+        patch.object(adapter, "_wait_stopped", side_effect=stopped),
+        patch.object(adapter, "_recover_offline_endpoint", side_effect=recycle_endpoint),
+        patch.object(adapter, "_create_probe", return_value=probe),
+    ):
+        result = adapter.start(Deadline.after(7200.0))
+
+    assert result.status == MumuRuntimeStatus.STARTED
+    assert result.error_code == MumuRuntimeErrorCode.OK
+    assert len(endpoint_deadlines) == 2
+    assert len(manager_deadlines) == 2
+    assert len(stop_deadlines) == 1
+    assert result.diagnostics["offline_endpoint_recovery_count"] == 2
+    assert result.diagnostics["offline_endpoint_recovery_status"] == "connected"
+    assert result.diagnostics["offline_recovery_count"] == 1
+    shared_deadlines = [*probe.deadlines, *manager_deadlines, *stop_deadlines, *endpoint_deadlines]
+    assert len({id(item) for item in shared_deadlines}) == 1
 
 
 def test_persistent_offline_restarts_once_then_times_out_without_budget_refresh(
@@ -793,6 +882,15 @@ def test_persistent_offline_restarts_once_then_times_out_without_budget_refresh(
         ),
         patch.object(adapter, "_run_manager_command", side_effect=manager_success),
         patch.object(adapter, "_wait_stopped", side_effect=stopped),
+        patch.object(
+            adapter,
+            "_recover_offline_endpoint",
+            return_value=_endpoint_recovery(
+                ProbeStatus.FAILED,
+                ProbeErrorCode.ADB_CONNECT_FAILED,
+                connect_status="failed",
+            ),
+        ) as endpoint_recovery,
         patch.object(adapter, "_create_probe", return_value=probe),
     ):
         result = adapter.start(Deadline.after(7200.0))
@@ -804,8 +902,41 @@ def test_persistent_offline_restarts_once_then_times_out_without_budget_refresh(
     assert result.diagnostics["offline_recovery_count"] == 1
     assert len(manager_deadlines) == 2
     assert len(stop_deadlines) == 1
+    assert endpoint_recovery.call_count == 2
     assert len({id(item) for item in shared_deadlines}) == 1
     assert remaining_seen[0] >= remaining_seen[-1]
+
+
+def test_offline_endpoint_recovery_cancellation_stops_before_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._OFFLINE_RECOVERY_GRACE_SECONDS", 0.005)
+    adapter = _adapter(tmp_path, start_timeout=0.2)
+    probe = _OfflineProbe()
+    cancelled = _endpoint_recovery(
+        ProbeStatus.FAILED,
+        ProbeErrorCode.ADB_CANCELLED,
+        connect_status="not_attempted",
+    )
+
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.NOT_READY, MumuRuntimeErrorCode.READINESS_FAILED),
+        ),
+        patch.object(adapter, "_recover_offline_endpoint", return_value=cancelled),
+        patch.object(adapter, "_recover_offline_transport") as restart,
+        patch.object(adapter, "_create_probe", return_value=probe),
+    ):
+        result = adapter.start(Deadline.after(7200.0))
+
+    assert result.status == MumuRuntimeStatus.CANCELLED
+    assert result.error_code == MumuRuntimeErrorCode.CANCELLED
+    assert result.diagnostics["offline_endpoint_recovery_status"] == "cancelled"
+    restart.assert_not_called()
 
 
 def test_external_offline_never_enters_managed_recovery(
@@ -816,12 +947,14 @@ def test_external_offline_never_enters_managed_recovery(
     with (
         patch.object(adapter, "_create_probe", return_value=probe),
         patch.object(adapter, "_recover_offline_transport") as recovery,
+        patch.object(adapter, "_recover_offline_endpoint") as endpoint_recovery,
         patch.object(adapter, "_run_manager_command") as manager,
     ):
         result = adapter.ensure_external_ready(Deadline.after(30.0))
 
     assert result.status == MumuRuntimeStatus.NOT_READY
     recovery.assert_not_called()
+    endpoint_recovery.assert_not_called()
     manager.assert_not_called()
 
 

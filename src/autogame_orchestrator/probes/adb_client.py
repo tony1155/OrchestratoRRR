@@ -35,6 +35,8 @@ _LOCAL_ADB_HOST = "127.0.0.1"
 _CONNECT_SUCCESS_ALREADY = "already connected to"
 _CONNECT_SUCCESS = "connected to"
 _CONNECT_FAILURE_MARKERS = ("not connected to", "failed", "cannot", "refused", "unable")
+_DISCONNECT_SUCCESS = "disconnected"
+_DISCONNECT_FAILURE_MARKERS = ("failed", "cannot", "refused", "unable", "error")
 _DIAG_MAX = 1_024  # diagnostics 摘要最大字符数
 _DEFAULT_COMMAND_TIMEOUT_SECONDS = 5.0
 
@@ -247,6 +249,127 @@ class AdbClient:
             ProbeErrorCode.ADB_CONNECT_FAILED,
             started_at,
             {"connect_status": "failed"},
+        )
+
+    def disconnect(
+        self,
+        host: str,
+        port: int,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        """Disconnect exactly one configured local TCP ADB endpoint."""
+        started_at = time.monotonic()
+        if host != _LOCAL_ADB_HOST:
+            return ProbeResult.from_monotonic(
+                "adb_disconnect",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.NON_LOCAL_ADDRESS_REJECTED,
+                started_at,
+                {"disconnect_status": "failed"},
+            )
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
+            return ProbeResult.from_monotonic(
+                "adb_disconnect",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.INVALID_CONFIGURATION,
+                started_at,
+                {"disconnect_status": "failed"},
+            )
+        if cancel is not None and cancel.is_cancelled:
+            return ProbeResult.from_monotonic(
+                "adb_disconnect",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.ADB_CANCELLED,
+                started_at,
+                {"disconnect_status": "failed"},
+            )
+        if deadline.expired:
+            return ProbeResult.from_monotonic(
+                "adb_disconnect",
+                ProbeStatus.TIMEOUT,
+                ProbeErrorCode.ADB_TIMEOUT,
+                started_at,
+                {"disconnect_status": "failed"},
+            )
+
+        probe = self._run_adb_command(
+            probe_name="adb_disconnect",
+            arguments=("disconnect", f"{host}:{port}"),
+            deadline=deadline,
+            cancel=cancel,
+        )
+        if probe.status != ProbeStatus.READY:
+            return ProbeResult.from_monotonic(
+                "adb_disconnect",
+                probe.status,
+                probe.error_code,
+                started_at,
+                {"disconnect_status": "failed"},
+            )
+
+        output = " ".join(
+            value.casefold()
+            for key in ("stdout_trimmed", "stderr_trimmed")
+            if isinstance(value := probe.diagnostics.get(key), str)
+        )
+        if any(marker in output for marker in _DISCONNECT_FAILURE_MARKERS) or _DISCONNECT_SUCCESS not in output:
+            return ProbeResult.from_monotonic(
+                "adb_disconnect",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.ADB_DISCONNECT_FAILED,
+                started_at,
+                {"disconnect_status": "failed"},
+            )
+        return ProbeResult.from_monotonic(
+            "adb_disconnect",
+            ProbeStatus.READY,
+            ProbeErrorCode.OK,
+            started_at,
+            {"disconnect_status": "disconnected"},
+        )
+
+    def recycle_local_endpoint(
+        self,
+        host: str,
+        port: int,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        """Recycle one exact local transport without touching the global ADB server."""
+        started_at = time.monotonic()
+        disconnected = self.disconnect(host, port, deadline, cancel)
+        disconnect_status = disconnected.diagnostics.get("disconnect_status", "failed")
+        diagnostics: dict[str, str] = {
+            "disconnect_status": disconnect_status if isinstance(disconnect_status, str) else "failed",
+            "connect_status": "not_attempted",
+        }
+        if disconnected.error_code == ProbeErrorCode.ADB_CANCELLED:
+            return ProbeResult.from_monotonic(
+                "adb_endpoint_recycle",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.ADB_CANCELLED,
+                started_at,
+                diagnostics,
+            )
+        if deadline.expired:
+            return ProbeResult.from_monotonic(
+                "adb_endpoint_recycle",
+                ProbeStatus.TIMEOUT,
+                ProbeErrorCode.ADB_TIMEOUT,
+                started_at,
+                diagnostics,
+            )
+
+        connected = self.connect(host, port, deadline, cancel)
+        connect_status = connected.diagnostics.get("connect_status", "failed")
+        diagnostics["connect_status"] = connect_status if isinstance(connect_status, str) else "failed"
+        return ProbeResult.from_monotonic(
+            "adb_endpoint_recycle",
+            connected.status,
+            connected.error_code,
+            started_at,
+            diagnostics,
         )
 
     # ── 内部 ──────────────────────────────────────────────────

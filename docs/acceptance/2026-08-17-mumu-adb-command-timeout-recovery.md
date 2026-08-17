@@ -1,5 +1,10 @@
 # 2026-08-17 MuMu ADB 子命令超时恢复
 
+> 本文是 commit <code>80e0835</code> 的历史验收记录。后续 offline recovery、
+> failure cleanup 与精确 endpoint recycle 的当前状态统一维护在
+> [累积维护与修复日志](../maintenance-log.md)；本文保留为 ADB child deadline
+> 的详细证据。
+
 ## 事故现场
 
 - 基线：`22d9fd0 refactor(workflow): retire AALC from production pipeline`

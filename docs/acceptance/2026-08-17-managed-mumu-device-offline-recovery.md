@@ -1,5 +1,12 @@
 # 2026-08-17 Managed MuMu DEVICE_OFFLINE recovery
 
+> Historical acceptance record for commit <code>46d3af9</code>. A later real
+> incident showed that a MuMu restart can complete while the host ADB transport
+> remains offline. The follow-up endpoint-scoped recovery is tracked as
+> <code>MNT-2026-08-17-03</code> in the [cumulative maintenance log](../maintenance-log.md).
+> Keep this file as evidence for the earlier change; use the cumulative log for
+> the current maintenance state.
+
 ## Incident evidence
 
 This change follows the individual ADB command timeout fix recorded in

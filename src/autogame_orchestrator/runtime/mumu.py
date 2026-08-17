@@ -47,6 +47,7 @@ _PROBE_STEP_ALLOWLIST = {
     "none",
 }
 _CONNECT_STATUS_ALLOWLIST = {"not_attempted", "connected", "already_connected", "failed"}
+_DISCONNECT_STATUS_ALLOWLIST = {"not_attempted", "disconnected", "failed"}
 _CONNECT_DIAGNOSTIC_KEYS = (
     "adb_connect_attempted",
     "adb_connect_status",
@@ -514,8 +515,10 @@ class MumuAdapter:
     # ── 内部 ──────────────────────────────────────────────────────
 
     def _create_probe(self) -> MumuReadinessProbe:
-        config = AdbClientConfig(executable=self._adb_executable)
-        return MumuReadinessProbe(AdbClient(config))
+        return MumuReadinessProbe(self._create_adb_client())
+
+    def _create_adb_client(self) -> AdbClient:
+        return AdbClient(AdbClientConfig(executable=self._adb_executable))
 
     def _run_manager_command(
         self,
@@ -620,6 +623,19 @@ class MumuAdapter:
             and self._adb_serial == f"{self._adb_host}:{self._adb_port}"
         )
 
+    def _recover_offline_endpoint(
+        self,
+        deadline: Deadline,
+        cancel: CancellationToken | None,
+    ) -> ProbeResult:
+        """Recycle only the configured local endpoint inside the existing budget."""
+        return self._create_adb_client().recycle_local_endpoint(
+            self._adb_host,
+            self._adb_port,
+            deadline,
+            cancel,
+        )
+
     def _recover_offline_transport(
         self,
         deadline: Deadline,
@@ -685,8 +701,11 @@ class MumuAdapter:
         wait_diagnostics: dict[str, JsonValue] = {}
         next_controlled_connect_at = 0.0
         connect_established = False
+        readonly_probe_once = False
         offline_since: float | None = None
         offline_recovery_attempted = False
+        offline_endpoint_recovery_attempted_since_restart = False
+        offline_endpoint_recovery_count = 0
 
         while not deadline.expired:
             if cancel is not None and cancel.is_cancelled:
@@ -700,7 +719,10 @@ class MumuAdapter:
                 )
 
             probe = self._create_probe()
-            if connect_established or time.monotonic() < next_controlled_connect_at:
+            if readonly_probe_once:
+                result = probe.probe(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
+                readonly_probe_once = False
+            elif connect_established or time.monotonic() < next_controlled_connect_at:
                 result = probe.probe(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
             else:
                 result = probe.ensure_ready(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
@@ -739,34 +761,83 @@ class MumuAdapter:
                                 "offline_recovery_count": 0,
                             }
                         )
-                elif not offline_recovery_attempted and now - offline_since >= _OFFLINE_RECOVERY_GRACE_SECONDS:
-                    offline_recovery_attempted = True
-                    changed = True
-                    wait_diagnostics.update(
-                        {
-                            "offline_recovery_attempted": True,
-                            "offline_recovery_count": 1,
-                            "offline_recovery_status": "started",
-                        }
-                    )
-                    recovery = self._recover_offline_transport(deadline, cancel)
-                    wait_diagnostics["offline_recovery_status"] = "completed" if recovery.succeeded else "failed"
-                    if not recovery.succeeded:
-                        return MumuRuntimeResult.from_monotonic(
-                            action,
-                            recovery.status,
-                            recovery.error_code,
-                            started_at,
-                            changed=True,
-                            diagnostics=_safe_wait_diagnostics(
-                                last_probe_result,
-                                wait_diagnostics,
-                            ),
+                elif now - offline_since >= _OFFLINE_RECOVERY_GRACE_SECONDS:
+                    if not offline_endpoint_recovery_attempted_since_restart:
+                        offline_endpoint_recovery_attempted_since_restart = True
+                        offline_endpoint_recovery_count += 1
+                        changed = True
+                        wait_diagnostics.update(
+                            {
+                                "offline_endpoint_recovery_attempted": True,
+                                "offline_endpoint_recovery_count": offline_endpoint_recovery_count,
+                            }
                         )
-                    offline_since = None
-                    connect_established = False
-                    next_controlled_connect_at = 0.0
-                    continue
+                        endpoint_recovery = self._recover_offline_endpoint(deadline, cancel)
+                        disconnect_status = endpoint_recovery.diagnostics.get("disconnect_status")
+                        if isinstance(disconnect_status, str) and disconnect_status in _DISCONNECT_STATUS_ALLOWLIST:
+                            wait_diagnostics["offline_endpoint_disconnect_status"] = disconnect_status
+                        connect_status = endpoint_recovery.diagnostics.get("connect_status")
+                        if isinstance(connect_status, str) and connect_status in _CONNECT_STATUS_ALLOWLIST:
+                            wait_diagnostics["offline_endpoint_connect_status"] = connect_status
+                        if endpoint_recovery.error_code == ProbeErrorCode.ADB_CANCELLED:
+                            wait_diagnostics["offline_endpoint_recovery_status"] = "cancelled"
+                            return MumuRuntimeResult.from_monotonic(
+                                action,
+                                MumuRuntimeStatus.CANCELLED,
+                                MumuRuntimeErrorCode.CANCELLED,
+                                started_at,
+                                changed=True,
+                                diagnostics=_safe_wait_diagnostics(last_probe_result, wait_diagnostics),
+                            )
+                        if deadline.expired:
+                            wait_diagnostics["offline_endpoint_recovery_status"] = "timeout"
+                            return MumuRuntimeResult.from_monotonic(
+                                action,
+                                MumuRuntimeStatus.TIMEOUT,
+                                MumuRuntimeErrorCode.START_TIMEOUT,
+                                started_at,
+                                changed=True,
+                                diagnostics=_safe_wait_diagnostics(last_probe_result, wait_diagnostics),
+                            )
+                        wait_diagnostics["offline_endpoint_recovery_status"] = (
+                            "connected" if endpoint_recovery.status == ProbeStatus.READY else "failed"
+                        )
+                        offline_since = None
+                        connect_established = False
+                        readonly_probe_once = True
+                        next_controlled_connect_at = time.monotonic() + _CONTROLLED_CONNECT_RETRY_INTERVAL
+                        continue
+
+                    if not offline_recovery_attempted:
+                        offline_recovery_attempted = True
+                        changed = True
+                        wait_diagnostics.update(
+                            {
+                                "offline_recovery_attempted": True,
+                                "offline_recovery_count": 1,
+                                "offline_recovery_status": "started",
+                            }
+                        )
+                        recovery = self._recover_offline_transport(deadline, cancel)
+                        wait_diagnostics["offline_recovery_status"] = "completed" if recovery.succeeded else "failed"
+                        if not recovery.succeeded:
+                            return MumuRuntimeResult.from_monotonic(
+                                action,
+                                recovery.status,
+                                recovery.error_code,
+                                started_at,
+                                changed=True,
+                                diagnostics=_safe_wait_diagnostics(
+                                    last_probe_result,
+                                    wait_diagnostics,
+                                ),
+                            )
+                        offline_since = None
+                        offline_endpoint_recovery_attempted_since_restart = False
+                        connect_established = False
+                        readonly_probe_once = True
+                        next_controlled_connect_at = 0.0
+                        continue
             else:
                 offline_since = None
 

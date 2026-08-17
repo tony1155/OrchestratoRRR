@@ -25,6 +25,8 @@ _PROBE_STATUS_ALLOWLIST = {item.value for item in ProbeStatus}
 _PROBE_ERROR_ALLOWLIST = {item.value for item in ProbeErrorCode}
 _ADB_CONNECT_STATUS_ALLOWLIST = {"not_attempted", "connected", "already_connected", "failed"}
 _OFFLINE_RECOVERY_STATUS_ALLOWLIST = {"started", "completed", "failed"}
+_OFFLINE_ENDPOINT_RECOVERY_STATUS_ALLOWLIST = {"connected", "failed", "timeout", "cancelled"}
+_OFFLINE_ENDPOINT_DISCONNECT_STATUS_ALLOWLIST = {"not_attempted", "disconnected", "failed"}
 
 
 def _outcome(
@@ -164,6 +166,31 @@ def project_mumu(
     offline_recovery_status = result.diagnostics.get("offline_recovery_status")
     if isinstance(offline_recovery_status, str) and offline_recovery_status in _OFFLINE_RECOVERY_STATUS_ALLOWLIST:
         diagnostics["offline_recovery_status"] = offline_recovery_status
+    offline_endpoint_attempted = result.diagnostics.get("offline_endpoint_recovery_attempted")
+    if isinstance(offline_endpoint_attempted, bool):
+        diagnostics["offline_endpoint_recovery_attempted"] = offline_endpoint_attempted
+    offline_endpoint_count = result.diagnostics.get("offline_endpoint_recovery_count")
+    if (
+        isinstance(offline_endpoint_count, int)
+        and not isinstance(offline_endpoint_count, bool)
+        and offline_endpoint_count in {0, 1, 2}
+    ):
+        diagnostics["offline_endpoint_recovery_count"] = offline_endpoint_count
+    offline_endpoint_status = result.diagnostics.get("offline_endpoint_recovery_status")
+    if (
+        isinstance(offline_endpoint_status, str)
+        and offline_endpoint_status in _OFFLINE_ENDPOINT_RECOVERY_STATUS_ALLOWLIST
+    ):
+        diagnostics["offline_endpoint_recovery_status"] = offline_endpoint_status
+    offline_disconnect_status = result.diagnostics.get("offline_endpoint_disconnect_status")
+    if (
+        isinstance(offline_disconnect_status, str)
+        and offline_disconnect_status in _OFFLINE_ENDPOINT_DISCONNECT_STATUS_ALLOWLIST
+    ):
+        diagnostics["offline_endpoint_disconnect_status"] = offline_disconnect_status
+    offline_connect_status = result.diagnostics.get("offline_endpoint_connect_status")
+    if isinstance(offline_connect_status, str) and offline_connect_status in _ADB_CONNECT_STATUS_ALLOWLIST:
+        diagnostics["offline_endpoint_connect_status"] = offline_connect_status
     if result.status == MumuRuntimeStatus.TIMEOUT:
         outcome, code = OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT
     elif result.status == MumuRuntimeStatus.CANCELLED:

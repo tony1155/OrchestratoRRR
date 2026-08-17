@@ -14,7 +14,7 @@ OrchestratoRRR 用于按确定顺序管理 MuMu、StarRailCopilot、MAA 等外�
 - **Deadline / Cancellation / Failure 传播**：父 Deadline 单调递减，子操作只能收紧预算；首个业务失败会阻断后续普通阶段，并保留稳定错误码。
 - **Windows 进程树管理**：`ProcessSupervisor` 统一处理创建、等待、超时、取消和清理，使用 Windows Job Object 约束受管进程树。
 - **MuMu 生命周期与 readiness**：启动、停止、重启、TCP 端口、ADB devices、device state 和 Android boot-completed 组合探测。
-- **有界 ADB 恢复**：单条 ADB 命令默认最多占用 5 秒；受控 localhost connect 带冷却；持续 `DEVICE_OFFLINE` 时 managed 模式最多执行一次共享原预算的恢复重启。
+- **有界 ADB 恢复**：单条 ADB 命令默认最多占用 5 秒；受控 localhost connect 带冷却；持续 `DEVICE_OFFLINE` 时只回收精确目标 transport，并在最多一次 managed restart 前后各允许一次 endpoint recovery，全部共享原预算。
 - **MAA 配置同步**：对白名单字段做转换和大小限制，使用临时文件、原子替换、备份与双目标失败回滚。
 - **受限 MAA 更新**：默认关闭；启用时要求显式网络授权，只允许固定 `update` 入口并受 Deadline 约束。
 - **可观测结果**：每次运行输出 JSONL 阶段事件和 schema v1 `RunReport`；报告先校验 JSON Schema，再原子落盘。
@@ -280,9 +280,9 @@ docs/                    架构、阶段计划、验收证据和手工门禁
 - managed MuMu 冷启动、停止、重启、ADB ready、最终 shutdown 和进程回收；
 - 两次 managed 真实完整工作流成功记录，其中一次从干净进程基线启动并验证 player born 2 / reaped 2 / leaked 0；
 - PyInstaller onedir、schema 资源、默认入口、首次安装和带产品数据保护的安装更新；
-- 当前不含 AALC 的 15 阶段计划、失败 cleanup、ADB child deadline 和 offline recovery 的完整自动测试。
+- 当前不含 AALC 的 15 阶段计划、失败 cleanup、ADB child deadline、精确 endpoint recycle 和 offline recovery 的完整自动测试。
 
-为避免夸大：最近两项 ADB/offline 修复只进行了自动测试和打包重建，没有重新执行真实业务工作流；历史 AALC 在线业务任务也从未被声明为完成，并且现已从生产流程下线。
+为避免夸大：最近的 ADB/offline 修复只进行了自动测试和打包重建，没有重新执行真实业务工作流；历史 AALC 在线业务任务也从未被声明为完成，并且现已从生产流程下线。
 
 ## 已知限制
 
@@ -290,9 +290,9 @@ docs/                    架构、阶段计划、验收证据和手工门禁
 - **依赖外部工具契约。** StarRailCopilot 日志格式、MuMuManager CLI、ADB 行为或 MAA 参数变化都可能需要适配。
 - **第三方任务可能自身卡住。** 历史上 MAA Recruit 曾出现上游页面导航循环；编排器只能通过 Deadline 有界终止，不能修复 MaaCore 的识别/点击逻辑。
 - **MAA update 不是完整事务。** 上游安装器会原地清理并解压资源；中断后通常依赖下次 update 或 MAA GUI 覆盖安装恢复，因此该能力默认关闭。
-- **ADB 恢复是刻意受限的。** 不会 kill/restart 全局 ADB server，也不会扫描或断开其他设备；一次 managed recovery 后仍 offline 会按 start timeout 失败。
+- **ADB 恢复是刻意受限的。** 不会 kill/restart 全局 ADB server，也不会扫描或断开其他设备；精确 endpoint recycle 最多两次、managed restart 最多一次，仍未恢复时会按 start timeout 失败。
 - **取消路径的 cleanup 仍需完善。** 已取得 managed 所有权后的 failure/timeout 会执行有界 shutdown；当前顶层 `CANCELLED` 状态尚未进入同一 failure-cleanup 分支，取消后应人工确认 MuMu 状态。
-- **最新恢复修复尚未真实回归。** ADB 5 秒 child deadline、offline 单次重启和失败通知已通过自动测试并进入打包制品，但没有再次运行真实 workflow。
+- **最新恢复修复尚未真实回归。** ADB 5 秒 child deadline、精确 endpoint recycle、offline 单次重启和失败通知已通过自动测试并进入打包制品，但没有再次运行真实 workflow。
 - **仍有少量格式债务。** 全仓 Ruff lint 与 mypy 通过；`ruff format --check .` 当前仍报告 4 个历史文件，仅为格式差异，不影响测试结果。
 
 ## 详细文档
@@ -301,6 +301,7 @@ README 只保留稳定的产品与工程概览，详细阶段和事故证据在�
 
 - [架构说明](docs/architecture.md)
 - [阶段规划与历史状态](docs/phase-plan.md)
+- [累积维护与修复日志](docs/maintenance-log.md)
 - [全部验收记录](docs/acceptance/)
 - [managed MuMu 生命周期真实验收](docs/acceptance/phase-6b2b3c-managed-mumu-lifecycle.md)
 - [打包默认入口人工确认边界](docs/acceptance/phase-7d4c-manual-shortcut-preflight-cancellation.md)
