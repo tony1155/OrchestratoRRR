@@ -28,6 +28,7 @@ from autogame_orchestrator.diagnostics.packaged_isolated_workflow import (
     execute_isolated_workflow,
     validate_isolated_deadline,
 )
+from autogame_orchestrator.failure_notification import notify_interactive_run_failure
 from autogame_orchestrator.log_writer import JsonlLogWriter
 from autogame_orchestrator.models import (
     ErrorCode,
@@ -175,6 +176,7 @@ def run_workflow(
     else:
         typer.echo(f"Workflow finished: status={result.status} error_code={result.error_code}")
     if result.exit_code != 0:
+        notify_interactive_run_failure(result)
         raise typer.Exit(code=result.exit_code)
 
 

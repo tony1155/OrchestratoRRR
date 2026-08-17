@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ from autogame_orchestrator.runtime.models import (
 _POLL_INTERVAL = 0.3  # readiness 轮询间隔（秒）
 _CommandResult = dict[str, Any]  # _run_manager_command 返回类型
 _CONTROLLED_CONNECT_RETRY_INTERVAL = 3.0  # cooldown between controlled local adb connects
+_OFFLINE_RECOVERY_GRACE_SECONDS = 3.0
 _PROBE_STEP_ALLOWLIST = {
     "tcp_probe",
     "adb_devices",
@@ -51,6 +53,13 @@ _CONNECT_DIAGNOSTIC_KEYS = (
     "adb_connect_error",
     "readiness_rechecked_after_connect",
 )
+
+
+@dataclass(frozen=True)
+class _OfflineRecoveryResult:
+    succeeded: bool
+    status: MumuRuntimeStatus
+    error_code: MumuRuntimeErrorCode
 
 
 def _safe_probe_diagnostics(result: ProbeResult) -> dict[str, JsonValue]:
@@ -330,7 +339,7 @@ class MumuAdapter:
                 cmd_result["status"],
                 cmd_result["error_code"],
                 started_at,
-                changed=False,
+                changed=True,
                 diagnostics=cmd_result["diag"],
             )
 
@@ -603,6 +612,60 @@ class MumuAdapter:
                 "diag": {"error": str(exc)},
             }
 
+    def _offline_recovery_is_allowed(self, result: ProbeResult) -> bool:
+        return (
+            result.error_code == ProbeErrorCode.DEVICE_OFFLINE
+            and result.diagnostics.get("step") == "select_device"
+            and self._adb_host == "127.0.0.1"
+            and self._adb_serial == f"{self._adb_host}:{self._adb_port}"
+        )
+
+    def _recover_offline_transport(
+        self,
+        deadline: Deadline,
+        cancel: CancellationToken | None,
+    ) -> _OfflineRecoveryResult:
+        """Restart one managed instance without creating a new time budget."""
+        stop_command = self._run_manager_command(
+            self._stop_args,
+            deadline,
+            cancel,
+            MumuRuntimeErrorCode.START_TIMEOUT,
+        )
+        if not stop_command["ok"]:
+            return _OfflineRecoveryResult(
+                False,
+                stop_command["status"],
+                stop_command["error_code"],
+            )
+
+        stopped = self._wait_stopped(time.monotonic(), deadline, cancel)
+        if stopped.status != MumuRuntimeStatus.STOPPED:
+            error_code = (
+                MumuRuntimeErrorCode.START_TIMEOUT
+                if stopped.status == MumuRuntimeStatus.TIMEOUT
+                else stopped.error_code
+            )
+            return _OfflineRecoveryResult(False, stopped.status, error_code)
+
+        start_command = self._run_manager_command(
+            self._start_args,
+            deadline,
+            cancel,
+            MumuRuntimeErrorCode.START_TIMEOUT,
+        )
+        if not start_command["ok"]:
+            return _OfflineRecoveryResult(
+                False,
+                start_command["status"],
+                start_command["error_code"],
+            )
+        return _OfflineRecoveryResult(
+            True,
+            MumuRuntimeStatus.STARTED,
+            MumuRuntimeErrorCode.OK,
+        )
+
     def _wait_readiness(
         self,
         action: MumuAction,
@@ -619,9 +682,11 @@ class MumuAdapter:
         必须经一次受控 ``adb connect`` 才能出现在设备列表中；仅靠只读探测会永远等不到就绪。
         """
         last_probe_result: ProbeResult | None = None
-        connect_diagnostics: dict[str, JsonValue] = {}
+        wait_diagnostics: dict[str, JsonValue] = {}
         next_controlled_connect_at = 0.0
         connect_established = False
+        offline_since: float | None = None
+        offline_recovery_attempted = False
 
         while not deadline.expired:
             if cancel is not None and cancel.is_cancelled:
@@ -631,7 +696,7 @@ class MumuAdapter:
                     MumuRuntimeErrorCode.CANCELLED,
                     started_at,
                     changed=changed,
-                    diagnostics=_safe_wait_diagnostics(last_probe_result, connect_diagnostics),
+                    diagnostics=_safe_wait_diagnostics(last_probe_result, wait_diagnostics),
                 )
 
             probe = self._create_probe()
@@ -641,9 +706,9 @@ class MumuAdapter:
                 result = probe.ensure_ready(self._adb_host, self._adb_port, self._adb_serial, deadline, cancel)
                 safe_result = _safe_probe_diagnostics(result)
                 if safe_result.get("adb_connect_attempted") is True:
-                    connect_diagnostics = {
-                        key: safe_result[key] for key in _CONNECT_DIAGNOSTIC_KEYS if key in safe_result
-                    }
+                    wait_diagnostics.update(
+                        {key: safe_result[key] for key in _CONNECT_DIAGNOSTIC_KEYS if key in safe_result}
+                    )
                     connect_status = safe_result.get("adb_connect_status")
                     connect_established = connect_status in {"connected", "already_connected"} and not (
                         safe_result.get("probe_error") == ProbeErrorCode.DEVICE_NOT_FOUND.value
@@ -660,8 +725,50 @@ class MumuAdapter:
                     MumuRuntimeErrorCode.OK,
                     started_at,
                     changed=changed,
-                    diagnostics=_safe_wait_diagnostics(last_probe_result, connect_diagnostics),
+                    diagnostics=_safe_wait_diagnostics(last_probe_result, wait_diagnostics),
                 )
+
+            now = time.monotonic()
+            if self._offline_recovery_is_allowed(result):
+                if offline_since is None:
+                    offline_since = now
+                    if not offline_recovery_attempted:
+                        wait_diagnostics.update(
+                            {
+                                "offline_recovery_attempted": False,
+                                "offline_recovery_count": 0,
+                            }
+                        )
+                elif not offline_recovery_attempted and now - offline_since >= _OFFLINE_RECOVERY_GRACE_SECONDS:
+                    offline_recovery_attempted = True
+                    changed = True
+                    wait_diagnostics.update(
+                        {
+                            "offline_recovery_attempted": True,
+                            "offline_recovery_count": 1,
+                            "offline_recovery_status": "started",
+                        }
+                    )
+                    recovery = self._recover_offline_transport(deadline, cancel)
+                    wait_diagnostics["offline_recovery_status"] = "completed" if recovery.succeeded else "failed"
+                    if not recovery.succeeded:
+                        return MumuRuntimeResult.from_monotonic(
+                            action,
+                            recovery.status,
+                            recovery.error_code,
+                            started_at,
+                            changed=True,
+                            diagnostics=_safe_wait_diagnostics(
+                                last_probe_result,
+                                wait_diagnostics,
+                            ),
+                        )
+                    offline_since = None
+                    connect_established = False
+                    next_controlled_connect_at = 0.0
+                    continue
+            else:
+                offline_since = None
 
             wait_sec = min(_POLL_INTERVAL, deadline.remaining_seconds)
             if cancel is not None:
@@ -673,7 +780,7 @@ class MumuAdapter:
                         MumuRuntimeErrorCode.CANCELLED,
                         started_at,
                         changed=changed,
-                        diagnostics=_safe_wait_diagnostics(last_probe_result, connect_diagnostics),
+                        diagnostics=_safe_wait_diagnostics(last_probe_result, wait_diagnostics),
                     )
             else:
                 time.sleep(wait_sec)
@@ -684,7 +791,7 @@ class MumuAdapter:
             MumuRuntimeErrorCode.START_TIMEOUT,
             started_at,
             changed=changed,
-            diagnostics=_safe_wait_diagnostics(last_probe_result, connect_diagnostics),
+            diagnostics=_safe_wait_diagnostics(last_probe_result, wait_diagnostics),
         )
 
     def _wait_stopped(

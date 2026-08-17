@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
 from autogame_orchestrator.maa_sync.models import MAASyncStatus
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, StageName, StageReport
+from autogame_orchestrator.runtime.models import MumuRuntimeStatus
 from autogame_orchestrator.workflow.contracts import StageExecutionContext
 from autogame_orchestrator.workflow.production.ports import (
     MAARunPort,
@@ -244,7 +246,22 @@ class ProductionStageExecutor:
             result = mumu.ensure_external_ready(context.deadline, context.cancel)
         else:
             result = mumu.status(context.deadline, context.cancel)
-        return project_mumu(
+        if managed:
+            if self._stage in {StageName.ENSURE_MUMU_RUNNING, StageName.START_MUMU} and (
+                result.changed
+                or result.status
+                in {
+                    MumuRuntimeStatus.STARTED,
+                    MumuRuntimeStatus.RESTARTED,
+                }
+            ):
+                self._state.mumu_managed_owned = True
+            if self._stage in {StageName.STOP_MUMU, StageName.SHUTDOWN_MUMU} and (
+                result.status == MumuRuntimeStatus.STOPPED
+            ):
+                self._state.mumu_managed_owned = False
+
+        report = project_mumu(
             self._stage,
             result,
             lifecycle_mode=self._config.mumu.lifecycle_mode,
@@ -256,6 +273,12 @@ class ProductionStageExecutor:
                 StageName.SHUTDOWN_MUMU,
             },
         )
+        if context.failure_cleanup:
+            report = replace(
+                report,
+                diagnostics={**dict(report.diagnostics), "failure_cleanup": True},
+            )
+        return report
 
     def _verify_starrail_postcondition(self) -> StageReport:
         cleaned = self._state.starrail_owned_process_cleaned

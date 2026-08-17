@@ -122,3 +122,35 @@ def test_connect_projection_keeps_only_fixed_fields() -> None:
         "adb_connect_error": "ADB_CONNECT_FAILED",
         "readiness_rechecked_after_connect": False,
     }
+
+
+def test_offline_recovery_projection_keeps_only_bounded_safe_fields() -> None:
+    report = project_mumu(
+        StageName.ENSURE_MUMU_RUNNING,
+        _result(
+            {
+                "probe_status": "not_ready",
+                "probe_error": "DEVICE_OFFLINE",
+                "probe_step": "select_device",
+                "offline_recovery_attempted": True,
+                "offline_recovery_count": 1,
+                "offline_recovery_status": "completed",
+                "serial": "private-serial",
+                "stdout": "private-stdout",
+                "stderr": "private-stderr",
+            }
+        ),
+    )
+
+    assert report.diagnostics == {
+        "source_error_code": "READINESS_FAILED",
+        "action": "status",
+        "changed": False,
+        "lifecycle_mode": "managed",
+        "probe_status": "not_ready",
+        "probe_error": "DEVICE_OFFLINE",
+        "probe_step": "select_device",
+        "offline_recovery_attempted": True,
+        "offline_recovery_count": 1,
+        "offline_recovery_status": "completed",
+    }

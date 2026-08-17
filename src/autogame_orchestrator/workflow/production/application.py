@@ -8,10 +8,10 @@ from pathlib import Path
 from types import TracebackType
 from typing import Protocol, Self
 
-from autogame_orchestrator.config_model import AppConfig
+from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
 from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.log_writer import JsonlLogWriter
-from autogame_orchestrator.models import JsonValue, RunReport, WorkflowMode
+from autogame_orchestrator.models import JsonValue, RunReport, StageName, WorkflowMode
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.workflow.contracts import ElevationGateway, ReportSink
@@ -111,6 +111,11 @@ class _LoggedProductionRunner:
                 report_sink,
                 event_sink=emit,
                 mode=self._dependencies.workflow_mode,
+                failure_cleanup_stage=(
+                    StageName.SHUTDOWN_MUMU if self._config.mumu.lifecycle_mode == MumuLifecycleMode.MANAGED else None
+                ),
+                failure_cleanup_required=executor_factory.failure_cleanup_required,
+                failure_cleanup_timeout_seconds=self._config.mumu.stop_timeout_seconds,
             )
             return runner.run(deadline=deadline, cancel=cancel, run_id=run_id)
 

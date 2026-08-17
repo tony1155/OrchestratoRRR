@@ -10,3 +10,4 @@ class ProductionWorkflowState:
     starrail_run_reached: bool = False
     starrail_completed: bool = False
     starrail_owned_process_cleaned: bool = False
+    mumu_managed_owned: bool = False

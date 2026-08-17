@@ -235,8 +235,11 @@ def test_external_readiness_failure_is_fail_fast(
     report, _ = _run(_external_config(tmp_path), runtime_factories)
     assert (report.stages[3].outcome, report.stages[3].error_code) == (outcome, error_code)
     assert mumu.calls == 1
+    assert (mumu.start_calls, mumu.stop_calls) == (0, 0)
     assert (starrail.calls, maa.calls, aalc.calls) == (0, 0, 0)
     assert all(stage.outcome == OutcomeKind.SKIPPED for stage in report.stages[4:-1])
+    assert StageName.SHUTDOWN_MUMU not in {stage.stage for stage in report.stages}
+    assert "failure_cleanup_attempted" not in report.diagnostics
 
 
 def test_external_starrail_failure_never_runs_later_adapter(tmp_path: Path) -> None:

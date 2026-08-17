@@ -24,6 +24,7 @@ _PROBE_STEP_ALLOWLIST = {
 _PROBE_STATUS_ALLOWLIST = {item.value for item in ProbeStatus}
 _PROBE_ERROR_ALLOWLIST = {item.value for item in ProbeErrorCode}
 _ADB_CONNECT_STATUS_ALLOWLIST = {"not_attempted", "connected", "already_connected", "failed"}
+_OFFLINE_RECOVERY_STATUS_ALLOWLIST = {"started", "completed", "failed"}
 
 
 def _outcome(
@@ -150,6 +151,19 @@ def project_mumu(
     rechecked = result.diagnostics.get("readiness_rechecked_after_connect")
     if isinstance(rechecked, bool):
         diagnostics["readiness_rechecked_after_connect"] = rechecked
+    offline_recovery_attempted = result.diagnostics.get("offline_recovery_attempted")
+    if isinstance(offline_recovery_attempted, bool):
+        diagnostics["offline_recovery_attempted"] = offline_recovery_attempted
+    offline_recovery_count = result.diagnostics.get("offline_recovery_count")
+    if (
+        isinstance(offline_recovery_count, int)
+        and not isinstance(offline_recovery_count, bool)
+        and offline_recovery_count in {0, 1}
+    ):
+        diagnostics["offline_recovery_count"] = offline_recovery_count
+    offline_recovery_status = result.diagnostics.get("offline_recovery_status")
+    if isinstance(offline_recovery_status, str) and offline_recovery_status in _OFFLINE_RECOVERY_STATUS_ALLOWLIST:
+        diagnostics["offline_recovery_status"] = offline_recovery_status
     if result.status == MumuRuntimeStatus.TIMEOUT:
         outcome, code = OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT
     elif result.status == MumuRuntimeStatus.CANCELLED:

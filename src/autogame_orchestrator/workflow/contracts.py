@@ -20,6 +20,7 @@ class StageExecutionContext:
     stage: StageName
     deadline: Deadline | None
     cancel: CancellationToken
+    failure_cleanup: bool = False
 
 
 class StageExecutor(Protocol):

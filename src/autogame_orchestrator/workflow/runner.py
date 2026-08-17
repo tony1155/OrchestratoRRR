@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -74,6 +75,9 @@ class WorkflowRunner:
         *,
         event_sink: WorkflowEventSink | None = None,
         mode: WorkflowMode | str = WorkflowMode.FAKE,
+        failure_cleanup_stage: StageName | None = None,
+        failure_cleanup_required: Callable[[], bool] | None = None,
+        failure_cleanup_timeout_seconds: float | None = None,
     ) -> None:
         if mode not in {item.value for item in WorkflowMode}:
             raise ValueError("工作流报告 mode 不受支持")
@@ -82,6 +86,9 @@ class WorkflowRunner:
         self._report_sink = report_sink
         self._event_sink = event_sink
         self._mode = WorkflowMode(mode)
+        self._failure_cleanup_stage = failure_cleanup_stage
+        self._failure_cleanup_required = failure_cleanup_required
+        self._failure_cleanup_timeout_seconds = failure_cleanup_timeout_seconds
 
     def _emit(self, report: StageReport, index: int) -> None:
         if self._event_sink is None:
@@ -116,16 +123,26 @@ class WorkflowRunner:
         top_status = RunStatus.SUCCESS
         top_error = ErrorCode.OK
         stopped = False
+        cleanup_attempted = False
+        cleanup_outcome: OutcomeKind | None = None
+        cleanup_error_code: ErrorCode | None = None
 
         for index, stage in enumerate(business_stages):
-            if stopped:
+            is_failure_cleanup = (
+                stopped
+                and top_status == RunStatus.FAILURE
+                and stage == self._failure_cleanup_stage
+                and self._failure_cleanup_required is not None
+                and self._failure_cleanup_required()
+            )
+            if stopped and not is_failure_cleanup:
                 report = _instant_report(stage, OutcomeKind.SKIPPED, ErrorCode.SKIPPED)
             elif token.is_cancelled:
                 top_status = RunStatus.CANCELLED
                 top_error = ErrorCode.WORKFLOW_CANCELLED
                 stopped = True
                 report = _instant_report(stage, OutcomeKind.SKIPPED, ErrorCode.SKIPPED)
-            elif deadline is not None and deadline.expired:
+            elif not is_failure_cleanup and deadline is not None and deadline.expired:
                 top_status = RunStatus.FAILURE
                 top_error = ErrorCode.WORKFLOW_STAGE_TIMEOUT
                 stopped = True
@@ -144,20 +161,30 @@ class WorkflowRunner:
                         OutcomeKind.FAILURE,
                         ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED,
                     )
-                    top_status = RunStatus.FAILURE
-                    top_error = ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED
-                    stopped = True
+                    if not is_failure_cleanup:
+                        top_status = RunStatus.FAILURE
+                        top_error = ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED
+                        stopped = True
                 except Exception:
                     report = _instant_report(stage, OutcomeKind.FAILURE, ErrorCode.INTERNAL_ERROR)
-                    top_status = RunStatus.FAILURE
-                    top_error = ErrorCode.INTERNAL_ERROR
-                    stopped = True
+                    if not is_failure_cleanup:
+                        top_status = RunStatus.FAILURE
+                        top_error = ErrorCode.INTERNAL_ERROR
+                        stopped = True
                 else:
+                    context_deadline = deadline
+                    context_cancel = token
+                    if is_failure_cleanup:
+                        cleanup_attempted = True
+                        context_cancel = CancellationToken()
+                        if self._failure_cleanup_timeout_seconds is not None:
+                            context_deadline = Deadline.after(self._failure_cleanup_timeout_seconds)
                     context = StageExecutionContext(
                         run_id=workflow_run_id,
                         stage=stage,
-                        deadline=deadline,
-                        cancel=token,
+                        deadline=context_deadline,
+                        cancel=context_cancel,
+                        failure_cleanup=is_failure_cleanup,
                     )
                     try:
                         candidate = executor.execute(context)
@@ -172,7 +199,7 @@ class WorkflowRunner:
                     else:
                         report = candidate
 
-                    if report.outcome != OutcomeKind.SUCCESS:
+                    if report.outcome != OutcomeKind.SUCCESS and not is_failure_cleanup:
                         stopped = True
                         if report.outcome == OutcomeKind.CANCELLED:
                             top_status = RunStatus.CANCELLED
@@ -190,12 +217,29 @@ class WorkflowRunner:
                             top_status = RunStatus.FAILURE
                             top_error = ErrorCode.WORKFLOW_STAGE_FAILED
 
+            if is_failure_cleanup:
+                cleanup_attempted = True
+                cleanup_outcome = report.outcome
+                cleanup_error_code = report.error_code
+
             reports.append(report)
             self._emit(report, index)
 
         write_report = _instant_report(StageName.WRITE_RUN_REPORT, OutcomeKind.SUCCESS, ErrorCode.OK)
         reports.append(write_report)
         finished_at = datetime.now(UTC)
+        run_diagnostics: dict[str, str | int | bool] = {
+            "requires_administrator": self._plan.requires_administrator,
+            "stage_count": len(self._plan.stages),
+        }
+        if cleanup_attempted and cleanup_outcome is not None and cleanup_error_code is not None:
+            run_diagnostics.update(
+                {
+                    "failure_cleanup_attempted": True,
+                    "failure_cleanup_outcome": cleanup_outcome.value,
+                    "failure_cleanup_error_code": cleanup_error_code.value,
+                }
+            )
         candidate_report = RunReport(
             schema_version=1,
             run_id=workflow_run_id,
@@ -207,10 +251,7 @@ class WorkflowRunner:
             finished_at=finished_at,
             duration_ms=max(0, int((time.monotonic() - started_monotonic) * 1000)),
             stages=tuple(reports),
-            diagnostics={
-                "requires_administrator": self._plan.requires_administrator,
-                "stage_count": len(self._plan.stages),
-            },
+            diagnostics=run_diagnostics,
         )
 
         try:
@@ -222,10 +263,7 @@ class WorkflowRunner:
                 error_code=ErrorCode.RUN_REPORT_WRITE_ERROR,
             )
             reports[-1] = failed_write
-            diagnostics: dict[str, str | int | bool] = {
-                "requires_administrator": self._plan.requires_administrator,
-                "stage_count": len(self._plan.stages),
-            }
+            diagnostics = dict(run_diagnostics)
             if top_error != ErrorCode.OK:
                 diagnostics["source_error_code"] = top_error.value
             final_report = replace(

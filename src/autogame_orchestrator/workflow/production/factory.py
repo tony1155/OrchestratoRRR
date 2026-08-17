@@ -76,6 +76,9 @@ class ProductionExecutorFactory:
             maa_update=self._runtime.maa_update,
         )
 
+    def failure_cleanup_required(self) -> bool:
+        return self.state.mumu_managed_owned
+
 
 def build_production_executor_factory(
     config: AppConfig,

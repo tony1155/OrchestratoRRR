@@ -143,6 +143,48 @@ class _StoppedProbe:
         )
 
 
+class _OfflineProbe:
+    def __init__(self) -> None:
+        self.ready = False
+        self.ensure_calls = 0
+        self.probe_calls = 0
+        self.deadlines: list[Deadline] = []
+
+    def _result(self, deadline: Deadline) -> ProbeResult:
+        self.deadlines.append(deadline)
+        if self.ready:
+            return ProbeResult.ready("mumu_readiness")
+        return ProbeResult.from_monotonic(
+            "mumu_readiness",
+            ProbeStatus.NOT_READY,
+            ProbeErrorCode.DEVICE_OFFLINE,
+            time.monotonic(),
+            {"step": "select_device"},
+        )
+
+    def ensure_ready(
+        self,
+        host: str,
+        port: int,
+        serial: str | None,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        self.ensure_calls += 1
+        return self._result(deadline)
+
+    def probe(
+        self,
+        host: str,
+        port: int,
+        serial: str | None,
+        deadline: Deadline,
+        cancel: CancellationToken | None = None,
+    ) -> ProbeResult:
+        self.probe_calls += 1
+        return self._result(deadline)
+
+
 class _ConnectOnceThenMissingProbe:
     def __init__(self) -> None:
         self.ensure_calls = 0
@@ -259,6 +301,16 @@ def _missing_device() -> ProbeResult:
         "mumu_readiness",
         ProbeStatus.UNAVAILABLE,
         ProbeErrorCode.DEVICE_NOT_FOUND,
+        time.monotonic(),
+        {"step": "select_device"},
+    )
+
+
+def _offline_device() -> ProbeResult:
+    return ProbeResult.from_monotonic(
+        "mumu_readiness",
+        ProbeStatus.NOT_READY,
+        ProbeErrorCode.DEVICE_OFFLINE,
         time.monotonic(),
         {"step": "select_device"},
     )
@@ -627,13 +679,159 @@ def test_shorter_parent_deadline_takes_priority(tmp_path: Path) -> None:
     assert max(probe.remaining_seen) <= 0.06
 
 
+def test_transient_offline_recovers_without_managed_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._OFFLINE_RECOVERY_GRACE_SECONDS", 0.05)
+    adapter = _adapter(tmp_path, start_timeout=0.2)
+    probe = _ScriptedReadinessProbe(
+        (_offline_device(), ProbeResult.ready("mumu_readiness")),
+        ProbeResult.ready("mumu_readiness"),
+    )
+
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.NOT_READY, MumuRuntimeErrorCode.READINESS_FAILED),
+        ),
+        patch.object(adapter, "_run_manager_command") as manager,
+        patch.object(adapter, "_create_probe", return_value=probe),
+    ):
+        result = adapter.start(Deadline.after(7200.0))
+
+    assert result.status == MumuRuntimeStatus.STARTED
+    assert result.changed is False
+    assert result.diagnostics["offline_recovery_attempted"] is False
+    assert result.diagnostics["offline_recovery_count"] == 0
+    manager.assert_not_called()
+
+
+def test_persistent_offline_restarts_managed_instance_once_then_becomes_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._OFFLINE_RECOVERY_GRACE_SECONDS", 0.008)
+    adapter = _adapter(tmp_path, start_timeout=0.2)
+    probe = _OfflineProbe()
+    manager_deadlines: list[Deadline] = []
+    stop_deadlines: list[Deadline] = []
+
+    def manager_success(arguments, deadline, cancel, timeout_code):
+        manager_deadlines.append(deadline)
+        if len(manager_deadlines) == 2:
+            probe.ready = True
+        return _manager_success()
+
+    def stopped(started_at, deadline, cancel):
+        stop_deadlines.append(deadline)
+        return MumuRuntimeResult.from_monotonic(
+            MumuAction.STOP,
+            MumuRuntimeStatus.STOPPED,
+            MumuRuntimeErrorCode.OK,
+            started_at,
+            changed=True,
+        )
+
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.NOT_READY, MumuRuntimeErrorCode.READINESS_FAILED),
+        ),
+        patch.object(adapter, "_run_manager_command", side_effect=manager_success),
+        patch.object(adapter, "_wait_stopped", side_effect=stopped),
+        patch.object(adapter, "_create_probe", return_value=probe),
+    ):
+        result = adapter.start(Deadline.after(7200.0))
+
+    assert result.status == MumuRuntimeStatus.STARTED
+    assert result.changed is True
+    assert result.diagnostics["offline_recovery_attempted"] is True
+    assert result.diagnostics["offline_recovery_count"] == 1
+    assert result.diagnostics["offline_recovery_status"] == "completed"
+    assert len(manager_deadlines) == 2
+    assert len(stop_deadlines) == 1
+
+
+def test_persistent_offline_restarts_once_then_times_out_without_budget_refresh(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._OFFLINE_RECOVERY_GRACE_SECONDS", 0.01)
+    adapter = _adapter(tmp_path, start_timeout=0.2)
+    probe = _OfflineProbe()
+    manager_deadlines: list[Deadline] = []
+    stop_deadlines: list[Deadline] = []
+    remaining_seen: list[float] = []
+
+    def manager_success(arguments, deadline, cancel, timeout_code):
+        manager_deadlines.append(deadline)
+        remaining_seen.append(deadline.remaining_seconds)
+        return _manager_success()
+
+    def stopped(started_at, deadline, cancel):
+        stop_deadlines.append(deadline)
+        remaining_seen.append(deadline.remaining_seconds)
+        return MumuRuntimeResult.from_monotonic(
+            MumuAction.STOP,
+            MumuRuntimeStatus.STOPPED,
+            MumuRuntimeErrorCode.OK,
+            started_at,
+            changed=True,
+        )
+
+    with (
+        patch.object(
+            adapter,
+            "status",
+            return_value=_status(MumuRuntimeStatus.NOT_READY, MumuRuntimeErrorCode.READINESS_FAILED),
+        ),
+        patch.object(adapter, "_run_manager_command", side_effect=manager_success),
+        patch.object(adapter, "_wait_stopped", side_effect=stopped),
+        patch.object(adapter, "_create_probe", return_value=probe),
+    ):
+        result = adapter.start(Deadline.after(7200.0))
+
+    shared_deadlines = [*probe.deadlines, *manager_deadlines, *stop_deadlines]
+    assert result.status == MumuRuntimeStatus.TIMEOUT
+    assert result.error_code == MumuRuntimeErrorCode.START_TIMEOUT
+    assert result.changed is True
+    assert result.diagnostics["offline_recovery_count"] == 1
+    assert len(manager_deadlines) == 2
+    assert len(stop_deadlines) == 1
+    assert len({id(item) for item in shared_deadlines}) == 1
+    assert remaining_seen[0] >= remaining_seen[-1]
+
+
+def test_external_offline_never_enters_managed_recovery(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    probe = _ScriptedReadinessProbe((_offline_device(),), _offline_device())
+    with (
+        patch.object(adapter, "_create_probe", return_value=probe),
+        patch.object(adapter, "_recover_offline_transport") as recovery,
+        patch.object(adapter, "_run_manager_command") as manager,
+    ):
+        result = adapter.ensure_external_ready(Deadline.after(30.0))
+
+    assert result.status == MumuRuntimeStatus.NOT_READY
+    recovery.assert_not_called()
+    manager.assert_not_called()
+
+
 def test_controlled_connect_retries_after_early_connected_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("autogame_orchestrator.runtime.mumu._POLL_INTERVAL", 0.002)
-    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._CONTROLLED_CONNECT_RETRY_INTERVAL", 0.01)
-    adapter = _adapter(tmp_path, start_timeout=0.08)
+    monkeypatch.setattr("autogame_orchestrator.runtime.mumu._CONTROLLED_CONNECT_RETRY_INTERVAL", 0.05)
+    adapter = _adapter(tmp_path, start_timeout=0.2)
     probe = _ScriptedReadinessProbe(
         (
             _connect_attempt(

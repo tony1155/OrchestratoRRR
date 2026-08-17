@@ -159,7 +159,7 @@ def aalc_result(status: AALCRunStatus = AALCRunStatus.COMPLETED) -> AALCRunResul
     return AALCRunResult(status, code, mode, NOW, LATER, 2.0, 3, 0, None)
 
 
-def mumu_result(status: MumuRuntimeStatus) -> MumuRuntimeResult:
+def mumu_result(status: MumuRuntimeStatus, *, changed: bool = False) -> MumuRuntimeResult:
     success = status in {
         MumuRuntimeStatus.READY,
         MumuRuntimeStatus.STOPPED,
@@ -176,7 +176,7 @@ def mumu_result(status: MumuRuntimeStatus) -> MumuRuntimeResult:
         NOW,
         LATER,
         2000,
-        False,
+        changed,
         {"executable": "E:\\private\\mumu.exe"},
     )
 

@@ -235,6 +235,44 @@ def test_failure_console_does_not_print_sensitive_values(monkeypatch: pytest.Mon
         assert secret not in result.stdout
 
 
+def test_failure_notification_runs_after_execution_and_preserves_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    def fake_execute(request, *, cancel):
+        events.append("report_written")
+        return RunCommandResult(
+            4,
+            "failure",
+            "WORKFLOW_STAGE_TIMEOUT",
+            "safe-run-id",
+        )
+
+    def fake_notify(result):
+        assert result.exit_code == 4
+        events.append("dialog")
+        return True
+
+    monkeypatch.setattr(cli, "execute_run_request", fake_execute)
+    monkeypatch.setattr(cli, "notify_interactive_run_failure", fake_notify)
+    result = runner.invoke(
+        cli.app,
+        [
+            "run",
+            "--config",
+            "safe-reference.toml",
+            "--deadline-seconds",
+            "30",
+            "--confirm-real-execution",
+            RUN_CONFIRMATION,
+        ],
+    )
+
+    assert result.exit_code == 4
+    assert events == ["report_written", "dialog"]
+
+
 def test_validate_log_does_not_record_config_path(tmp_path: Path) -> None:
     path = write_run_config(tmp_path)
     result = runner.invoke(cli.app, ["validate", "--config", str(path)])

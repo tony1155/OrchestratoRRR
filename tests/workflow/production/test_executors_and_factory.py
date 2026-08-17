@@ -11,7 +11,9 @@ from autogame_orchestrator.config_model import AppConfig, MuMuConfig, MumuLifecy
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, RunStatus, StageName
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
+from autogame_orchestrator.runtime.maa_models import MAARunStatus
 from autogame_orchestrator.runtime.models import MumuRuntimeStatus
+from autogame_orchestrator.runtime.starrail_models import StarRailRunStatus
 from autogame_orchestrator.workflow.contracts import StageExecutionContext
 from autogame_orchestrator.workflow.plan import build_execution_plan
 from autogame_orchestrator.workflow.production.factory import build_production_executor_factory
@@ -76,6 +78,22 @@ class SequencedManagedMumu(FakeMumuPort):
     def stop(self, deadline, cancel=None):
         self.events.append("stop")
         self.result = self._stop_results.pop(0)
+        return super().stop(deadline, cancel)
+
+
+class PartialStartFailureMumu(FakeMumuPort):
+    def __init__(self) -> None:
+        super().__init__(mumu_result(MumuRuntimeStatus.TIMEOUT, changed=True))
+        self.events: list[str] = []
+
+    def start(self, deadline=None, cancel=None):
+        self.events.append("start")
+        self.result = mumu_result(MumuRuntimeStatus.TIMEOUT, changed=True)
+        return super().start(deadline, cancel)
+
+    def stop(self, deadline=None, cancel=None):
+        self.events.append("stop")
+        self.result = mumu_result(MumuRuntimeStatus.STOPPED, changed=True)
         return super().stop(deadline, cancel)
 
 
@@ -250,6 +268,7 @@ def test_starrail_success_updates_only_safe_state() -> None:
         "starrail_run_reached",
         "starrail_completed",
         "starrail_owned_process_cleaned",
+        "mumu_managed_owned",
     }
 
 
@@ -304,7 +323,14 @@ def test_managed_success_keeps_final_shutdown_after_maa(tmp_path: Path) -> None:
     mumu = SequencedManagedMumu()
     runtime_factories, counts = factories(mumu=mumu)
     factory = build_production_executor_factory(config, runtime_factories=runtime_factories)
-    report = WorkflowRunner(build_execution_plan(config), factory, MemorySink()).run(deadline=Deadline.after(30))
+    report = WorkflowRunner(
+        build_execution_plan(config),
+        factory,
+        MemorySink(),
+        failure_cleanup_stage=StageName.SHUTDOWN_MUMU,
+        failure_cleanup_required=factory.failure_cleanup_required,
+        failure_cleanup_timeout_seconds=config.mumu.stop_timeout_seconds,
+    ).run(deadline=Deadline.after(30))
 
     stages = tuple(item.stage for item in report.stages)
     assert report.status == RunStatus.SUCCESS
@@ -317,6 +343,111 @@ def test_managed_success_keeps_final_shutdown_after_maa(tmp_path: Path) -> None:
     assert mumu.stop_calls == 2
     assert mumu.events[-1] == "stop"
     assert counts["aalc"] == 0
+    shutdown = next(item for item in report.stages if item.stage == StageName.SHUTDOWN_MUMU)
+    assert "failure_cleanup" not in shutdown.diagnostics
+    assert "failure_cleanup_attempted" not in report.diagnostics
+
+
+@pytest.mark.parametrize(
+    ("failed_stage", "expected_stop_calls"),
+    [
+        (StageName.RUN_STARRAIL, 1),
+        (StageName.RUN_MAA, 2),
+    ],
+)
+def test_managed_upstream_failure_runs_bounded_cleanup_once(
+    tmp_path: Path,
+    failed_stage: StageName,
+    expected_stop_calls: int,
+) -> None:
+    config = valid_config(tmp_path)
+    mumu = SequencedManagedMumu()
+    starrail = FakeRunPort(
+        starrail_result(
+            StarRailRunStatus.FAILED if failed_stage == StageName.RUN_STARRAIL else StarRailRunStatus.COMPLETED
+        )
+    )
+    maa = FakeRunPort(maa_result(MAARunStatus.FAILED if failed_stage == StageName.RUN_MAA else MAARunStatus.COMPLETED))
+    runtime_factories, _ = factories(starrail=starrail, maa=maa, mumu=mumu)
+    factory = build_production_executor_factory(config, runtime_factories=runtime_factories)
+
+    report = WorkflowRunner(
+        build_execution_plan(config),
+        factory,
+        MemorySink(),
+        failure_cleanup_stage=StageName.SHUTDOWN_MUMU,
+        failure_cleanup_required=factory.failure_cleanup_required,
+        failure_cleanup_timeout_seconds=config.mumu.stop_timeout_seconds,
+    ).run(deadline=Deadline.after(30))
+
+    original = next(item for item in report.stages if item.stage == failed_stage)
+    shutdown = next(item for item in report.stages if item.stage == StageName.SHUTDOWN_MUMU)
+    assert report.status == RunStatus.FAILURE
+    assert report.error_code == ErrorCode.WORKFLOW_STAGE_FAILED
+    assert original.outcome == OutcomeKind.FAILURE
+    assert shutdown.outcome == OutcomeKind.SUCCESS
+    assert shutdown.diagnostics["failure_cleanup"] is True
+    assert mumu.stop_calls == expected_stop_calls
+    assert report.diagnostics["failure_cleanup_attempted"] is True
+    assert report.diagnostics["failure_cleanup_outcome"] == "success"
+    assert report.diagnostics["failure_cleanup_error_code"] == "OK"
+
+
+def test_partial_managed_start_failure_is_cleaned_up(tmp_path: Path) -> None:
+    config = valid_config(tmp_path)
+    mumu = PartialStartFailureMumu()
+    runtime_factories, _ = factories(mumu=mumu)
+    factory = build_production_executor_factory(config, runtime_factories=runtime_factories)
+
+    parent_deadline = Deadline.after(30)
+    report = WorkflowRunner(
+        build_execution_plan(config),
+        factory,
+        MemorySink(),
+        failure_cleanup_stage=StageName.SHUTDOWN_MUMU,
+        failure_cleanup_required=factory.failure_cleanup_required,
+        failure_cleanup_timeout_seconds=config.mumu.stop_timeout_seconds,
+    ).run(deadline=parent_deadline)
+
+    ensure = next(item for item in report.stages if item.stage == StageName.ENSURE_MUMU_RUNNING)
+    shutdown = next(item for item in report.stages if item.stage == StageName.SHUTDOWN_MUMU)
+    assert ensure.outcome == OutcomeKind.TIMEOUT
+    assert report.error_code == ErrorCode.WORKFLOW_STAGE_TIMEOUT
+    assert shutdown.outcome == OutcomeKind.SUCCESS
+    assert shutdown.diagnostics["failure_cleanup"] is True
+    assert mumu.events == ["start", "stop"]
+    assert mumu.deadline is not None
+    assert mumu.deadline is not parent_deadline
+    assert 0 < mumu.deadline.remaining_seconds <= config.mumu.stop_timeout_seconds
+
+
+def test_cleanup_failure_is_secondary_and_preserves_original_error(tmp_path: Path) -> None:
+    config = valid_config(tmp_path)
+    mumu = SequencedManagedMumu()
+    mumu._stop_results = [mumu_result(MumuRuntimeStatus.TIMEOUT)]  # noqa: SLF001
+    starrail = FakeRunPort(starrail_result(StarRailRunStatus.FAILED))
+    runtime_factories, _ = factories(starrail=starrail, mumu=mumu)
+    factory = build_production_executor_factory(config, runtime_factories=runtime_factories)
+
+    report = WorkflowRunner(
+        build_execution_plan(config),
+        factory,
+        MemorySink(),
+        failure_cleanup_stage=StageName.SHUTDOWN_MUMU,
+        failure_cleanup_required=factory.failure_cleanup_required,
+        failure_cleanup_timeout_seconds=config.mumu.stop_timeout_seconds,
+    ).run(deadline=Deadline.after(30))
+
+    original = next(item for item in report.stages if item.stage == StageName.RUN_STARRAIL)
+    shutdown = next(item for item in report.stages if item.stage == StageName.SHUTDOWN_MUMU)
+    assert original.outcome == OutcomeKind.FAILURE
+    assert shutdown.outcome == OutcomeKind.TIMEOUT
+    assert shutdown.error_code == ErrorCode.WORKFLOW_STAGE_TIMEOUT
+    assert report.status == RunStatus.FAILURE
+    assert report.error_code == ErrorCode.WORKFLOW_STAGE_FAILED
+    assert report.diagnostics["failure_cleanup_outcome"] == "timeout"
+    assert report.diagnostics["failure_cleanup_error_code"] == "WORKFLOW_STAGE_TIMEOUT"
+    assert mumu.stop_calls == 1
 
 
 def test_runtime_is_constructed_at_most_once_per_factory() -> None:
