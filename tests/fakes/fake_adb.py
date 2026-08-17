@@ -127,6 +127,7 @@ def _generate_large_stderr() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="伪造 ADB 程序")
     parser.add_argument("--mode", type=str, default="normal", help="场景模式")
+    parser.add_argument("--state-file", type=str, default="")
     parser.add_argument("-s", type=str, default="", help="目标设备 serial")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="ADB 命令")
 
@@ -138,6 +139,14 @@ def main() -> None:
         Path(args.args_file).write_text(json.dumps(args.command), encoding="utf-8")
 
     cmd = " ".join(args.command) if args.command else ""
+
+    if mode == "hang_devices_once" and cmd in {"devices", "devices -l"}:
+        state_file = Path(args.state_file)
+        if not state_file.exists():
+            state_file.write_text("hung", encoding="utf-8")
+            while True:
+                time.sleep(1.0)
+        mode = "normal"
 
     if mode == "sleep_forever":
         while True:

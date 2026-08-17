@@ -266,7 +266,7 @@ class MumuAdapter:
                 changed=False,
                 diagnostics=st.diagnostics,
             )
-        if st.status == MumuRuntimeStatus.TIMEOUT or operation_deadline.expired:
+        if operation_deadline.expired:
             return MumuRuntimeResult.from_monotonic(
                 MumuAction.START,
                 MumuRuntimeStatus.TIMEOUT,
@@ -274,6 +274,18 @@ class MumuAdapter:
                 started_at,
                 changed=False,
                 diagnostics=st.diagnostics,
+            )
+        if st.status == MumuRuntimeStatus.TIMEOUT:
+            # ADB commands have a shorter child deadline than this operation.
+            # An inconclusive initial probe must not launch MuMu again, but it
+            # can continue readonly readiness polling inside the same budget.
+            return self._wait_readiness(
+                MumuAction.START,
+                MumuRuntimeStatus.STARTED,
+                started_at,
+                operation_deadline,
+                cancel,
+                changed=False,
             )
         if st.status == MumuRuntimeStatus.FAILED:
             return MumuRuntimeResult.from_monotonic(
@@ -372,7 +384,7 @@ class MumuAdapter:
                 changed=False,
                 diagnostics=st.diagnostics,
             )
-        if st.status == MumuRuntimeStatus.TIMEOUT or operation_deadline.expired:
+        if operation_deadline.expired:
             return MumuRuntimeResult.from_monotonic(
                 MumuAction.STOP,
                 MumuRuntimeStatus.TIMEOUT,
@@ -381,6 +393,9 @@ class MumuAdapter:
                 changed=False,
                 diagnostics=st.diagnostics,
             )
+        # A shorter ADB command deadline may make the initial status probe
+        # inconclusive while the stop operation still has budget. Continue to
+        # the idempotent manager shutdown command instead of returning early.
         if st.status == MumuRuntimeStatus.FAILED:
             return MumuRuntimeResult.from_monotonic(
                 MumuAction.STOP,

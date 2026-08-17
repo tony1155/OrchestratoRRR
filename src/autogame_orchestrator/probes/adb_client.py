@@ -9,6 +9,7 @@ from __future__ import annotations
 import tempfile
 import time
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 
 from autogame_orchestrator.probes.adb_parser import AdbParseError, parse_adb_devices
@@ -35,6 +36,7 @@ _CONNECT_SUCCESS_ALREADY = "already connected to"
 _CONNECT_SUCCESS = "connected to"
 _CONNECT_FAILURE_MARKERS = ("not connected to", "failed", "cannot", "refused", "unable")
 _DIAG_MAX = 1_024  # diagnostics 摘要最大字符数
+_DEFAULT_COMMAND_TIMEOUT_SECONDS = 5.0
 
 
 def _read_limited_text(path: Path, limit: int) -> tuple[str, bool]:
@@ -63,6 +65,13 @@ class AdbClientConfig:
     executable: Path
     base_arguments: tuple[str, ...] = ()
     working_directory: Path | None = None
+    command_timeout_seconds: float = _DEFAULT_COMMAND_TIMEOUT_SECONDS
+
+    def __post_init__(self) -> None:
+        timeout = self.command_timeout_seconds
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not isfinite(timeout) or timeout <= 0:
+            msg = f"command_timeout_seconds 必须是有限正数，收到 {timeout!r}"
+            raise ValueError(msg)
 
 
 class AdbClient:
@@ -251,6 +260,7 @@ class AdbClient:
     ) -> ProbeResult:
         """执行 ADB 命令并返回 ProbeResult。"""
         started_at = time.monotonic()
+        command_deadline = Deadline.at(started_at + deadline.clamp_timeout(self._config.command_timeout_seconds))
 
         # 预检：可执行文件
         if not self._config.executable.is_file():
@@ -279,7 +289,7 @@ class AdbClient:
                 )
 
                 with ProcessSupervisor() as supervisor:
-                    proc_result = supervisor.run(spec, deadline, cancel)
+                    proc_result = supervisor.run(spec, command_deadline, cancel)
 
                 # 映射 ProcessResult → ProbeResult
                 reason = proc_result.termination_reason

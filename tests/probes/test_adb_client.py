@@ -17,7 +17,12 @@ from autogame_orchestrator.process import CancellationToken, Deadline
 _FAKE_ADB = str(Path(__file__).resolve().parent.parent / "fakes" / "fake_adb.py")
 
 
-def _make_client(mode: str = "normal", args_file: Path | None = None) -> AdbClient:
+def _make_client(
+    mode: str = "normal",
+    args_file: Path | None = None,
+    *,
+    command_timeout_seconds: float = 5.0,
+) -> AdbClient:
     base_arguments = [_FAKE_ADB, "--mode", mode]
     if args_file is not None:
         base_arguments.extend(["--args-file", str(args_file)])
@@ -25,6 +30,7 @@ def _make_client(mode: str = "normal", args_file: Path | None = None) -> AdbClie
         AdbClientConfig(
             executable=Path(sys.executable),
             base_arguments=tuple(base_arguments),
+            command_timeout_seconds=command_timeout_seconds,
         )
     )
 
@@ -68,6 +74,39 @@ def test_timeout() -> None:
     assert result.status == ProbeStatus.TIMEOUT
     assert result.error_code == ProbeErrorCode.ADB_TIMEOUT
     assert time.monotonic() - t0 < 3.0
+
+
+def test_command_timeout_is_shorter_than_long_parent_deadline() -> None:
+    """One blocked ADB process returns control without consuming its parent budget."""
+    client = _make_client("sleep_forever", command_timeout_seconds=0.08)
+    parent = Deadline.after(2.0)
+
+    started = time.monotonic()
+    result = client.version(parent)
+    elapsed = time.monotonic() - started
+
+    assert result.status == ProbeStatus.TIMEOUT
+    assert result.error_code == ProbeErrorCode.ADB_TIMEOUT
+    assert elapsed < 0.8
+    assert parent.remaining_seconds > 1.0
+
+
+def test_short_parent_deadline_clamps_command_timeout() -> None:
+    client = _make_client("sleep_forever", command_timeout_seconds=5.0)
+
+    started = time.monotonic()
+    result = client.version(Deadline.after(0.08))
+    elapsed = time.monotonic() - started
+
+    assert result.status == ProbeStatus.TIMEOUT
+    assert result.error_code == ProbeErrorCode.ADB_TIMEOUT
+    assert elapsed < 0.8
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("inf"), float("nan"), True])
+def test_invalid_command_timeout_is_rejected(timeout: float) -> None:
+    with pytest.raises(ValueError, match="command_timeout_seconds"):
+        AdbClientConfig(executable=Path(sys.executable), command_timeout_seconds=timeout)
 
 
 def test_cancellation() -> None:
