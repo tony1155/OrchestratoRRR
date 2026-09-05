@@ -33,7 +33,7 @@
 
 | 字段 | 记录 |
 | --- | --- |
-| ID / 日期 / 状态 | <code>MNT-2026-09-05-02</code> / 2026-09-05 / 自动验证完成 |
+| ID / 日期 / 状态 | <code>MNT-2026-09-05-02</code> / 2026-09-05 / 真实验证完成 |
 | 影响范围 | <code>maa update</code> 只更新 <code>MaaResource</code> 仓库而不覆盖 MaaCore 共用 <code>resource</code> 时，MAA CLI 可能因资源叠加顺序和旧技能表残留而加载失败；此前生产计划没有自动修复步骤。 |
 | 事故证据 | 资源更新后 CLI 侧连续加载 <code>resource</code> 与 <code>MaaResource/resource</code>；已知失败表现为资源加载失败和非零退出。新增报告 marker 可识别资源仓库 pull、MaaCore 初始化和资源加载等稳定原因，但不会输出原始日志。 |
 | 根因 | CLI 与 GUI 的资源更新语义不同：GUI 将增量资源就地 DirectoryMerge 到单一 <code>resource</code>，CLI 仍保留两份目录并由 MaaCore 连续加载；同名技能使用 <code>emplace</code> 时旧值不会覆盖，后续新技能组引用可能触发查找失败。 |
@@ -41,9 +41,9 @@
 | 安全边界 | 默认关闭；不联网、不删除目标独有文件、不跟随源符号链接；源/目标相同或互为祖先时拒绝；最大文件数、单文件大小和 deadline 可配置且必须为正数；公开结果不包含路径和原始 stdout/stderr。external 与 managed 仅执行资源阶段，不改变 MuMu 所有权边界。 |
 | 自动验证 | 资源合并、配置、工作流、报告投影、ADB server 持久化及原有回归测试均通过；full pytest：1512 passed, 1 skipped；Ruff：passed；strict mypy：passed（72 source files）；<code>git diff --check</code>：passed。 |
 | 制品 | 未重建 onedir；本次新增功能尚未执行正式打包构建。 |
-| 真实验证 | 未运行真实 MAA CLI、MuMu、StarRail 或真实资源更新 workflow；配置保持默认关闭，不能视为真实资源合并已验收。 |
+| 真实验证 | 已从正式安装目录的脱敏生产 RunReport 确认 external workflow 多次实际执行资源合并。2026-09-05 最近一次成功扫描 5215 个真实资源文件，覆盖 4206 个文件、跳过 1009 个相同文件，复制约 91.5 MiB，随后完整 external workflow 成功；此前 2026-09-03、2026-08-31、2026-08-29 等运行也确认合并成功或资源完全一致。未执行 managed 模式真实复验。 |
 | 提交 | 待本次变更提交：<code>feat(maa): add safe resource merge stage</code> |
-| 剩余风险 | 合并过程按阶段和文件批次检查控制信号，单个大文件读写本身不是可中断的；目标目录若被外部 MAA GUI 同时修改，仍可能出现竞态。启用前应执行真实资源更新 smoke test，并考虑增加运行锁和目标目录变更检测。 |
+| 剩余风险 | 真实 external workflow 已验证资源合并在当前安装目录、当前真实资源规模和 MAA 运行链路下正常工作。合并过程按阶段和文件批次检查控制信号，单个大文件读写本身不是可中断的；目标目录若被外部 MAA GUI 同时修改，仍可能出现竞态。managed 模式和更换机器/安装目录仍需独立验证。 |
 
 
 | 字段 | 记录 |
