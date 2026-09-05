@@ -96,7 +96,18 @@ function Assert-ValidHash {
 
 function Get-FileSha256 {
     param([string]$Path)
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+    # Windows PowerShell 5.1 environments may not expose the Get-FileHash
+    # cmdlet (for example, constrained/embedded hosts). Keep hashing inside the
+    # .NET API so backup/update verification has no PowerShell-version gap.
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+        try {
+            return ([System.BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace("-", "").ToUpperInvariant()
+        }
+        finally { $stream.Dispose() }
+    }
+    finally { $algorithm.Dispose() }
 }
 
 function Get-MaintenancePaths {

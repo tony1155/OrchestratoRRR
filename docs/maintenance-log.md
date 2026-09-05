@@ -29,7 +29,22 @@
 
 ---
 
-## MNT-2026-08-17-03 — 精确 MuMu ADB endpoint transport recycle
+## MNT-2026-09-05-01 — Windows PowerShell 5.1 backup hashing compatibility
+
+| 字段 | 记录 |
+| --- | --- |
+| ID / 日期 / 状态 | <code>MNT-2026-09-05-01</code> / 2026-09-05 / 自动验证完成 |
+| 影响范围 | 安装更新前的产品数据 backup 在 Windows PowerShell 5.1 环境中统一失败为 <code>BACKUP_COPY_FAILED</code>，导致后续 onedir update、参数校验与回滚测试全部无法执行。 |
+| 事故证据 | backup 在扫描产品数据并计算文件摘要阶段失败；实际宿主为 Windows PowerShell 5.1，未提供 <code>Get-FileHash</code> cmdlet。修复前 focused packaging 为 7 个基础失败并产生 29 个级联失败。 |
+| 根因 | <code>scripts/lib/DefaultEntryMaintenance.psm1</code> 依赖 PowerShell 7 可用的 <code>Get-FileHash</code>，但项目文档同时支持 Windows PowerShell 5.1；顶层脚本为保护内部细节将该命令缺失折叠为稳定错误码。 |
+| 修复 | 将 <code>Get-FileSha256</code> 改为使用 <code>System.Security.Cryptography.SHA256</code> 和只读 .NET 文件流计算 SHA-256，保持原有大写摘要格式、文件共享模式、manifest 校验和错误码契约；不再依赖 <code>Get-FileHash</code>。 |
+| 安全边界 | 仅替换摘要实现，未放宽路径、reparse point、manifest、原子写入、事务回滚或安装目录策略；文件仍以只读共享方式打开，backup/update 的内容校验逻辑不变。 |
+| 自动验证 | packaging focused：36 passed；full pytest：1512 passed, 1 skipped；Ruff：passed；strict mypy：passed（72 source files）；<code>git diff --check</code>：passed。 |
+| 制品 | 未重建 onedir；本次修复只修改维护脚本，尚未执行打包制品构建。 |
+| 真实验证 | 未运行真实 MuMu、StarRail 或 MAA workflow；已在当前 Windows PowerShell 5.1 宿主完成安装更新脚本自动验证。 |
+| 提交 | 待本次修复提交：<code>fix(packaging): support backup hashing on PowerShell 5.1</code> |
+| 剩余风险 | 尚未在 PowerShell 7、非英文路径、超大文件和真实安装目录上分别执行现场验证；这些边界仍由现有自动测试和后续真实安装验收覆盖。 |
+
 
 | 字段 | 记录 |
 | --- | --- |
