@@ -59,7 +59,13 @@ class FakeAdb(AdbClient):
         self.connect_calls = 0
         self.state_calls = 0
         self.boot_calls = 0
+        self.ensure_server_calls = 0
         self.deadlines: list[Deadline] = []
+
+    def ensure_server(self, deadline: Deadline, cancel: CancellationToken | None = None) -> ProbeResult:
+        """常驻 daemon 已由真实客户端保证；Fake 只计数，不消耗预算。"""
+        self.ensure_server_calls += 1
+        return _ready("adb_start_server")
 
     def list_devices(self, deadline: Deadline, cancel: CancellationToken | None = None) -> AdbDevicesResult:
         self.list_calls += 1

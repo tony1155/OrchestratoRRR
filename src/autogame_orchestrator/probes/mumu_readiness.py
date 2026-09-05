@@ -35,7 +35,12 @@ class MumuReadinessProbe:
     ) -> ProbeResult:
         """执行完整 MuMu 就绪探测。
 
-        流程：检查取消 → TCP → 检查取消 → devices → 选择 → 检查取消 → state → 检查取消 → boot。
+        流程：检查取消 → TCP → 确保 adb server → 检查取消 → devices → 选择
+        → 检查取消 → state → 检查取消 → boot。
+
+        ``ensure_server`` 必须排在 TCP 探测之后、第一条 adb 命令之前：既不影响 TCP
+        阶段的预算归因，又能保证后续命令共用同一个常驻 daemon——否则每条命令会
+        各自冷启动一个空 daemon，使 ``adb connect`` 注册的 TCP 设备凭空消失。
         """
         started_at = time.monotonic()
 
@@ -59,6 +64,15 @@ class MumuReadinessProbe:
             )
 
         # 3. 检查取消
+        if cancel is not None and cancel.is_cancelled:
+            return ProbeResult.from_monotonic(
+                "mumu_readiness", ProbeStatus.FAILED, ProbeErrorCode.ADB_CANCELLED, started_at
+            )
+        if deadline.expired:
+            return _deadline_result(started_at, "adb_devices")
+
+        # 3.5 确保常驻 adb server（幂等；失败不阻断，由后续命令给出具体错误码）
+        self._adb.ensure_server(deadline, cancel)
         if cancel is not None and cancel.is_cancelled:
             return ProbeResult.from_monotonic(
                 "mumu_readiness", ProbeStatus.FAILED, ProbeErrorCode.ADB_CANCELLED, started_at

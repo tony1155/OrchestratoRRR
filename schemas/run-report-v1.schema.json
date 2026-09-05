@@ -82,6 +82,7 @@
         "validate_config",
         "sync_maa_config",
         "update_maa",
+        "merge_maa_resource",
         "ensure_mumu_running",
         "wait_mumu_adb_ready",
         "run_starrail",

@@ -29,7 +29,22 @@
 
 ---
 
-## MNT-2026-09-05-01 — Windows PowerShell 5.1 backup hashing compatibility
+## MNT-2026-09-05-02 — MAA MaaResource 覆盖合并阶段
+
+| 字段 | 记录 |
+| --- | --- |
+| ID / 日期 / 状态 | <code>MNT-2026-09-05-02</code> / 2026-09-05 / 自动验证完成 |
+| 影响范围 | <code>maa update</code> 只更新 <code>MaaResource</code> 仓库而不覆盖 MaaCore 共用 <code>resource</code> 时，MAA CLI 可能因资源叠加顺序和旧技能表残留而加载失败；此前生产计划没有自动修复步骤。 |
+| 事故证据 | 资源更新后 CLI 侧连续加载 <code>resource</code> 与 <code>MaaResource/resource</code>；已知失败表现为资源加载失败和非零退出。新增报告 marker 可识别资源仓库 pull、MaaCore 初始化和资源加载等稳定原因，但不会输出原始日志。 |
+| 根因 | CLI 与 GUI 的资源更新语义不同：GUI 将增量资源就地 DirectoryMerge 到单一 <code>resource</code>，CLI 仍保留两份目录并由 MaaCore 连续加载；同名技能使用 <code>emplace</code> 时旧值不会覆盖，后续新技能组引用可能触发查找失败。 |
+| 修复 | 新增默认关闭的 <code>maa_resource_merge</code> 配置、不可变结果模型、资源合并器和生产阶段 <code>MERGE_MAA_RESOURCE</code>。该阶段紧跟 <code>UPDATE_MAA</code>，仅将源目录文件覆盖合并到目标目录；同内容文件跳过，新目录按需创建，目标独有文件保留，单文件使用同目录临时文件、flush/fsync 和 <code>os.replace</code>。新增文件数、字节数、跳过数和错误码诊断。MAA 输出投影同时增加安全的固定 failure markers。 |
+| 安全边界 | 默认关闭；不联网、不删除目标独有文件、不跟随源符号链接；源/目标相同或互为祖先时拒绝；最大文件数、单文件大小和 deadline 可配置且必须为正数；公开结果不包含路径和原始 stdout/stderr。external 与 managed 仅执行资源阶段，不改变 MuMu 所有权边界。 |
+| 自动验证 | 资源合并、配置、工作流、报告投影、ADB server 持久化及原有回归测试均通过；full pytest：1512 passed, 1 skipped；Ruff：passed；strict mypy：passed（72 source files）；<code>git diff --check</code>：passed。 |
+| 制品 | 未重建 onedir；本次新增功能尚未执行正式打包构建。 |
+| 真实验证 | 未运行真实 MAA CLI、MuMu、StarRail 或真实资源更新 workflow；配置保持默认关闭，不能视为真实资源合并已验收。 |
+| 提交 | 待本次变更提交：<code>feat(maa): add safe resource merge stage</code> |
+| 剩余风险 | 合并过程按阶段和文件批次检查控制信号，单个大文件读写本身不是可中断的；目标目录若被外部 MAA GUI 同时修改，仍可能出现竞态。启用前应执行真实资源更新 smoke test，并考虑增加运行锁和目标目录变更检测。 |
+
 
 | 字段 | 记录 |
 | --- | --- |

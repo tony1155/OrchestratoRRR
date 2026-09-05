@@ -141,7 +141,7 @@ def test_plan_and_validate_do_not_call_mumu_ensure(tmp_path: Path) -> None:
         StageExecutionContext("validate-test", StageName.VALIDATE_CONFIG, Deadline.after(30), CancellationToken())
     )
 
-    assert len(plan.stages) == 10
+    assert len(plan.stages) == 11
     assert report.outcome == OutcomeKind.SUCCESS
     assert (mumu.calls, mumu.ensure_calls) == (0, 0)
 
@@ -152,7 +152,7 @@ def test_external_complete_fake_workflow_succeeds(tmp_path: Path) -> None:
     report, _ = _run(config, runtime_factories)
 
     assert (report.status, report.error_code) == (RunStatus.SUCCESS, ErrorCode.OK)
-    assert len(report.stages) == 10
+    assert len(report.stages) == 11
     assert tuple(stage.stage for stage in report.stages) == build_execution_plan(config).stages
     assert all(stage.outcome == OutcomeKind.SUCCESS for stage in report.stages)
     assert counts == Counter({"mumu": 1, "starrail": 1, "maa": 1})
@@ -206,14 +206,14 @@ def test_default_external_runtime_port_only_exposes_status(tmp_path: Path) -> No
 def test_external_stopped_is_blocked_without_repair(tmp_path: Path) -> None:
     runtime_factories, counts, mumu, starrail, maa, aalc = _factories(mumu_status=MumuRuntimeStatus.STOPPED)
     report, _ = _run(_external_config(tmp_path), runtime_factories)
-    ensure = report.stages[3]
+    ensure = report.stages[4]
     assert (ensure.outcome, ensure.error_code) == (OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_BLOCKED)
     assert ensure.diagnostics["blocker"] == "mumu_external_not_ready"
     assert mumu.calls == 1
     assert mumu.ensure_calls == 1
     assert (starrail.calls, maa.calls, aalc.calls) == (0, 0, 0)
     assert counts == Counter({"mumu": 1})
-    assert all(stage.outcome == OutcomeKind.SKIPPED for stage in report.stages[4:-1])
+    assert all(stage.outcome == OutcomeKind.SKIPPED for stage in report.stages[5:-1])
 
 
 @pytest.mark.parametrize(
@@ -233,11 +233,11 @@ def test_external_readiness_failure_is_fail_fast(
 ) -> None:
     runtime_factories, _, mumu, starrail, maa, aalc = _factories(mumu_status=status)
     report, _ = _run(_external_config(tmp_path), runtime_factories)
-    assert (report.stages[3].outcome, report.stages[3].error_code) == (outcome, error_code)
+    assert (report.stages[4].outcome, report.stages[4].error_code) == (outcome, error_code)
     assert mumu.calls == 1
     assert (mumu.start_calls, mumu.stop_calls) == (0, 0)
     assert (starrail.calls, maa.calls, aalc.calls) == (0, 0, 0)
-    assert all(stage.outcome == OutcomeKind.SKIPPED for stage in report.stages[4:-1])
+    assert all(stage.outcome == OutcomeKind.SKIPPED for stage in report.stages[5:-1])
     assert StageName.SHUTDOWN_MUMU not in {stage.stage for stage in report.stages}
     assert "failure_cleanup_attempted" not in report.diagnostics
 
@@ -245,16 +245,16 @@ def test_external_readiness_failure_is_fail_fast(
 def test_external_starrail_failure_never_runs_later_adapter(tmp_path: Path) -> None:
     runtime_factories, _, mumu, starrail, maa, aalc = _factories(starrail_status=StarRailRunStatus.FAILED)
     report, _ = _run(_external_config(tmp_path), runtime_factories)
-    assert report.stages[5].stage == StageName.RUN_STARRAIL
-    assert report.stages[5].outcome == OutcomeKind.FAILURE
+    assert report.stages[6].stage == StageName.RUN_STARRAIL
+    assert report.stages[6].outcome == OutcomeKind.FAILURE
     assert (mumu.calls, starrail.calls, maa.calls, aalc.calls) == (2, 1, 0, 0)
 
 
 def test_external_maa_failure_does_not_run_later_adapters(tmp_path: Path) -> None:
     runtime_factories, _, mumu, _, maa, aalc = _factories(maa_status=MAARunStatus.FAILED)
     report, _ = _run(_external_config(tmp_path), runtime_factories)
-    assert report.stages[8].stage == StageName.RUN_MAA
-    assert report.stages[8].outcome == OutcomeKind.FAILURE
+    assert report.stages[9].stage == StageName.RUN_MAA
+    assert report.stages[9].outcome == OutcomeKind.FAILURE
     assert (mumu.calls, maa.calls, aalc.calls) == (2, 1, 0)
     assert StageName.START_MUMU not in {stage.stage for stage in report.stages}
 

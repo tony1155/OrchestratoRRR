@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from autogame_orchestrator.maa_resource.models import MAAResourceMergeResult
 from autogame_orchestrator.maa_sync.models import MAASyncResult
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
@@ -88,6 +89,14 @@ class MAAUpdatePort(Protocol):
     ) -> MAARunResult: ...
 
 
+class MAAResourceMergePort(Protocol):
+    def run(
+        self,
+        deadline: Deadline | None = None,
+        cancel: CancellationToken | None = None,
+    ) -> MAAResourceMergeResult: ...
+
+
 @dataclass(frozen=True)
 class RuntimeFactories:
     """仅在对应 Stage 到达时才调用的 Runtime 构造器。"""
@@ -98,3 +107,4 @@ class RuntimeFactories:
     mumu: Callable[[], MumuRuntimePort]
     maa_sync: Callable[[], MAASyncPort] | None = None
     maa_update: Callable[[], MAAUpdatePort] | None = None
+    maa_resource_merge: Callable[[], MAAResourceMergePort] | None = None

@@ -41,7 +41,7 @@ def test_complete_fake_public_application_succeeds(tmp_path: Path) -> None:
     assert result.report is not None
     assert result.report.mode == "workflow_external"
     assert result.report.status == RunStatus.SUCCESS
-    assert len(result.report.stages) == 10
+    assert len(result.report.stages) == 11
     assert counts == {"mumu": 1, "starrail": 1, "maa": 1}
     assert (mumu.calls, starrail.calls, maa.calls, aalc.calls) == (2, 1, 1, 0)
     assert tuple(stage.stage for stage in result.report.stages[-2:]) == (
@@ -88,7 +88,7 @@ def test_mumu_failure_exit_mapping(
     result = execute_run_request(_request(write_run_config(tmp_path)), dependencies=dependencies)
     assert result.exit_code == exit_code
     assert result.report is not None
-    assert result.report.stages[3].outcome == outcome
+    assert result.report.stages[4].outcome == outcome
     assert mumu.calls == 1
     assert (starrail.calls, maa.calls, aalc.calls) == (0, 0, 0)
     assert counts == {"mumu": 1}

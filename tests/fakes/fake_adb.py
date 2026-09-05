@@ -182,6 +182,11 @@ def main() -> None:
 
     if cmd == "version":
         _cmd_version()
+    elif cmd == "start-server":
+        # 真实 adb 在 daemon 已运行时静默退出 0；首次启动则写 stderr 提示。
+        if mode == "start_server_nonzero":
+            print("cannot start server", file=sys.stderr)
+            sys.exit(1)
     elif cmd == "devices -l" or cmd == "devices":
         _cmd_devices(mode)
     elif "get-state" in cmd:

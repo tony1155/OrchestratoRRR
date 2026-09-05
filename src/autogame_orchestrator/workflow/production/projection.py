@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from autogame_orchestrator.config_model import MumuLifecycleMode
 from autogame_orchestrator.models import ErrorCode, JsonValue, OutcomeKind, StageName, StageReport
 from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeStatus
+from autogame_orchestrator.process.errors import ProcessExecutionErrorCode
 from autogame_orchestrator.runtime.aalc_models import AALCRunResult, AALCRunStatus
 from autogame_orchestrator.runtime.maa_models import MAARunResult, MAARunStatus
 from autogame_orchestrator.runtime.models import MumuRuntimeResult, MumuRuntimeStatus
@@ -27,6 +28,53 @@ _ADB_CONNECT_STATUS_ALLOWLIST = {"not_attempted", "connected", "already_connecte
 _OFFLINE_RECOVERY_STATUS_ALLOWLIST = {"started", "completed", "failed"}
 _OFFLINE_ENDPOINT_RECOVERY_STATUS_ALLOWLIST = {"connected", "failed", "timeout", "cancelled"}
 _OFFLINE_ENDPOINT_DISCONNECT_STATUS_ALLOWLIST = {"not_attempted", "disconnected", "failed"}
+_PROCESS_ERROR_ALLOWLIST = {item.value for item in ProcessExecutionErrorCode}
+
+# MAA 失败时只从输出摘要里提取固定标识符，不外泄原文、路径或任何可变内容。
+# 左侧是稳定 marker，右侧是 maa-cli / MaaCore 的固定英文提示（小写匹配）。
+_MAA_FAILURE_MARKERS: tuple[tuple[str, str], ...] = (
+    ("core_error", "maacore returned an error"),
+    ("core_load_failed", "failed to load maacore"),
+    ("core_version_failed", "failed to get maacore version"),
+    ("resource_load_failed", "resources may not be loaded"),
+    ("resource_repo_pull_failed", "failed to pull resource repository"),
+    ("resource_repo_clone_failed", "failed to clone resource repository"),
+    ("profile_not_found", "failed to find profile file"),
+    ("task_file_not_found", "failed to find task file"),
+    ("task_config_failed", "failed to initialize task config"),
+    ("connection_failed", "failed to connect to game"),
+    ("game_start_failed", "failed to start game"),
+    ("core_install_failed", "failed to install maacore"),
+)
+_MAA_MARKER_SCAN_LIMIT = 8 * 1024
+
+
+def extract_maa_failure_markers(*excerpts: str) -> list[str]:
+    """从 stdout/stderr 摘要中识别已知失败原因，返回稳定 marker 列表。
+
+    只返回白名单常量，因此不可能把本机路径、环境变量或其他敏感值带入报告。
+    """
+    folded = "\n".join(excerpt[:_MAA_MARKER_SCAN_LIMIT] for excerpt in excerpts if excerpt).casefold()
+    if not folded:
+        return []
+    return [marker for marker, needle in _MAA_FAILURE_MARKERS if needle in folded]
+
+
+def maa_output_diagnostics(result: MAARunResult) -> dict[str, JsonValue]:
+    """MAA 进程输出的安全诊断投影；``run_maa`` 与 ``update_maa`` 共用。"""
+    diagnostics: dict[str, JsonValue] = {
+        "stdout_present": bool(result.stdout_excerpt),
+        "stderr_present": bool(result.stderr_excerpt),
+        "failure_markers": extract_maa_failure_markers(result.stdout_excerpt, result.stderr_excerpt),
+    }
+    process_error_code = result.diagnostics.get("process_error_code")
+    if isinstance(process_error_code, str) and process_error_code in _PROCESS_ERROR_ALLOWLIST:
+        diagnostics["process_error_code"] = process_error_code
+    for key in ("stdout_read_failed", "stderr_read_failed"):
+        value = result.diagnostics.get(key)
+        if isinstance(value, bool):
+            diagnostics[key] = value
+    return diagnostics
 
 
 def _outcome(
@@ -81,6 +129,7 @@ def project_maa(stage: StageName, result: MAARunResult) -> StageReport:
         "owned_process_cleaned": result.owned_process_cleaned,
         "stdout_truncated": result.stdout_truncated,
         "stderr_truncated": result.stderr_truncated,
+        **maa_output_diagnostics(result),
     }
     return StageReport(
         stage, outcome, code, result.started_at, result.finished_at, result.duration_ms, diagnostics=diagnostics

@@ -103,6 +103,9 @@ def test_update_projection_is_strict_allowlist() -> None:
         "owned_process_cleaned",
         "stdout_truncated",
         "stderr_truncated",
+        "stdout_present",
+        "stderr_present",
+        "failure_markers",
     }
     assert report.diagnostics["exit_code"] == 0
     assert report.diagnostics["termination_reason"] == "normal_exit"
@@ -140,6 +143,24 @@ def test_update_failure_prevents_mumu_construction(tmp_path: Path) -> None:
     assert counts["mumu"] == 0
 
 
+def test_update_repository_pull_failure_is_visible_in_report() -> None:
+    """maa update 阶段也应当暴露稳定 marker：资源仓库 pull 失败会在这里显形。"""
+    port = FakeRunPort(
+        maa_result(
+            MAARunStatus.FAILED,
+            stdout_excerpt="",
+            stderr_excerpt="Error: Failed to pull resource repository",
+        )
+    )
+    runtime_factories, counts = factories()
+    runtime_factories = replace(runtime_factories, maa_update=CountingFactory("maa_update", port, counts))
+    report = build_production_executor_factory(enabled_config(), runtime_factories=runtime_factories)(
+        StageName.UPDATE_MAA
+    ).execute(context())
+    assert report.outcome == OutcomeKind.FAILURE
+    assert report.diagnostics["failure_markers"] == ["resource_repo_pull_failed"]
+
+
 def test_disabled_update_reaches_stopped_mumu_gate(tmp_path: Path) -> None:
     config = valid_config(tmp_path)
     mumu = FakeMumuPort(mumu_result(MumuRuntimeStatus.STOPPED))
@@ -150,8 +171,9 @@ def test_disabled_update_reaches_stopped_mumu_gate(tmp_path: Path) -> None:
         MemorySink(),
     ).run(deadline=Deadline.after(30))
     assert report.stages[2].outcome == OutcomeKind.SUCCESS
-    assert report.stages[3].error_code == ErrorCode.WORKFLOW_STAGE_BLOCKED
-    assert report.stages[3].diagnostics["blocker"] == "mumu_start_not_approved"
+    assert report.stages[3].outcome == OutcomeKind.SUCCESS
+    assert report.stages[4].error_code == ErrorCode.WORKFLOW_STAGE_BLOCKED
+    assert report.stages[4].diagnostics["blocker"] == "mumu_start_not_approved"
     assert counts["mumu"] == 1
 
 
@@ -170,5 +192,6 @@ def test_ready_mumu_managed_stop_stage_catches_not_stopped(tmp_path: Path) -> No
     ).run(deadline=Deadline.after(30))
     assert report.stages[2].outcome == OutcomeKind.SUCCESS
     assert report.stages[3].outcome == OutcomeKind.SUCCESS
-    assert report.stages[8].error_code == ErrorCode.WORKFLOW_STAGE_FAILED
-    assert report.stages[9].outcome == OutcomeKind.SKIPPED
+    assert report.stages[4].outcome == OutcomeKind.SUCCESS
+    assert report.stages[9].error_code == ErrorCode.WORKFLOW_STAGE_FAILED
+    assert report.stages[10].outcome == OutcomeKind.SKIPPED

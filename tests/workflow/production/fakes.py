@@ -9,9 +9,15 @@ from autogame_orchestrator.config_model import (
     AALCConfig,
     AppConfig,
     MAAConfig,
+    MAAResourceMergeConfig,
     MuMuConfig,
     OrchestratorConfig,
     StarRailConfig,
+)
+from autogame_orchestrator.maa_resource.models import (
+    MAAResourceMergeErrorCode,
+    MAAResourceMergeResult,
+    MAAResourceMergeStatus,
 )
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
@@ -67,6 +73,19 @@ def valid_config(root: Path) -> AppConfig:
     )
 
 
+def merge_config(root: Path) -> MAAResourceMergeConfig:
+    """真存在的源/目标目录，供开启合并阶段的用例复用。"""
+    source = root / "MaaResource" / "resource"
+    destination = root / "resource"
+    source.mkdir(parents=True, exist_ok=True)
+    destination.mkdir(parents=True, exist_ok=True)
+    return MAAResourceMergeConfig(
+        enabled=True,
+        source_directory=str(source),
+        destination_directory=str(destination),
+    )
+
+
 def starrail_result(status: StarRailRunStatus = StarRailRunStatus.COMPLETED) -> StarRailRunResult:
     values = {
         StarRailRunStatus.COMPLETED: (StarRailErrorCode.OK, StarRailCompletionMode.LOG_SUCCESS),
@@ -95,7 +114,12 @@ def starrail_result(status: StarRailRunStatus = StarRailRunStatus.COMPLETED) -> 
     )
 
 
-def maa_result(status: MAARunStatus = MAARunStatus.COMPLETED) -> MAARunResult:
+def maa_result(
+    status: MAARunStatus = MAARunStatus.COMPLETED,
+    *,
+    stdout_excerpt: str = "stdout secret",
+    stderr_excerpt: str = "stderr secret",
+) -> MAARunResult:
     values = {
         MAARunStatus.COMPLETED: (MAAErrorCode.OK, TerminationReason.NORMAL_EXIT),
         MAARunStatus.FAILED: (MAAErrorCode.PROCESS_EXIT_NONZERO, TerminationReason.NONZERO_EXIT),
@@ -113,11 +137,37 @@ def maa_result(status: MAARunStatus = MAARunStatus.COMPLETED) -> MAARunResult:
         0 if status == MAARunStatus.COMPLETED else 7,
         reason,
         True,
-        "stdout secret",
-        "stderr secret",
+        stdout_excerpt,
+        stderr_excerpt,
         True,
         True,
         {"path": "E:\\private\\maa.exe"},
+    )
+
+
+def merge_result(
+    status: MAAResourceMergeStatus = MAAResourceMergeStatus.COMPLETED,
+    *,
+    files_copied: int = 3,
+) -> MAAResourceMergeResult:
+    values = {
+        MAAResourceMergeStatus.COMPLETED: MAAResourceMergeErrorCode.OK,
+        MAAResourceMergeStatus.FAILED: MAAResourceMergeErrorCode.TARGET_WRITE_FAILED,
+        MAAResourceMergeStatus.TIMEOUT: MAAResourceMergeErrorCode.PARENT_DEADLINE,
+        MAAResourceMergeStatus.CANCELLED: MAAResourceMergeErrorCode.CANCELLED,
+    }
+    return MAAResourceMergeResult(
+        status,
+        values[status],
+        NOW,
+        LATER,
+        2000,
+        True,
+        10,
+        files_copied,
+        4,
+        2048,
+        1,
     )
 
 

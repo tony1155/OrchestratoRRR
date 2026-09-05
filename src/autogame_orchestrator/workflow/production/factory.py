@@ -8,6 +8,7 @@ from autogame_orchestrator.config_model import AppConfig
 from autogame_orchestrator.models import StageName
 from autogame_orchestrator.workflow.production.executors import ProductionStageExecutor
 from autogame_orchestrator.workflow.production.ports import (
+    MAAResourceMergePort,
     MAARunPort,
     MAASyncPort,
     MAAUpdatePort,
@@ -53,6 +54,14 @@ class _RuntimeCache:
             raise RuntimeBindingError("MAA Update 构造器未注册")
         return cast("MAAUpdatePort", self._get("maa_update", self._factories.maa_update))
 
+    def maa_resource_merge(self) -> MAAResourceMergePort:
+        if self._factories.maa_resource_merge is None:
+            raise RuntimeBindingError("MAA 资源合并构造器未注册")
+        return cast(
+            "MAAResourceMergePort",
+            self._get("maa_resource_merge", self._factories.maa_resource_merge),
+        )
+
 
 class ProductionExecutorFactory:
     """一次工作流专用；状态与 Runtime 缓存不跨运行共享。"""
@@ -74,6 +83,7 @@ class ProductionExecutorFactory:
             mumu=self._runtime.mumu,
             maa_sync=self._runtime.maa_sync,
             maa_update=self._runtime.maa_update,
+            maa_resource_merge=self._runtime.maa_resource_merge,
         )
 
     def failure_cleanup_required(self) -> bool:

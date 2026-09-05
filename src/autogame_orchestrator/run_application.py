@@ -33,6 +33,7 @@ EXTERNAL_RUN_STAGES = (
     StageName.VALIDATE_CONFIG,
     StageName.SYNC_MAA_CONFIG,
     StageName.UPDATE_MAA,
+    StageName.MERGE_MAA_RESOURCE,
     StageName.ENSURE_MUMU_RUNNING,
     StageName.WAIT_MUMU_ADB_READY,
     StageName.RUN_STARRAIL,
@@ -47,6 +48,7 @@ MANAGED_RUN_STAGES = (
     StageName.VALIDATE_CONFIG,
     StageName.SYNC_MAA_CONFIG,
     StageName.UPDATE_MAA,
+    StageName.MERGE_MAA_RESOURCE,
     StageName.ENSURE_MUMU_RUNNING,
     StageName.WAIT_MUMU_ADB_READY,
     StageName.RUN_STARRAIL,
@@ -117,7 +119,7 @@ def validate_run_v1_config(config: AppConfig) -> str | None:
 
 
 def validate_external_plan(plan: ExecutionPlan) -> str | None:
-    """要求与生命周期模式匹配的精确默认计划（external 11 阶段 / managed 15 阶段）。"""
+    """要求与生命周期模式匹配的精确默认计划（external 11 阶段 / managed 16 阶段）。"""
 
     if plan.stages not in (EXTERNAL_RUN_STAGES, MANAGED_RUN_STAGES):
         return "external_plan_invalid"

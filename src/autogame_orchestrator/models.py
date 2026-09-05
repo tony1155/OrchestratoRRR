@@ -115,6 +115,7 @@ class StageName(StrEnum):
     VALIDATE_CONFIG = "validate_config"
     SYNC_MAA_CONFIG = "sync_maa_config"
     UPDATE_MAA = "update_maa"
+    MERGE_MAA_RESOURCE = "merge_maa_resource"
     ENSURE_MUMU_RUNNING = "ensure_mumu_running"
     WAIT_MUMU_ADB_READY = "wait_mumu_adb_ready"
     RUN_STARRAIL = "run_starrail"

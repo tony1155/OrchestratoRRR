@@ -419,6 +419,67 @@ class MAASyncConfig:
 
 
 @dataclass(frozen=True)
+class MAAResourceMergeConfig:
+    """把 MaaResource 增量资源覆盖合并进 MaaCore 共用资源目录的契约。
+
+    ``maa update`` 只把 MaaResource 仓库 ``git pull`` 到 ``<data>/MaaResource``，
+    不会并入随 MaaCore 安装的 ``<data>/resource``。maa-cli 随后让 MaaCore 依次加载
+    这两个目录，而 ``InfrastConfig::parse`` 用 ``emplace`` 装填技能表（对已存在的
+    key 不覆盖）、再用 ``.at()`` 解析 ``skillsGroup``；因此当新版资源引入「新
+    skillsGroup 引用新技能」时，第二遍加载会命中第一遍的旧表并抛
+    ``std::out_of_range``，资源加载整体失败。MAA GUI 因为是就地合并成单一份资源
+    才不受影响。本阶段复刻 GUI 的合并动作，消除该叠加冲突。
+
+    默认关闭。启用后会写入与 MAA GUI 共用的资源目录，因此逐文件采用「同目录临时
+    文件 + fsync + ``os.replace``」提交，且内容相同的文件直接跳过、不产生写入。
+    """
+
+    enabled: bool = False
+    source_directory: str = ""
+    destination_directory: str = ""
+    max_files: int = 20000
+    max_file_bytes: int = 64 * 1024 * 1024
+    timeout_seconds: int = 600
+
+    def validate(self) -> list[ErrorCode]:
+        errors: list[ErrorCode] = []
+        if not isinstance(self.enabled, bool):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        for value in (self.max_files, self.max_file_bytes, self.timeout_seconds):
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.enabled, bool) or not self.enabled:
+            return errors
+        paths = (self.source_directory, self.destination_directory)
+        if any(not isinstance(value, str) or not value.strip() for value in paths):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            return errors
+        normalized = [os.path.normcase(os.path.abspath(value)) for value in paths]
+        if normalized[0] == normalized[1]:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        # 源与目标互为祖先时，合并会自我递归或自我覆盖。
+        for first, second in (normalized, normalized[::-1]):
+            if second.startswith(first + os.sep):
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+                break
+        return errors
+
+    def check_paths(self) -> list[ErrorCode]:
+        from pathlib import Path
+
+        if not self.enabled:
+            return []
+        errors: list[ErrorCode] = []
+        for value in (self.source_directory, self.destination_directory):
+            path = Path(value)
+            if not path.exists():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+            elif not path.is_dir():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_DIRECTORY)
+        return errors
+
+
+@dataclass(frozen=True)
 class MAAUpdateConfig:
     """仅允许 MaaCore/资源 update 的安全配置。
 
@@ -480,6 +541,7 @@ class AppConfig:
     maa: MAAConfig = field(default_factory=MAAConfig)
     maa_sync: MAASyncConfig = field(default_factory=MAASyncConfig)
     maa_update: MAAUpdateConfig = field(default_factory=MAAUpdateConfig)
+    maa_resource_merge: MAAResourceMergeConfig = field(default_factory=MAAResourceMergeConfig)
     aalc: AALCConfig = field(default_factory=AALCConfig)
 
     def validate(self) -> list[ErrorCode]:
@@ -490,6 +552,7 @@ class AppConfig:
         errors.extend(self.maa.validate())
         errors.extend(self.maa_sync.validate())
         errors.extend(self.maa_update.validate())
+        errors.extend(self.maa_resource_merge.validate())
         return errors
 
     def check_paths(self) -> list[ErrorCode]:
@@ -498,6 +561,7 @@ class AppConfig:
         errors.extend(self.starrail.check_paths())
         errors.extend(self.maa.check_paths())
         errors.extend(self.maa_sync.check_paths())
+        errors.extend(self.maa_resource_merge.check_paths())
         return errors
 
     def check_default_entry_paths(

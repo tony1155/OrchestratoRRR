@@ -260,7 +260,7 @@ def test_wrong_confirmation_never_executes_and_leaves_no_probe(tmp_path: Path) -
         dependencies=_dependencies(environment, io, lambda request: pytest.fail("workflow must not run"))
     )
     assert result.error_code == DefaultEntryErrorCode.CONFIRMATION_REJECTED
-    assert len([line for line in io.messages if line[:1].isdigit()]) == 10
+    assert len([line for line in io.messages if line[:1].isdigit()]) == 11
     assert list(paths.log_directory.glob(".orchestrator-write-probe-*")) == []
     assert list(paths.report_directory.glob(".orchestrator-write-probe-*")) == []
     assert list(paths.log_directory.iterdir()) == []
@@ -322,7 +322,7 @@ def test_invalid_deadline_precedes_filesystem_and_config(tmp_path: Path) -> None
 
 
 def test_managed_plan_is_accepted_and_stage_count_is_not_hardcoded(tmp_path: Path) -> None:
-    """`start` 命令须接受 managed 的 15 阶段计划，并按实际阶段数输出。
+    """`start` 命令须接受 managed 的 16 阶段计划，并按实际阶段数输出。
 
     回归保护：入口曾额外硬校验 `plan.stages != EXTERNAL_RUN_STAGES`，使 managed
     配置一律以 PLAN_INVALID 拒绝；警告文案也写死为「11 external stages」。
@@ -339,8 +339,8 @@ def test_managed_plan_is_accepted_and_stage_count_is_not_hardcoded(tmp_path: Pat
 
     assert result.error_code == "OK"
     assert len(calls) == 1
-    assert len([line for line in io.messages if line[:1].isdigit()]) == 15
-    assert any("15 stages" in message for message in io.messages)
+    assert len([line for line in io.messages if line[:1].isdigit()]) == 16
+    assert any("16 stages" in message for message in io.messages)
     assert not any("11 external stages" in message for message in io.messages)
 
 

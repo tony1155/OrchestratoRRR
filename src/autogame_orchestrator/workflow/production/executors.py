@@ -7,11 +7,13 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
+from autogame_orchestrator.maa_resource.models import MAAResourceMergeStatus
 from autogame_orchestrator.maa_sync.models import MAASyncStatus
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, StageName, StageReport
 from autogame_orchestrator.runtime.models import MumuRuntimeStatus
 from autogame_orchestrator.workflow.contracts import StageExecutionContext
 from autogame_orchestrator.workflow.production.ports import (
+    MAAResourceMergePort,
     MAARunPort,
     MAASyncPort,
     MAAUpdatePort,
@@ -20,6 +22,7 @@ from autogame_orchestrator.workflow.production.ports import (
     StarRailRunPort,
 )
 from autogame_orchestrator.workflow.production.projection import (
+    maa_output_diagnostics,
     project_maa,
     project_mumu,
     project_starrail,
@@ -60,6 +63,7 @@ class ProductionStageExecutor:
         mumu: Callable[[], MumuRuntimePort],
         maa_sync: Callable[[], MAASyncPort],
         maa_update: Callable[[], MAAUpdatePort],
+        maa_resource_merge: Callable[[], MAAResourceMergePort],
     ) -> None:
         self._stage = stage
         self._config = config
@@ -69,6 +73,7 @@ class ProductionStageExecutor:
         self._mumu = mumu
         self._maa_sync = maa_sync
         self._maa_update = maa_update
+        self._maa_resource_merge = maa_resource_merge
 
     def execute(self, context: StageExecutionContext) -> StageReport:
         if context.stage != self._stage:
@@ -88,6 +93,8 @@ class ProductionStageExecutor:
             return self._run_maa_sync(context)
         if stage == StageName.UPDATE_MAA:
             return self._run_maa_update(context)
+        if stage == StageName.MERGE_MAA_RESOURCE:
+            return self._run_maa_resource_merge(context)
         if self._config.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL and stage in {
             StageName.STOP_MUMU,
             StageName.START_MUMU,
@@ -198,6 +205,51 @@ class ProductionStageExecutor:
                 "owned_process_cleaned": update_result.owned_process_cleaned,
                 "stdout_truncated": update_result.stdout_truncated,
                 "stderr_truncated": update_result.stderr_truncated,
+                **maa_output_diagnostics(update_result),
+            },
+        )
+
+    def _run_maa_resource_merge(self, context: StageExecutionContext) -> StageReport:
+        """把 MaaResource 增量资源合并进 MaaCore 共用资源目录。
+
+        必须紧跟在 ``UPDATE_MAA`` 之后：``maa update`` 刚把仓库 pull 到最新，而
+        MaaCore 本身升级会把 ``resource`` 重刷回该版本自带的内容，因此合并必须
+        在两者之后才能得到正确结果。
+        """
+        if not self._config.maa_resource_merge.enabled:
+            return _instant(
+                self._stage,
+                OutcomeKind.SUCCESS,
+                ErrorCode.OK,
+                {"enabled": False, "executed": False},
+            )
+        if self._config.maa_resource_merge.validate():
+            return _instant(self._stage, OutcomeKind.FAILURE, ErrorCode.CONFIG_SCHEMA_ERROR)
+        merge_result = self._maa_resource_merge().run(context.deadline, context.cancel)
+        mapping = {
+            MAAResourceMergeStatus.COMPLETED: (OutcomeKind.SUCCESS, ErrorCode.OK),
+            MAAResourceMergeStatus.FAILED: (OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_FAILED),
+            MAAResourceMergeStatus.TIMEOUT: (OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT),
+            MAAResourceMergeStatus.CANCELLED: (OutcomeKind.CANCELLED, ErrorCode.WORKFLOW_CANCELLED),
+        }
+        outcome, code = mapping[merge_result.status]
+        return StageReport(
+            self._stage,
+            outcome,
+            code,
+            merge_result.started_at,
+            merge_result.finished_at,
+            merge_result.duration_ms,
+            diagnostics={
+                "enabled": True,
+                "executed": True,
+                "source_error_code": merge_result.error_code.value,
+                "changed": merge_result.changed,
+                "files_scanned": merge_result.files_scanned,
+                "files_copied": merge_result.files_copied,
+                "files_identical": merge_result.files_identical,
+                "bytes_copied": merge_result.bytes_copied,
+                "directories_created": merge_result.directories_created,
             },
         )
 

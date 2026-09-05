@@ -2,6 +2,20 @@
 
 通过 ProcessSupervisor 执行 ADB 命令，自动管理临时输出文件和目录。
 每条命令创建一个独立的 ProcessSupervisor 上下文，确保资源隔离。
+
+adb server（daemon，监听 5037）必须活过单条命令：设备表——包括 ``adb connect``
+注册的 TCP 设备——完全保存在该 daemon 的内存里。若 daemon 随命令一起被 Job 回收：
+
+1. ``adb connect`` 写入的 TCP 设备记录随之丢失，下一条 ``adb devices`` 冷启动出空
+   daemon，探测得到 ``DEVICE_NOT_FOUND`` / ``step=select_device``；
+2. 每条命令都要重新冷启动 daemon（实测 0.06s -> 2.08s），逼近甚至超出单命令预算，
+   表现为 ``ADB_TIMEOUT``。
+
+因此 :meth:`AdbClient.ensure_server` 在首条命令前显式拉起一次常驻 daemon。它使用
+``descendants_survive_close=True`` 且**不**重定向 stdout/stderr：后者会使 ``launch()``
+传 ``bInheritHandles=TRUE``，而那会让存活的 daemon 连带继承编排器自己的 stdout 句柄，
+下游读取端永远收不到 EOF。普通命令仍维持默认的 ``KILL_ON_JOB_CLOSE``，
+不会泄漏句柄也不会留下游离进程。
 """
 
 from __future__ import annotations
@@ -85,8 +99,89 @@ class AdbClient:
 
     def __init__(self, config: AdbClientConfig) -> None:
         self._config = config
+        self._server_ensured = False
 
     # ── 公开方法 ──────────────────────────────────────────────
+
+    def ensure_server(self, deadline: Deadline, cancel: CancellationToken | None = None) -> ProbeResult:
+        """确保常驻 adb server 已在运行，且不会被本进程的 Job 回收。
+
+        ``adb start-server`` 属于引信型命令：前台进程立即退出，其 fork 出的 daemon
+        必须长期存活，否则每条后续命令都会自行冷启动一个空 daemon，丢掉
+        ``adb connect`` 注册的 TCP 设备（见模块 docstring）。
+
+        与其他命令的两点关键差异：
+
+        1. ``descendants_survive_close=True``，让 daemon 活过本命令；
+        2. **不**重定向 stdout/stderr。重定向会使 ``launch()`` 传
+           ``bInheritHandles=TRUE``，存活的 daemon 会连带继承编排器自己的 stdout
+           句柄，使下游读取端永远收不到 EOF（实测会挂住管道）。因此这里放弃输出捕获，
+           只依据 ``termination_reason`` 判定结果。
+
+        幂等：同一 client 实例只实际执行一次。失败不抛出，由后续命令自行报错。
+        """
+        started_at = time.monotonic()
+        if self._server_ensured:
+            return ProbeResult.from_monotonic(
+                "adb_start_server", ProbeStatus.READY, ProbeErrorCode.OK, started_at
+            )
+
+        if not self._config.executable.is_file():
+            return ProbeResult.from_monotonic(
+                "adb_start_server",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.ADB_NOT_FOUND,
+                started_at,
+            )
+        if cancel is not None and cancel.is_cancelled:
+            return ProbeResult.from_monotonic(
+                "adb_start_server", ProbeStatus.FAILED, ProbeErrorCode.ADB_CANCELLED, started_at
+            )
+        if deadline.expired:
+            return ProbeResult.from_monotonic(
+                "adb_start_server", ProbeStatus.TIMEOUT, ProbeErrorCode.ADB_TIMEOUT, started_at
+            )
+
+        command_deadline = Deadline.at(started_at + deadline.clamp_timeout(self._config.command_timeout_seconds))
+        spec = ProcessSpec(
+            name="adb_start_server",
+            executable=self._config.executable,
+            arguments=(*self._config.base_arguments, "start-server"),
+            working_directory=self._config.working_directory,
+            descendants_survive_close=True,
+        )
+
+        try:
+            with ProcessSupervisor() as supervisor:
+                proc_result = supervisor.run(spec, command_deadline, cancel)
+        except Exception:
+            return ProbeResult.from_monotonic(
+                "adb_start_server",
+                ProbeStatus.FAILED,
+                ProbeErrorCode.ADB_START_FAILED,
+                started_at,
+            )
+
+        reason = proc_result.termination_reason
+        if reason == TerminationReason.NORMAL_EXIT:
+            self._server_ensured = True
+            return ProbeResult.from_monotonic(
+                "adb_start_server", ProbeStatus.READY, ProbeErrorCode.OK, started_at
+            )
+        if reason == TerminationReason.TIMEOUT:
+            return ProbeResult.from_monotonic(
+                "adb_start_server", ProbeStatus.TIMEOUT, ProbeErrorCode.ADB_TIMEOUT, started_at
+            )
+        if reason == TerminationReason.CANCELLED:
+            return ProbeResult.from_monotonic(
+                "adb_start_server", ProbeStatus.FAILED, ProbeErrorCode.ADB_CANCELLED, started_at
+            )
+        return ProbeResult.from_monotonic(
+            "adb_start_server",
+            ProbeStatus.FAILED,
+            ProbeErrorCode.ADB_EXIT_NONZERO,
+            started_at,
+        )
 
     def version(self, deadline: Deadline, cancel: CancellationToken | None = None) -> ProbeResult:
         """执行 ``adb version``。"""
@@ -198,6 +293,9 @@ class AdbClient:
                 ProbeErrorCode.ADB_TIMEOUT,
                 started_at,
             )
+
+        # connect 写入的 TCP 设备仅存于 daemon 内存，必须先保证 daemon 能活过本命令。
+        self.ensure_server(deadline, cancel)
 
         probe = self._run_adb_command(
             probe_name="adb_connect",

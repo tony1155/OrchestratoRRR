@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
+from autogame_orchestrator.maa_resource.merger import MAAResourceMerger
 from autogame_orchestrator.maa_sync.synchronizer import MAASynchronizer
 from autogame_orchestrator.maa_update import build_maa_update_runtime_config
 from autogame_orchestrator.process.cancellation import CancellationToken
@@ -89,4 +90,15 @@ def build_default_runtime_factories(config: AppConfig) -> RuntimeFactories:
     def build_maa_update() -> MAAAdapter:
         return MAAAdapter(build_maa_update_runtime_config(config.maa, config.maa_update))
 
-    return RuntimeFactories(build_starrail, build_maa, build_aalc, build_mumu, build_maa_sync, build_maa_update)
+    def build_maa_resource_merge() -> MAAResourceMerger:
+        return MAAResourceMerger(config.maa_resource_merge)
+
+    return RuntimeFactories(
+        build_starrail,
+        build_maa,
+        build_aalc,
+        build_mumu,
+        build_maa_sync,
+        build_maa_update,
+        build_maa_resource_merge,
+    )

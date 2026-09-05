@@ -14,8 +14,8 @@ def test_default_plan_preserves_existing_order() -> None:
     assert build_execution_plan(AppConfig()).stages == build_plan()
 
 
-def test_default_plan_has_fifteen_stages() -> None:
-    assert len(build_execution_plan(AppConfig()).stages) == 15
+def test_default_plan_has_sixteen_stages() -> None:
+    assert len(build_execution_plan(AppConfig()).stages) == 16
 
 
 def test_default_plan_ends_with_maa_shutdown_and_report() -> None:

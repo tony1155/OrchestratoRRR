@@ -15,6 +15,7 @@ from autogame_orchestrator.config_model import (
     AALCConfig,
     AppConfig,
     MAAConfig,
+    MAAResourceMergeConfig,
     MAASyncConfig,
     MAAUpdateConfig,
     MuMuConfig,
@@ -84,6 +85,7 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     cfg_ma = _parse_maa(data.get("maa"))
     cfg_ms = _parse_maa_sync(data.get("maa_sync"))
     cfg_up = _parse_maa_update(data.get("maa_update"))
+    cfg_rm = _parse_maa_resource_merge(data.get("maa_resource_merge"))
     cfg_al = _parse_aalc(data.get("aalc"))
 
     all_errors.extend(cfg_or[1])
@@ -92,6 +94,7 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     all_errors.extend(cfg_ma[1])
     all_errors.extend(cfg_ms[1])
     all_errors.extend(cfg_up[1])
+    all_errors.extend(cfg_rm[1])
 
     if all_errors:
         return None, all_errors
@@ -103,6 +106,7 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
         maa=cfg_ma[0],  # type: ignore[arg-type]
         maa_sync=cfg_ms[0],  # type: ignore[arg-type]
         maa_update=cfg_up[0],  # type: ignore[arg-type]
+        maa_resource_merge=cfg_rm[0],  # type: ignore[arg-type]
         aalc=cfg_al[0] if cfg_al[0] is not None else AALCConfig(),
     )
 
@@ -385,6 +389,49 @@ def _parse_maa_update(raw: object) -> tuple[MAAUpdateConfig | None, list[ErrorCo
         allow_network=allow_network,
         requires_administrator=requires_administrator,
         arguments=tuple(arguments) if arguments is not None else (),
+        timeout_seconds=timeout_seconds,
+    ), []
+
+
+def _parse_maa_resource_merge(raw: object) -> tuple[MAAResourceMergeConfig | None, list[ErrorCode]]:
+    if raw is None:
+        return MAAResourceMergeConfig(), []
+    if not isinstance(raw, dict):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    allowed_fields = {
+        "enabled",
+        "source_directory",
+        "destination_directory",
+        "max_files",
+        "max_file_bytes",
+        "timeout_seconds",
+    }
+    if any(key not in allowed_fields for key in raw):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    defaults = MAAResourceMergeConfig()
+    enabled = raw.get("enabled", defaults.enabled)
+    source_directory = raw.get("source_directory", defaults.source_directory)
+    destination_directory = raw.get("destination_directory", defaults.destination_directory)
+    max_files = raw.get("max_files", defaults.max_files)
+    max_file_bytes = raw.get("max_file_bytes", defaults.max_file_bytes)
+    timeout_seconds = raw.get("timeout_seconds", defaults.timeout_seconds)
+    valid = (
+        isinstance(enabled, bool)
+        and isinstance(source_directory, str)
+        and isinstance(destination_directory, str)
+        and all(
+            isinstance(value, int) and not isinstance(value, bool)
+            for value in (max_files, max_file_bytes, timeout_seconds)
+        )
+    )
+    if not valid:
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    return MAAResourceMergeConfig(
+        enabled=enabled,
+        source_directory=source_directory,
+        destination_directory=destination_directory,
+        max_files=max_files,
+        max_file_bytes=max_file_bytes,
         timeout_seconds=timeout_seconds,
     ), []
 

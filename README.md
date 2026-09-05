@@ -17,19 +17,21 @@ OrchestratoRRR 用于按确定顺序管理 MuMu、StarRailCopilot、MAA 等外�
 - **有界 ADB 恢复**：单条 ADB 命令默认最多占用 5 秒；受控 localhost connect 带冷却；持续 `DEVICE_OFFLINE` 时只回收精确目标 transport，并在最多一次 managed restart 前后各允许一次 endpoint recovery，全部共享原预算。
 - **MAA 配置同步**：对白名单字段做转换和大小限制，使用临时文件、原子替换、备份与双目标失败回滚。
 - **受限 MAA 更新**：默认关闭；启用时要求显式网络授权，只允许固定 `update` 入口并受 Deadline 约束。
+- **MaaResource 覆盖合并**：默认关闭；把 `maa update` 拉取的增量资源逐文件原子合并进 MaaCore 共用资源目录，消除 CLI 侧多目录叠加导致的资源加载失败（内容相同则跳过，不产生写入）。
 - **可观测结果**：每次运行输出 JSONL 阶段事件和 schema v1 `RunReport`；报告先校验 JSON Schema，再原子落盘。
 - **打包与桌面入口**：PyInstaller 6.21 onedir、资源审计、标准 LOCALAPPDATA 布局、Start Menu `start` 入口和交互式真实执行确认。
 - **工程验证**：pytest Fake/mock 测试覆盖进程、探针、Runtime、工作流、CLI、打包与安装边界，并使用 Ruff 和 strict mypy 做静态检查。
 
 ## 当前生产流程
 
-managed 模式的默认生产计划共有 15 个阶段，顺序由源码中的 `planning.build_plan()` 与 `run_application.MANAGED_RUN_STAGES` 共同锁定：
+managed 模式的默认生产计划共有 16 个阶段，顺序由源码中的 `planning.build_plan()` 与 `run_application.MANAGED_RUN_STAGES` 共同锁定：
 
 ```mermaid
 flowchart TD
     A[加载配置与 VALIDATE_CONFIG]
     B[SYNC_MAA_CONFIG<br/>可选配置同步]
     C[UPDATE_MAA<br/>可选且需网络授权]
+    P[MERGE_MAA_RESOURCE<br/>可选资源合并]
     D[ENSURE_MUMU_RUNNING]
     E[WAIT_MUMU_ADB_READY]
     F[RUN_STARRAIL]
@@ -43,17 +45,18 @@ flowchart TD
     N[SHUTDOWN_MUMU]
     O[WRITE_RUN_REPORT]
 
-    A --> B --> C --> D --> E --> F --> G --> H
+    A --> B --> C --> P --> D --> E --> F --> G --> H
     H --> I --> J --> K --> L --> M --> N --> O
 ```
 
 这条顺序表达了一个明确的生命周期边界：
 
 1. 先校验配置，并按配置决定是否同步或更新 MAA。
-2. 确认 MuMu 与 ADB readiness 后运行 StarRailCopilot。
-3. StarRail 完成后停止并重新启动 MuMu，为 MAA 提供干净实例。
-4. MAA 完成后关闭整个 MuMu，最后写入 RunReport。
-5. managed 实例已被本次运行接管后，若业务阶段失败或超时，会在写报告前额外尝试一次有界 `SHUTDOWN_MUMU`；cleanup 失败只作为 secondary failure，不覆盖原始错误。
+2. 资源合并紧跟在更新之后：`maa update` 刚把 MaaResource 拉到最新，而 MaaCore 升级会重刷 `resource`，合并必须排在两者之后。
+3. 确认 MuMu 与 ADB readiness 后运行 StarRailCopilot。
+4. StarRail 完成后停止并重新启动 MuMu，为 MAA 提供干净实例。
+5. MAA 完成后关闭整个 MuMu，最后写入 RunReport。
+6. managed 实例已被本次运行接管后，若业务阶段失败或超时，会在写报告前额外尝试一次有界 `SHUTDOWN_MUMU`；cleanup 失败只作为 secondary failure，不覆盖原始错误。
 
 external 模式不拥有 MuMu 生命周期，会从默认计划中移除 stop/start/restart/shutdown 阶段，只验证外部已启动实例的 readiness。AALC/Limbus 已从 managed 和 external 生产计划、执行器分发与路径校验中下线；旧配置段和历史 Adapter 暂时保留用于兼容与追溯。
 
@@ -280,7 +283,7 @@ docs/                    架构、阶段计划、验收证据和手工门禁
 - managed MuMu 冷启动、停止、重启、ADB ready、最终 shutdown 和进程回收；
 - 两次 managed 真实完整工作流成功记录，其中一次从干净进程基线启动并验证 player born 2 / reaped 2 / leaked 0；
 - PyInstaller onedir、schema 资源、默认入口、首次安装和带产品数据保护的安装更新；
-- 当前不含 AALC 的 15 阶段计划、失败 cleanup、ADB child deadline、精确 endpoint recycle 和 offline recovery 的完整自动测试。
+- 当前不含 AALC 的 16 阶段计划、失败 cleanup、ADB child deadline、精确 endpoint recycle 和 offline recovery 的完整自动测试。
 
 为避免夸大：最近的 ADB/offline 修复只进行了自动测试和打包重建，没有重新执行真实业务工作流；历史 AALC 在线业务任务也从未被声明为完成，并且现已从生产流程下线。
 

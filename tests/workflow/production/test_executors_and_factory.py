@@ -104,14 +104,19 @@ def factories(
     maa=None,
     aalc=None,
     mumu=None,
+    maa_resource_merge=None,
 ) -> tuple[RuntimeFactories, Counter[str]]:
     counter = counts or Counter()
+    merge_factory = (
+        CountingFactory("maa_resource_merge", maa_resource_merge, counter) if maa_resource_merge is not None else None
+    )
     return (
         RuntimeFactories(
             CountingFactory("starrail", starrail or FakeRunPort(starrail_result()), counter),
             CountingFactory("maa", maa or FakeRunPort(maa_result()), counter),
             CountingFactory("aalc", aalc or FakeRunPort(aalc_result()), counter),
             CountingFactory("mumu", mumu or FakeMumuPort(mumu_result(MumuRuntimeStatus.READY)), counter),
+            maa_resource_merge=merge_factory,
         ),
         counter,
     )
@@ -180,8 +185,9 @@ def test_default_plan_passes_disabled_update_before_mumu_deadline_gate(tmp_path:
     assert report.stages[0].outcome == OutcomeKind.SUCCESS
     assert report.stages[1].outcome == OutcomeKind.SUCCESS
     assert report.stages[2].outcome == OutcomeKind.SUCCESS
-    assert report.stages[3].error_code == ErrorCode.WORKFLOW_DEADLINE_REQUIRED
-    assert all(item.outcome == OutcomeKind.SKIPPED for item in report.stages[4:-1])
+    assert report.stages[3].outcome == OutcomeKind.SUCCESS
+    assert report.stages[4].error_code == ErrorCode.WORKFLOW_DEADLINE_REQUIRED
+    assert all(item.outcome == OutcomeKind.SKIPPED for item in report.stages[5:-1])
     assert counts == Counter()
 
 

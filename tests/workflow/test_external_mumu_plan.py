@@ -22,6 +22,7 @@ EXTERNAL_STAGES = (
     StageName.VALIDATE_CONFIG,
     StageName.SYNC_MAA_CONFIG,
     StageName.UPDATE_MAA,
+    StageName.MERGE_MAA_RESOURCE,
     StageName.ENSURE_MUMU_RUNNING,
     StageName.WAIT_MUMU_ADB_READY,
     StageName.RUN_STARRAIL,
@@ -40,7 +41,7 @@ REMOVED_STAGES = (
 
 # SHUTDOWN_MUMU 也只属于 managed：它是 AALC 之后的收尾关闭，external 模式下
 # 编排器不拥有模拟器生命周期，故同样被移除。它不在 REMOVED_STAGES 里是因为
-# 后者断言的是静态计划中连续的 [8:12] 区段，而 SHUTDOWN_MUMU 位于索引 14。
+# 后者断言的是静态计划中连续的 [9:13] 区段，而 SHUTDOWN_MUMU 位于索引 15。
 MANAGED_ONLY_TEARDOWN = StageName.SHUTDOWN_MUMU
 
 
@@ -49,20 +50,20 @@ def _external_config(**changes: object) -> AppConfig:
     return replace(config, **changes)
 
 
-def test_static_build_plan_has_fifteen_managed_stages() -> None:
-    assert len(build_plan()) == 15
+def test_static_build_plan_has_sixteen_managed_stages() -> None:
+    assert len(build_plan()) == 16
 
 
 def test_static_build_plan_order_is_unchanged() -> None:
-    assert build_plan()[8:12] == REMOVED_STAGES
+    assert build_plan()[9:13] == REMOVED_STAGES
 
 
 def test_managed_execution_plan_uses_static_plan() -> None:
     assert build_execution_plan(AppConfig()).stages == build_plan()
 
 
-def test_managed_execution_plan_has_fifteen_stages() -> None:
-    assert len(build_execution_plan(AppConfig()).stages) == 15
+def test_managed_execution_plan_has_sixteen_stages() -> None:
+    assert len(build_execution_plan(AppConfig()).stages) == 16
 
 
 def test_managed_plan_ends_with_shutdown_before_report() -> None:
@@ -80,9 +81,9 @@ def test_external_execution_plan_has_exact_order() -> None:
     assert build_execution_plan(_external_config()).stages == EXTERNAL_STAGES
 
 
-def test_external_execution_plan_has_ten_stages() -> None:
+def test_external_execution_plan_has_eleven_stages() -> None:
     stages = build_execution_plan(_external_config()).stages
-    assert len(stages) == 10
+    assert len(stages) == 11
     assert StageName.RUN_AALC not in stages
 
 

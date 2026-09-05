@@ -90,6 +90,33 @@ requires_administrator = false
 arguments = ["update"]
 timeout_seconds = 3600
 
+# [maa_resource_merge] 默认关闭。启用后在 UPDATE_MAA 之后把 MaaResource 增量资源
+# 覆盖合并进随 MaaCore 安装的共用 resource 目录。
+#
+# 为何需要：`maa update` 只把 MaaResource 仓库 git pull 到 <data>/MaaResource，不会
+# 并入 <data>/resource。maa-cli 随后让 MaaCore 按 resource -> MaaResource/resource
+# -> cache/resource 顺序对同一单例连续调用 AsstLoadResource，而
+# InfrastConfig::parse 用 m_skills.emplace(facility, ...) 装填技能表（emplace 对已
+# 存在的 key 静默不覆盖），随后解析 skillsGroup 时却用 .at() 查找技能 id。因此
+# 当新版资源引入「新 skillsGroup 引用新技能」时，第二遍加载会命中第一遍留下的
+# 旧技能表，.at() 抛 std::out_of_range，整个资源加载失败，maa-cli 以退出码 1 结束。
+# MAA GUI 不受影响，因为它更新资源时是把增量包 DirectoryMerge 就地并入自己的
+# resource，全程只有一份 infrast.json。本阶段做的就是 GUI 那个合并动作。
+#
+# 安全余量：逐文件“同目录临时文件 + fsync + os.replace”提交；内容相同则跳过，
+# 不产生写入；只覆盖源侧存在的路径，不删除目标独有文件（core 自带的 onnx/OCR
+# 等不会丢）；跳过符号链接；源与目标互为祖先时在校验期拒绝。
+#
+# 注意：destination_directory 与 MAA GUI 共用。合并会让 GUI 也看到新资源（通常
+# 是期望行为）；若不希望影响 GUI，请保持 enabled = false。
+[maa_resource_merge]
+enabled = false
+# source_directory = "C:\\path\\to\\MAA\\MaaResource\\resource"
+# destination_directory = "C:\\path\\to\\MAA\\resource"
+max_files = 20000
+max_file_bytes = 67108864
+timeout_seconds = 600
+
 [aalc]
 executable = "C:\\path\\to\\AALC.exe"
 working_directory = "C:\\path\\to\\AALC"

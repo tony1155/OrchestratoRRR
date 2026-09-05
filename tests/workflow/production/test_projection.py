@@ -84,7 +84,49 @@ def test_maa_projection_uses_allowlist() -> None:
         "owned_process_cleaned",
         "stdout_truncated",
         "stderr_truncated",
+        "stdout_present",
+        "stderr_present",
+        "failure_markers",
     }
+
+
+def test_maa_projection_reports_output_presence() -> None:
+    report = project_maa(StageName.RUN_MAA, maa_result())
+    assert report.diagnostics["stdout_present"] is True
+    assert report.diagnostics["stderr_present"] is True
+    empty = project_maa(StageName.RUN_MAA, maa_result(stdout_excerpt="", stderr_excerpt=""))
+    assert empty.diagnostics["stdout_present"] is False
+    assert empty.diagnostics["stderr_present"] is False
+
+
+def test_maa_projection_extracts_stable_failure_markers() -> None:
+    """资源加载失败应当直接体现在报告里，而不需要翻 MaaCore 的 asst.log。"""
+    result = maa_result(
+        MAARunStatus.FAILED,
+        stdout_excerpt="",
+        stderr_excerpt=(
+            "Error: MaaCore returned an error, check its log for details\n"
+            "Failed to create Assistant: resources may not be loaded\n"
+        ),
+    )
+    markers = project_maa(StageName.RUN_MAA, result).diagnostics["failure_markers"]
+    assert markers == ["core_error", "resource_load_failed"]
+
+
+def test_maa_projection_markers_are_empty_without_known_cause() -> None:
+    result = maa_result(MAARunStatus.FAILED, stdout_excerpt="plain", stderr_excerpt="nothing recognisable")
+    assert project_maa(StageName.RUN_MAA, result).diagnostics["failure_markers"] == []
+
+
+def test_maa_failure_markers_never_leak_surrounding_text() -> None:
+    result = maa_result(
+        MAARunStatus.FAILED,
+        stdout_excerpt="",
+        stderr_excerpt="Failed to pull resource repository at E:\\private\\MaaResource",
+    )
+    report = project_maa(StageName.RUN_MAA, result)
+    assert report.diagnostics["failure_markers"] == ["resource_repo_pull_failed"]
+    assert "private" not in json.dumps(report.to_json_encodable(), ensure_ascii=False)
 
 
 def test_maa_projection_preserves_runtime_time() -> None:

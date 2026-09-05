@@ -101,6 +101,11 @@ class _WhitespaceAdb:
         self.output = output
         self.get_state_calls = 0
         self.boot_calls = 0
+        self.ensure_server_calls = 0
+
+    def ensure_server(self, _deadline: Deadline, _cancel=None) -> ProbeResult:
+        self.ensure_server_calls += 1
+        return ProbeResult.ready("adb_start_server")
 
     def list_devices(self, _deadline: Deadline, _cancel=None) -> AdbDevicesResult:
         try:

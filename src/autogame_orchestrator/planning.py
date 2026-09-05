@@ -17,6 +17,7 @@ _DEFAULT_PLAN: tuple[StageName, ...] = (
     StageName.VALIDATE_CONFIG,
     StageName.SYNC_MAA_CONFIG,
     StageName.UPDATE_MAA,
+    StageName.MERGE_MAA_RESOURCE,
     StageName.ENSURE_MUMU_RUNNING,
     StageName.WAIT_MUMU_ADB_READY,
     StageName.RUN_STARRAIL,
