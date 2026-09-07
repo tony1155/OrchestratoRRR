@@ -11,6 +11,7 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from autogame_orchestrator.bettergi_config import BetterGIConfig
 from autogame_orchestrator.config_model import (
     AALCConfig,
     AppConfig,
@@ -86,6 +87,7 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     cfg_ms = _parse_maa_sync(data.get("maa_sync"))
     cfg_up = _parse_maa_update(data.get("maa_update"))
     cfg_rm = _parse_maa_resource_merge(data.get("maa_resource_merge"))
+    cfg_bg = _parse_bettergi(data.get("bettergi"))
     cfg_al = _parse_aalc(data.get("aalc"))
 
     all_errors.extend(cfg_or[1])
@@ -95,11 +97,13 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     all_errors.extend(cfg_ms[1])
     all_errors.extend(cfg_up[1])
     all_errors.extend(cfg_rm[1])
+    all_errors.extend(cfg_bg[1])
 
     if all_errors:
         return None, all_errors
 
     config = AppConfig(
+        bettergi=cfg_bg[0],  # type: ignore[arg-type]
         orchestrator=cfg_or[0],  # type: ignore[arg-type]
         mumu=cfg_mu[0],  # type: ignore[arg-type]
         starrail=cfg_sr[0],  # type: ignore[arg-type]
@@ -434,6 +438,45 @@ def _parse_maa_resource_merge(raw: object) -> tuple[MAAResourceMergeConfig | Non
         max_file_bytes=max_file_bytes,
         timeout_seconds=timeout_seconds,
     ), []
+
+
+def _parse_bettergi(raw: object) -> tuple[BetterGIConfig | None, list[ErrorCode]]:
+    if raw is None:
+        return BetterGIConfig(), []
+    if not isinstance(raw, dict):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    defaults = BetterGIConfig()
+    allowed = {
+        "enabled",
+        "executable",
+        "working_directory",
+        "mode",
+        "config_name",
+        "timeout_seconds",
+        "stop_timeout_seconds",
+    }
+    if set(raw) - allowed:
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    enabled = raw.get("enabled", defaults.enabled)
+    executable = raw.get("executable", defaults.executable)
+    directory = raw.get("working_directory", defaults.working_directory)
+    mode = raw.get("mode", defaults.mode)
+    name = raw.get("config_name", defaults.config_name)
+    timeout = raw.get("timeout_seconds", defaults.timeout_seconds)
+    stop = raw.get("stop_timeout_seconds", defaults.stop_timeout_seconds)
+    if not (
+        isinstance(enabled, bool)
+        and isinstance(executable, str)
+        and isinstance(directory, str)
+        and isinstance(mode, str)
+        and isinstance(name, str)
+        and isinstance(timeout, int)
+        and not isinstance(timeout, bool)
+        and isinstance(stop, int)
+        and not isinstance(stop, bool)
+    ):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    return BetterGIConfig(enabled, executable, directory, mode, name, timeout, stop), []
 
 
 def _parse_aalc(raw: object) -> tuple[AALCConfig | None, list[ErrorCode]]:

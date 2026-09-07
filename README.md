@@ -24,6 +24,12 @@ OrchestratoRRR 用于按确定顺序管理 MuMu、StarRailCopilot、MAA 等外�
 
 ## 当前生产流程
 
+可选启用官方 BetterGI 0.64.0 一条龙：`[bettergi] enabled = true` 时，managed 模式在
+`SHUTDOWN_MUMU` 后、写报告前增加 `RUN_BETTERGI`；external 模式在 MAA 后执行。
+默认关闭，任务由 BetterGI GUI 配置。Adapter 结合本次实例日志与进程退出判定完成，
+并执行有界 Job 清理。接入已提供 Fake 测试，尚未真实游戏验收；配置方法与边界见
+[BetterGI 接入说明](docs/manual/bettergi-integration.md)。
+
 managed 模式的默认生产计划共有 16 个阶段，顺序由源码中的 `planning.build_plan()` 与 `run_application.MANAGED_RUN_STAGES` 共同锁定：
 
 ```mermaid

@@ -11,6 +11,7 @@ from autogame_orchestrator.maa_update import build_maa_update_runtime_config
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.runtime.aalc import AALCAdapter
+from autogame_orchestrator.runtime.bettergi import BetterGIAdapter
 from autogame_orchestrator.runtime.maa import MAAAdapter
 from autogame_orchestrator.runtime.models import MumuRuntimeResult
 from autogame_orchestrator.runtime.mumu import MumuAdapter
@@ -101,4 +102,5 @@ def build_default_runtime_factories(config: AppConfig) -> RuntimeFactories:
         build_maa_sync,
         build_maa_update,
         build_maa_resource_merge,
+        bettergi=lambda: BetterGIAdapter(config.bettergi),
     )

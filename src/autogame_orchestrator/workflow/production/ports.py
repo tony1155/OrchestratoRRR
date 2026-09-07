@@ -11,6 +11,7 @@ from autogame_orchestrator.maa_sync.models import MAASyncResult
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.runtime.aalc_models import AALCRunResult
+from autogame_orchestrator.runtime.bettergi_models import BetterGIRunResult
 from autogame_orchestrator.runtime.maa_models import MAARunResult
 from autogame_orchestrator.runtime.models import MumuRuntimeResult
 from autogame_orchestrator.runtime.starrail_models import StarRailRunResult
@@ -22,6 +23,14 @@ class StarRailRunPort(Protocol):
         deadline: Deadline | None = None,
         cancel: CancellationToken | None = None,
     ) -> StarRailRunResult: ...
+
+
+class BetterGIRunPort(Protocol):
+    def run(
+        self,
+        deadline: Deadline | None = None,
+        cancel: CancellationToken | None = None,
+    ) -> BetterGIRunResult: ...
 
 
 class MAARunPort(Protocol):
@@ -108,3 +117,4 @@ class RuntimeFactories:
     maa_sync: Callable[[], MAASyncPort] | None = None
     maa_update: Callable[[], MAAUpdatePort] | None = None
     maa_resource_merge: Callable[[], MAAResourceMergePort] | None = None
+    bettergi: Callable[[], BetterGIRunPort] | None = None

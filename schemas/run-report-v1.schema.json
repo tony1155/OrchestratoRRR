@@ -93,6 +93,7 @@
         "start_mumu",
         "wait_mumu_adb_ready_after_restart",
         "run_maa",
+        "run_bettergi",
         "run_aalc",
         "shutdown_mumu",
         "write_run_report"

@@ -13,6 +13,7 @@ from autogame_orchestrator.models import ErrorCode, OutcomeKind, StageName, Stag
 from autogame_orchestrator.runtime.models import MumuRuntimeStatus
 from autogame_orchestrator.workflow.contracts import StageExecutionContext
 from autogame_orchestrator.workflow.production.ports import (
+    BetterGIRunPort,
     MAAResourceMergePort,
     MAARunPort,
     MAASyncPort,
@@ -64,7 +65,9 @@ class ProductionStageExecutor:
         maa_sync: Callable[[], MAASyncPort],
         maa_update: Callable[[], MAAUpdatePort],
         maa_resource_merge: Callable[[], MAAResourceMergePort],
+        bettergi: Callable[[], BetterGIRunPort] | None = None,
     ) -> None:
+        self._bettergi = bettergi
         self._stage = stage
         self._config = config
         self._state = state
@@ -129,9 +132,39 @@ class ProductionStageExecutor:
             return project_starrail(stage, result)
         if stage in {StageName.STOP_STARRAIL, StageName.VERIFY_STARRAIL_STOPPED}:
             return self._verify_starrail_postcondition()
+        if stage == StageName.RUN_BETTERGI:
+            return self._run_bettergi(context)
         if stage == StageName.RUN_MAA:
             return project_maa(stage, self._maa().run(context.deadline, context.cancel))
         return _instant(stage, OutcomeKind.FAILURE, ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED)
+
+    def _run_bettergi(self, context: StageExecutionContext) -> StageReport:
+        if not self._config.bettergi.enabled or self._bettergi is None:
+            return _instant(self._stage, OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_BLOCKED)
+        result = self._bettergi().run(context.deadline, context.cancel)
+        mapping = {
+            "completed": (OutcomeKind.SUCCESS, ErrorCode.OK),
+            "failed": (OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_FAILED),
+            "timeout": (OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT),
+            "cancelled": (OutcomeKind.CANCELLED, ErrorCode.WORKFLOW_CANCELLED),
+        }
+        outcome, code = mapping[result.status.value]
+        return StageReport(
+            self._stage,
+            outcome,
+            code,
+            result.started_at,
+            result.finished_at,
+            result.duration_ms,
+            diagnostics={
+                "source_error_code": result.error_code.value,
+                "exit_code": result.exit_code,
+                "owned_process_cleaned": result.owned_process_cleaned,
+                "configuration_confirmed": result.configuration_confirmed,
+                "completion_confirmed": result.completion_confirmed,
+                "completion_contract": "bettergi_0.64.0_instance_log",
+            },
+        )
 
     def _run_maa_sync(self, context: StageExecutionContext) -> StageReport:
         if not self._config.maa_sync.enabled:

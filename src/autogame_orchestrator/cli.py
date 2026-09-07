@@ -38,10 +38,11 @@ from autogame_orchestrator.models import (
     StageName,
     StageReport,
 )
-from autogame_orchestrator.planning import PLAN_HEADER, build_plan
+from autogame_orchestrator.planning import PLAN_HEADER
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.reporter import write_report_atomic
 from autogame_orchestrator.run_application import RunRequest, execute_run_request
+from autogame_orchestrator.workflow.plan import build_execution_plan
 
 if TYPE_CHECKING:
     pass
@@ -343,7 +344,8 @@ def plan(
     typer.echo(PLAN_HEADER)
     typer.echo()
 
-    plan_stages = build_plan()
+    assert app_config is not None
+    plan_stages = build_execution_plan(app_config).stages
     for idx, stage_name in enumerate(plan_stages, 1):
         typer.echo(f"  {idx:2d}. {stage_name.value}")
 
