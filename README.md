@@ -110,8 +110,11 @@ python -m pip install -e ".[dev]"
 # 只读预检，不启动游戏、提权、更新或写运行日志
 .\scripts\run-local.ps1 -CheckOnly
 
-# 预览计划、交互确认后运行，结束时保留窗口
+# 预检通过后直接运行，结束时保留窗口
 .\scripts\run-local.ps1
+
+# 可选：运行前手动输入确认
+.\scripts\run-local.ps1 -ConfirmBeforeRun
 ```
 
 入口统一使用 `config/orchestrator.local.toml` 和项目 `.venv\Scripts\python.exe`。

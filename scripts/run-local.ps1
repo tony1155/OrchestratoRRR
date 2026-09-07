@@ -5,6 +5,7 @@ param(
     [ValidateRange(1, 86400)]
     [int]$DeadlineSeconds = 7200,
     [switch]$CheckOnly,
+    [switch]$ConfirmBeforeRun,
     [switch]$NoPause
 )
 
@@ -55,9 +56,13 @@ try {
             throw "An interactive console is required. Use -CheckOnly for noninteractive checks."
         }
         Write-Host "WARNING: This starts real programs and may update MAA or request administrator privileges."
-        $confirmation = Read-Host "Type $($launch.confirmation) to continue"
-        if ($confirmation -cne $launch.confirmation) {
-            throw "Confirmation rejected. No workflow was started."
+        if ($ConfirmBeforeRun) {
+            $confirmation = Read-Host "Type $($launch.confirmation) to continue"
+            if ($confirmation -cne $launch.confirmation) {
+                throw "Confirmation rejected. No workflow was started."
+            }
+        } else {
+            $confirmation = $launch.confirmation
         }
         foreach ($directory in @($launch.log_directory, $launch.report_directory, $launch.runtime_directory)) {
             [System.IO.Directory]::CreateDirectory($directory) | Out-Null

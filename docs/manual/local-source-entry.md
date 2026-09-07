@@ -40,8 +40,11 @@ redirected by the orchestrator log setting.
 # Read-only configuration, source, schema, path and plan checks. No game/UAC.
 .\scripts\run-local.ps1 -CheckOnly
 
-# Interactive execution, followed by a pause so the result stays visible.
+# Start immediately after preflight; pause at the end to keep the result visible.
 .\scripts\run-local.ps1
+
+# Optional typed confirmation before starting.
+.\scripts\run-local.ps1 -ConfirmBeforeRun
 
 # Optional alternate absolute locations; TOML destinations must match.
 .\scripts\run-local.ps1 -Config 'E:\other\orchestrator.local.toml' `
@@ -49,9 +52,12 @@ redirected by the orchestrator log setting.
 ```
 
 The launcher displays the Python, source, config, log, report and runtime
-paths and the complete plan. A real run requires an interactive console and
-the exact confirmation requested on screen. `-NoPause` only suppresses the
-final pause; it does not bypass confirmation or permit noninteractive runs.
+paths and the complete plan. A real run requires an interactive console but
+starts immediately after preflight by default, including from the desktop
+shortcut. The local launcher supplies the existing run command's confirmation
+value automatically. Use `-ConfirmBeforeRun` to opt into a typed confirmation
+prompt. `-NoPause` only suppresses the final pause; it does not bypass an
+explicit `-ConfirmBeforeRun` or permit noninteractive runs.
 The default total deadline remains 7200 seconds (maximum 86400). Cancellation,
 elevation, process ownership and cleanup remain governed by the existing run
 command. Failed interactive source runs now use the same bounded-information
@@ -71,8 +77,9 @@ or carry an embedded execution confirmation.
 
 `-CheckOnly` reads but does not create data directories, write logs/reports,
 request elevation, start business programs or perform network updates. Real
-runs create data directories only after confirmation. The directory write
-permissions still need to allow the user running the launcher to create them.
+runs create data directories after preflight and any requested confirmation.
+The directory write permissions still need to allow the user running the
+launcher to create them.
 
 ## Compatibility
 

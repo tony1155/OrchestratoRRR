@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -178,9 +179,10 @@ def _run_script(config: Path, data: Path, *options: str) -> subprocess.Completed
     )
 
 
-def test_script_check_only_is_read_only_and_works_from_another_cwd(local_config) -> None:
+@pytest.mark.parametrize("extra", [(), ("-ConfirmBeforeRun",)])
+def test_script_check_only_is_read_only_and_works_from_another_cwd(local_config, extra: tuple[str, ...]) -> None:
     config, data = local_config
-    result = _run_script(config, data, "-CheckOnly")
+    result = _run_script(config, data, "-CheckOnly", *extra)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "source entry" in result.stdout
     assert str(data / "run-results") in result.stdout
@@ -212,3 +214,63 @@ def test_script_rejects_out_of_range_deadlines(local_config, deadline: str) -> N
     assert result.returncode != 0
     assert "source entry" not in result.stdout
     assert not data.exists()
+
+
+@pytest.mark.parametrize(
+    ("confirm_before_run", "answer", "accepted"),
+    [
+        (False, "", True),
+        (True, RUN_CONFIRMATION, True),
+        (True, RUN_CONFIRMATION + " to continue", False),
+        (True, RUN_CONFIRMATION.lower(), False),
+        (True, "", False),
+    ],
+)
+def test_script_confirmation_is_opt_in(confirm_before_run: bool, answer: str, accepted: bool) -> None:
+    # Execute the actual confirmation branch in isolation, never the launch command.
+    command = r"""$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:ORCH_LAUNCHER, [ref]$tokens, [ref]$errors)
+if ($errors.Count -ne 0) { throw 'Script parse failed' }
+$branch = $ast.Find({ param($node)
+    $node -is [System.Management.Automation.Language.IfStatementAst] -and
+    $node.Clauses[0].Item1.Extent.Text -eq '$ConfirmBeforeRun'
+}, $true)
+if ($null -eq $branch) { throw 'Confirmation branch missing' }
+$ConfirmBeforeRun = $env:ORCH_CONFIRM -eq '1'
+$launch = [pscustomobject]@{ confirmation = $env:ORCH_EXPECTED }
+$script:promptCount = 0
+function Read-Host([string]$Prompt) {
+    $script:promptCount++
+    return $env:ORCH_ANSWER
+}
+$failure = $null
+$confirmation = $null
+try { . ([scriptblock]::Create($branch.Extent.Text)) } catch { $failure = $_.Exception.Message }
+@{ confirmation = $confirmation; prompts = $script:promptCount; error = $failure } | ConvertTo-Json -Compress
+"""
+    environment = os.environ.copy()
+    environment.update(
+        ORCH_LAUNCHER=str(SOURCE_ROOT / "scripts" / "run-local.ps1"),
+        ORCH_CONFIRM="1" if confirm_before_run else "0",
+        ORCH_EXPECTED=RUN_CONFIRMATION,
+        ORCH_ANSWER=answer,
+    )
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    metadata = json.loads(result.stdout)
+    assert metadata["prompts"] == int(confirm_before_run)
+    if accepted:
+        assert metadata["error"] is None
+        assert metadata["confirmation"] == RUN_CONFIRMATION
+    else:
+        assert metadata["error"] == "Confirmation rejected. No workflow was started."
