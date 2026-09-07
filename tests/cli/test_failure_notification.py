@@ -64,11 +64,12 @@ def _result(cleanup: OutcomeKind = OutcomeKind.SUCCESS) -> RunCommandResult:
     )
 
 
-def test_packaged_interactive_failure_shows_safe_dialog_after_report() -> None:
+@pytest.mark.parametrize("frozen", [False, True])
+def test_interactive_failure_shows_safe_dialog_after_report(frozen: bool) -> None:
     shown: list[tuple[str, str]] = []
     dependencies = FailureNotificationDependencies(
         platform="win32",
-        frozen=True,
+        frozen=frozen,
         stdin_isatty=lambda: True,
         stdout_isatty=lambda: True,
         show_dialog=lambda title, message: shown.append((title, message)),
@@ -119,12 +120,13 @@ def test_cleanup_failure_does_not_replace_original_dialog_error() -> None:
     ("platform", "frozen", "stdin_tty", "stdout_tty"),
     [
         ("linux", True, True, True),
-        ("win32", False, True, True),
+        ("win32", False, False, True),
+        ("win32", False, True, False),
         ("win32", True, False, True),
         ("win32", True, True, False),
     ],
 )
-def test_noninteractive_or_nonpackaged_failure_never_shows_dialog(
+def test_noninteractive_or_nonwindows_failure_never_shows_dialog(
     platform: str,
     frozen: bool,
     stdin_tty: bool,
