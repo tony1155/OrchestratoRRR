@@ -93,7 +93,13 @@ python -m autogame_orchestrator <dry-plan 入口，见 README"当前生产流程
 ```
 
 验收通过标准：① 全绿；③ 计划与文档一致；④ 一次完整成功 + 一次中途 Ctrl+C/取消
-（预期 run 状态 cancelled、MuMu 被清理关闭）。
+（预期 run 状态 cancelled、SHUTDOWN_MUMU 阶段 skipped、**MuMu 保留运行**——用户主动
+取消不动环境是上游的一贯语义，验收时手动关闭 MuMu 即可；超时（TIMEOUT/失败）才会
+触发失败清理关闭 MuMu）。
+
+注意预算关系：run 的 `--deadline-seconds` 应 ≥ `[mash].timeout_seconds` + 10 分钟余量
+（mash-cli 的内部 watchdog 按 `timeout_seconds` 预算运作；父预算先到期时兜底路径的
+优雅窗口会变窄）。
 
 ## 4. 出问题时的取证清单
 

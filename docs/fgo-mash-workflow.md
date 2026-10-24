@@ -50,7 +50,8 @@ WRITE_RUN_REPORT
   StageReport 诊断（投影层改名 `mash_*`，不透传本机路径）。
 - **默认注入 `--watchdog`**（timeout_seconds ≥ 300 且用户未显式配置时）：超时路径
   由 mash-cli 内部 watchdog 先行——优雅取消、120s 宽限、写齐结果文件、清理
-  current.json、契约退出码 3 干净退出；外部硬杀只作最后兜底（审计 P1-1 方案 3）。
+  current.json，并以退出码 3（timeout）上报：引擎响应取消优雅收尾（主流形态）
+  与挂死强退同样映射 timeout，不会误报为 cancelled；外部硬杀只作最后兜底（审计 P1-1 方案 3）。
   launch 前同时清除陈旧 result_file，避免上一次内容污染诊断（审计 P1-2）。
 
 ## 配置

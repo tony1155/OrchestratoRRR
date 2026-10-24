@@ -66,9 +66,10 @@ def build_run_arguments(config: MashConfig) -> tuple[str, ...]:
         arguments.extend(("--repeat", f"count:{config.repeat_count}"))
     # 审计 P1-1（方案 3）：超时路径让 mash-cli 的内部 watchdog 先行——它会
     # 优雅取消、留出固定宽限、写齐结果文件、清理 current.json，并以契约
-    # 退出码 3 干净退出；外部硬杀只剩兜底作用，规避宽限预算坍缩。
-    # 预算不足（timeout ≤ 阈值）或用户已显式配置 --watchdog 时不注入
-    # （mash-cli 取首个出现的 --watchdog，注入在前会覆盖用户值）。
+    # 退出码 3（timeout）上报（含引擎响应取消优雅收尾的主流形态，见
+    # mash-cli 侧 final_outcome 的 watchdog 映射）；外部硬杀只剩兜底作用。
+    # 预算不足（timeout_seconds < 300，恰好 300 会注入 180）或用户已显式
+    # 配置 --watchdog 时不注入（mash-cli 取首个出现的 --watchdog）。
     if "--watchdog" not in config.extra_arguments and config.timeout_seconds >= MIN_WATCHDOG_TIMEOUT_SECONDS:
         arguments.extend(("--watchdog", str(config.timeout_seconds - WATCHDOG_GRACE_SECONDS)))
     arguments.extend(config.extra_arguments)
@@ -366,9 +367,14 @@ class MashAdapter:
             cancelled_now = cancel is not None and cancel.is_cancelled
             if cancelled_now or effective_deadline.expired:
                 self._request_graceful_stop(supervisor, effective_deadline)
+                # 审计二轮 P2-5N：deadline 已耗尽时的下限预算不能太小——
+                # Windows 上子进程 spawn 在负载下可超过 1s，真实 mash-cli
+                # 的取消响应（300ms 轮询 + 战斗检查点）也需要 ≥1s。这两个
+                # 下限只作用于“watchdog 未兜住”的兑底路径，允许小幅越过
+                # 已到期的 deadline。
                 grace_seconds = min(
                     float(self._config.stop_timeout_seconds),
-                    max(effective_deadline.remaining_seconds, 0.5),
+                    max(effective_deadline.remaining_seconds, 2.0),
                 )
                 grace_deadline = Deadline.after(grace_seconds)
                 while managed.poll() is None and not grace_deadline.expired:
@@ -387,8 +393,9 @@ class MashAdapter:
             working_directory=working_directory,
             environment_overrides=_build_environment(self._config),
         )
+        # 见上方 P2-5N 注释：cancel 子进程自身的预算下限同步放宽到 3s。
         cancel_budget = min(
-            float(self._config.stop_timeout_seconds) + 5.0, max(effective_deadline.remaining_seconds, 1.0)
+            float(self._config.stop_timeout_seconds) + 5.0, max(effective_deadline.remaining_seconds, 3.0)
         )
         try:
             supervisor.run(spec, Deadline.after(cancel_budget))
