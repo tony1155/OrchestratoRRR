@@ -38,6 +38,12 @@ MASH_EXIT_FAILED = 1
 MASH_EXIT_CANCELLED = 2
 MASH_EXIT_WATCHDOG_TIMEOUT = 3
 
+# mash-cli watchdog 触发后的内部固定宽限（cancel → 120s → 强退）。
+WATCHDOG_GRACE_SECONDS = 120
+# timeout 预算低于该值不注入默认 watchdog：watchdog 必须 ≥ 内部宽限 + 余量，
+# 否则 mash-cli 会在阶段 deadline 之前就自行动手。
+MIN_WATCHDOG_TIMEOUT_SECONDS = 300
+
 
 def build_run_arguments(config: MashConfig) -> tuple[str, ...]:
     """由配置生成 ``mash-cli run`` 参数。"""
@@ -58,6 +64,13 @@ def build_run_arguments(config: MashConfig) -> tuple[str, ...]:
         arguments.extend(("--repeat", "infinite"))
     elif config.repeat_mode == MashRepeatMode.COUNT:
         arguments.extend(("--repeat", f"count:{config.repeat_count}"))
+    # 审计 P1-1（方案 3）：超时路径让 mash-cli 的内部 watchdog 先行——它会
+    # 优雅取消、留出固定宽限、写齐结果文件、清理 current.json，并以契约
+    # 退出码 3 干净退出；外部硬杀只剩兜底作用，规避宽限预算坍缩。
+    # 预算不足（timeout ≤ 阈值）或用户已显式配置 --watchdog 时不注入
+    # （mash-cli 取首个出现的 --watchdog，注入在前会覆盖用户值）。
+    if "--watchdog" not in config.extra_arguments and config.timeout_seconds >= MIN_WATCHDOG_TIMEOUT_SECONDS:
+        arguments.extend(("--watchdog", str(config.timeout_seconds - WATCHDOG_GRACE_SECONDS)))
     arguments.extend(config.extra_arguments)
     return tuple(arguments)
 
@@ -215,6 +228,12 @@ class MashAdapter:
         if not working_directory.is_dir():
             return result(MashRunStatus.FAILED, MashErrorCode.WORKING_DIRECTORY_NOT_FOUND, pid=None)
         config_deadline = Deadline.after(float(self._config.timeout_seconds))
+        # 审计 P1-2：固定路径的 result_file 在硬杀场景下来不及被覆盖，
+        # launch 前先删除，避免把上一次的 runId/outcome 读进本阶段诊断。
+        try:
+            Path(self._config.result_file).unlink(missing_ok=True)
+        except OSError:
+            pass
         if deadline is not None and deadline.expired:
             return result(
                 MashRunStatus.TIMEOUT,

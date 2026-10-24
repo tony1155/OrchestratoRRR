@@ -14,10 +14,18 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import NoReturn
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        # 真实 mash-cli 的用法错误统一退出码 64；对齐以免与“已取消”的 2 混淆
+        # （审计 P2-1）。
+        raise SystemExit(64)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = _Parser()
     parser.add_argument("command", choices=["run", "cancel"])
     # 适配器会传入的选项全部显式吸收，避免 argparse 把未知的裸值当成位置参数。
     parser.add_argument("--project", default="")
@@ -35,6 +43,7 @@ def main() -> None:
     parser.add_argument("--cancel-exit-code", type=int, default=0)
     parser.add_argument("--mode", default="exit")
     parser.add_argument("--poll-seconds", type=float, default=0.02)
+    parser.add_argument("--skip-result-file", action="store_true")
     args, _remaining = parser.parse_known_args()
 
     app_data = Path.cwd() / "fake-mash-appdata"
@@ -84,7 +93,7 @@ def main() -> None:
 
 
 def _write_result(args: argparse.Namespace, outcome: str, *, exit_code: int) -> None:
-    if not args.result_file:
+    if args.skip_result_file or not args.result_file:
         return
     target = Path(args.result_file)
     target.parent.mkdir(parents=True, exist_ok=True)

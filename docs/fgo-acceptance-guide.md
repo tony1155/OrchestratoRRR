@@ -104,6 +104,10 @@ python -m autogame_orchestrator <dry-plan 入口，见 README"当前生产流程
 3. `mash-cli validate --json` 的完整输出；
 4. `%APPDATA%\com.xiaotongx.mash\cli\runs\` 下最新的 JSON（含事件计数）。
 
+5. 若 run 被拒（提示“已有正在运行的 mash-cli run”）或 status 显示异常：先跑 `mash-cli status`
+   核对——新版本对陈旧记录会自动清理并标 `"stale": true`；如仍异常，手动删除
+   `%APPDATA%\com.xiaotongx.mash\cli\current.json` 后重试（硬杀/崩溃残留的兜底）。
+
 ## 5. 已知边界（不算验收失败）
 
 - FGO 与 StarRail 不能并发（共享 MuMu），串行编排即可。

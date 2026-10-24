@@ -89,6 +89,51 @@ def test_run_arguments_follow_config() -> None:
         assert needle in arguments, arguments
 
 
+def test_default_watchdog_injected_for_long_timeout() -> None:
+    config = _config(Path("."), timeout_seconds=3600)
+    arguments = build_run_arguments(config)
+    assert "--watchdog" in arguments
+    watchdog = arguments[arguments.index("--watchdog") + 1]
+    assert watchdog == str(3600 - 120)
+
+
+def test_explicit_watchdog_not_overridden() -> None:
+    config = _config(Path("."), timeout_seconds=3600, extra_arguments=("--watchdog", "600"))
+    arguments = build_run_arguments(config)
+    assert arguments.count("--watchdog") == 1
+    assert arguments[arguments.index("--watchdog") + 1] == "600"
+
+
+def test_short_timeout_skips_watchdog_injection() -> None:
+    config = _config(Path("."), timeout_seconds=300 - 1)
+    assert "--watchdog" not in build_run_arguments(config)
+
+
+def test_stale_result_file_removed_before_launch(tmp_path: Path) -> None:
+    stale = tmp_path / "result.json"
+    stale.write_text(
+        json.dumps({"runId": "previous", "outcome": "finished"}),
+        encoding="utf-8",
+    )
+    config = _config(
+        tmp_path,
+        extra_arguments=("--exit-code", "1", "--skip-result-file"),
+    )
+    result = MashAdapter(config).run()
+    assert result.status is MashRunStatus.FAILED
+    # 陈旧文件在 launch 前已被清除，未污染本阶段诊断（审计 P1-2）。
+    assert "outcome" not in result.diagnostics
+    assert not stale.exists()
+
+
+def test_usage_error_maps_failed_not_cancelled(tmp_path: Path) -> None:
+    config = _config(tmp_path, extra_arguments=("--exit-code", "notanumber"))
+    result = MashAdapter(config).run()
+    assert result.status is MashRunStatus.FAILED
+    assert result.error_code is MashErrorCode.PROCESS_EXIT_NONZERO
+    assert result.exit_code == 64
+
+
 def test_run_arguments_omit_unset_options() -> None:
     arguments = build_run_arguments(_config(Path(".")))
     assert "--device" not in arguments
@@ -159,8 +204,11 @@ def test_graceful_cancel_via_mash_cli_cancel(tmp_path: Path) -> None:
 
 
 def test_deadline_expiry_triggers_graceful_stop(tmp_path: Path) -> None:
-    config = _config(tmp_path, extra_arguments=("--mode", "hang"), timeout_seconds=1, stop_timeout_seconds=5)
-    result = MashAdapter(config).run(deadline=Deadline.after(1.0))
+    # 预算留足 cancel 子进程 + fake 响应的时间：预算过紧会偶发落入
+    # GRACEFUL_STOP_FAILED 硬杀路径（那是审计 P1-1 的真实行为，
+    # 由默认 watchdog 注入在产品层解决，本测试只验证宽裕时的优雅路径）。
+    config = _config(tmp_path, extra_arguments=("--mode", "hang"), timeout_seconds=8, stop_timeout_seconds=5)
+    result = MashAdapter(config).run(deadline=Deadline.after(1.5))
     assert result.status is MashRunStatus.CANCELLED
     assert result.diagnostics["graceful_stop_requested"] is True
     assert result.exit_code == 2

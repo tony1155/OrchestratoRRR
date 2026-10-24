@@ -48,6 +48,10 @@ WRITE_RUN_REPORT
   `ProcessSupervisor.stop` 终止 Job，并标记 `GRACEFUL_STOP_FAILED`。
 - run-result JSON 的稳定字段（`outcome/message/completedRuns/runId`）进入
   StageReport 诊断（投影层改名 `mash_*`，不透传本机路径）。
+- **默认注入 `--watchdog`**（timeout_seconds ≥ 300 且用户未显式配置时）：超时路径
+  由 mash-cli 内部 watchdog 先行——优雅取消、120s 宽限、写齐结果文件、清理
+  current.json、契约退出码 3 干净退出；外部硬杀只作最后兜底（审计 P1-1 方案 3）。
+  launch 前同时清除陈旧 result_file，避免上一次内容污染诊断（审计 P1-2）。
 
 ## 配置
 
