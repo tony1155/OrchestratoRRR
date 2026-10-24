@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
+from autogame_orchestrator.config_model import AppConfig, GameSelection, MumuLifecycleMode
 from autogame_orchestrator.models import StageName
-from autogame_orchestrator.planning import build_plan
+from autogame_orchestrator.planning import build_fgo_plan, build_plan
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,11 @@ def build_execution_plan(
     stages: tuple[StageName, ...] | None = None,
 ) -> ExecutionPlan:
     """纯函数构建执行计划，不做路径、进程或权限操作。"""
-    selected = build_plan() if stages is None else stages
+    if stages is None:
+        base_plan = build_fgo_plan() if config.game == GameSelection.FGO else build_plan()
+        selected: tuple[StageName, ...] = base_plan
+    else:
+        selected = stages
     if stages is None and config.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL:
         removed = {
             StageName.STOP_MUMU,

@@ -15,6 +15,8 @@ from autogame_orchestrator.runtime.aalc_models import (
 )
 from autogame_orchestrator.runtime.maa import MAAAdapter
 from autogame_orchestrator.runtime.maa_models import MAAErrorCode, MAARunResult, MAARunStatus
+from autogame_orchestrator.runtime.mash import MashAdapter
+from autogame_orchestrator.runtime.mash_models import MashErrorCode, MashRunResult, MashRunStatus
 from autogame_orchestrator.runtime.models import MumuAction, MumuRuntimeErrorCode, MumuRuntimeResult, MumuRuntimeStatus
 from autogame_orchestrator.runtime.mumu import MumuAdapter
 from autogame_orchestrator.runtime.starrail import StarRailAdapter
@@ -42,6 +44,10 @@ __all__ = [
     "AALCAttemptStatus",
     "AALCCompletionMode",
     "AALCErrorCode",
+    "MashAdapter",
+    "MashRunResult",
+    "MashRunStatus",
+    "MashErrorCode",
     "StarRailAdapter",
     "StarRailRunResult",
     "StarRailRunStatus",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TypeVar, cast
 
 from autogame_orchestrator.config_model import AppConfig
@@ -12,6 +13,7 @@ from autogame_orchestrator.workflow.production.ports import (
     MAARunPort,
     MAASyncPort,
     MAAUpdatePort,
+    MashRunPort,
     MumuRuntimePort,
     RuntimeFactories,
     StarRailRunPort,
@@ -62,6 +64,9 @@ class _RuntimeCache:
             self._get("maa_resource_merge", self._factories.maa_resource_merge),
         )
 
+    def mash_factory(self) -> Callable[[], MashRunPort] | None:
+        return self._factories.mash
+
 
 class ProductionExecutorFactory:
     """一次工作流专用；状态与 Runtime 缓存不跨运行共享。"""
@@ -84,6 +89,7 @@ class ProductionExecutorFactory:
             maa_sync=self._runtime.maa_sync,
             maa_update=self._runtime.maa_update,
             maa_resource_merge=self._runtime.maa_resource_merge,
+            mash=self._runtime.mash_factory(),
         )
 
     def failure_cleanup_required(self) -> bool:

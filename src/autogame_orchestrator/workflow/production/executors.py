@@ -18,12 +18,14 @@ from autogame_orchestrator.workflow.production.ports import (
     MAASyncPort,
     MAAUpdatePort,
     ManagedMumuRuntimePort,
+    MashRunPort,
     MumuRuntimePort,
     StarRailRunPort,
 )
 from autogame_orchestrator.workflow.production.projection import (
     maa_output_diagnostics,
     project_maa,
+    project_mash,
     project_mumu,
     project_starrail,
 )
@@ -64,6 +66,7 @@ class ProductionStageExecutor:
         maa_sync: Callable[[], MAASyncPort],
         maa_update: Callable[[], MAAUpdatePort],
         maa_resource_merge: Callable[[], MAAResourceMergePort],
+        mash: Callable[[], MashRunPort] | None = None,
     ) -> None:
         self._stage = stage
         self._config = config
@@ -74,6 +77,7 @@ class ProductionStageExecutor:
         self._maa_sync = maa_sync
         self._maa_update = maa_update
         self._maa_resource_merge = maa_resource_merge
+        self._mash = mash
 
     def execute(self, context: StageExecutionContext) -> StageReport:
         if context.stage != self._stage:
@@ -131,6 +135,10 @@ class ProductionStageExecutor:
             return self._verify_starrail_postcondition()
         if stage == StageName.RUN_MAA:
             return project_maa(stage, self._maa().run(context.deadline, context.cancel))
+        if stage == StageName.RUN_MASH:
+            if self._mash is None:
+                raise RuntimeBindingError("Mash Runtime 构造器未注册")
+            return project_mash(stage, self._mash().run(context.deadline, context.cancel))
         return _instant(stage, OutcomeKind.FAILURE, ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED)
 
     def _run_maa_sync(self, context: StageExecutionContext) -> StageReport:

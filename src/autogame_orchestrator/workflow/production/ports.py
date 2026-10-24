@@ -12,6 +12,7 @@ from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.runtime.aalc_models import AALCRunResult
 from autogame_orchestrator.runtime.maa_models import MAARunResult
+from autogame_orchestrator.runtime.mash_models import MashRunResult
 from autogame_orchestrator.runtime.models import MumuRuntimeResult
 from autogame_orchestrator.runtime.starrail_models import StarRailRunResult
 
@@ -30,6 +31,14 @@ class MAARunPort(Protocol):
         deadline: Deadline | None = None,
         cancel: CancellationToken | None = None,
     ) -> MAARunResult: ...
+
+
+class MashRunPort(Protocol):
+    def run(
+        self,
+        deadline: Deadline | None = None,
+        cancel: CancellationToken | None = None,
+    ) -> MashRunResult: ...
 
 
 class AALCRunPort(Protocol):
@@ -108,3 +117,4 @@ class RuntimeFactories:
     maa_sync: Callable[[], MAASyncPort] | None = None
     maa_update: Callable[[], MAAUpdatePort] | None = None
     maa_resource_merge: Callable[[], MAAResourceMergePort] | None = None
+    mash: Callable[[], MashRunPort] | None = None

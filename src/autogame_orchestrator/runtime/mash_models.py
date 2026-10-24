@@ -1,0 +1,145 @@
+"""mash-cli 运行结果模型。
+
+镜像 ``MAARunResult`` 的稳定结果形状；差异在于退出码语义遵循
+mash-cli 契约（0 完成 / 1 失败 / 2 已取消 / 3 watchdog 超时）。
+"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+
+from autogame_orchestrator.models import JsonValue, is_json_serializable
+from autogame_orchestrator.process.errors import TerminationReason
+
+
+class MashRunStatus(StrEnum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+    TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
+
+
+class MashErrorCode(StrEnum):
+    OK = "OK"
+    INVALID_CONFIGURATION = "INVALID_CONFIGURATION"
+    EXECUTABLE_NOT_FOUND = "EXECUTABLE_NOT_FOUND"
+    WORKING_DIRECTORY_NOT_FOUND = "WORKING_DIRECTORY_NOT_FOUND"
+    PROCESS_START_FAILED = "PROCESS_START_FAILED"
+    PROCESS_EXIT_NONZERO = "PROCESS_EXIT_NONZERO"
+    PROCESS_TIMEOUT = "PROCESS_TIMEOUT"
+    CANCELLED = "CANCELLED"
+    GRACEFUL_STOP_FAILED = "GRACEFUL_STOP_FAILED"
+    WAIT_FAILED = "WAIT_FAILED"
+    CLEANUP_FAILED = "CLEANUP_FAILED"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+
+
+@dataclass(frozen=True)
+class MashRunResult:
+    """单次 mash-cli run 调用的不可变结果。"""
+
+    status: MashRunStatus
+    error_code: MashErrorCode
+    started_at: datetime
+    finished_at: datetime
+    duration_ms: int
+    pid: int | None
+    exit_code: int | None
+    termination_reason: TerminationReason | None
+    owned_process_cleaned: bool
+    stdout_excerpt: str
+    stderr_excerpt: str
+    stdout_truncated: bool
+    stderr_truncated: bool
+    diagnostics: Mapping[str, JsonValue] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.started_at, datetime) or self.started_at.tzinfo is None:
+            raise ValueError("started_at 必须是带时区的时间")
+        if not isinstance(self.finished_at, datetime) or self.finished_at.tzinfo is None:
+            raise ValueError("finished_at 必须是带时区的时间")
+        if self.finished_at < self.started_at:
+            raise ValueError("finished_at 不得早于 started_at")
+        if not isinstance(self.duration_ms, int) or isinstance(self.duration_ms, bool) or self.duration_ms < 0:
+            raise ValueError("duration_ms 必须是非负整数")
+        if not isinstance(self.stdout_excerpt, str) or not isinstance(self.stderr_excerpt, str):
+            raise ValueError("输出摘要必须是字符串")
+        if self.status == MashRunStatus.COMPLETED:
+            valid = self.error_code == MashErrorCode.OK and self.termination_reason == TerminationReason.NORMAL_EXIT
+            if not valid or self.exit_code != 0 or not self.owned_process_cleaned:
+                raise ValueError("完成结果不满足成功不变量")
+        elif self.error_code == MashErrorCode.OK:
+            raise ValueError("非完成结果不得使用 OK")
+        if self.error_code == MashErrorCode.CLEANUP_FAILED and self.owned_process_cleaned:
+            raise ValueError("清理失败必须标记为未清理")
+        if self.status == MashRunStatus.TIMEOUT:
+            if self.error_code not in {MashErrorCode.PROCESS_TIMEOUT, MashErrorCode.CLEANUP_FAILED}:
+                raise ValueError("超时错误码不匹配")
+            if self.termination_reason not in {
+                TerminationReason.TIMEOUT,
+                TerminationReason.TERMINATION_FAILED,
+                TerminationReason.STOPPED,
+                TerminationReason.NONZERO_EXIT,
+                TerminationReason.NORMAL_EXIT,
+            }:
+                raise ValueError("超时终止原因不匹配")
+        if self.status == MashRunStatus.CANCELLED:
+            if self.error_code not in {
+                MashErrorCode.CANCELLED,
+                MashErrorCode.GRACEFUL_STOP_FAILED,
+                MashErrorCode.CLEANUP_FAILED,
+            }:
+                raise ValueError("取消错误码不匹配")
+            if self.termination_reason not in {
+                TerminationReason.CANCELLED,
+                TerminationReason.TERMINATION_FAILED,
+                TerminationReason.STOPPED,
+                TerminationReason.NORMAL_EXIT,
+                TerminationReason.NONZERO_EXIT,
+            }:
+                raise ValueError("取消终止原因不匹配")
+        try:
+            diagnostics = dict(self.diagnostics)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("诊断信息必须是映射") from exc
+        if not is_json_serializable(diagnostics):
+            raise ValueError("诊断信息必须可 JSON 序列化")
+
+    @classmethod
+    def from_monotonic(
+        cls,
+        *,
+        status: MashRunStatus,
+        error_code: MashErrorCode,
+        started_at: datetime,
+        started_at_monotonic: float,
+        pid: int | None,
+        exit_code: int | None = None,
+        termination_reason: TerminationReason | None = None,
+        owned_process_cleaned: bool = True,
+        stdout_excerpt: str = "",
+        stderr_excerpt: str = "",
+        stdout_truncated: bool = False,
+        stderr_truncated: bool = False,
+        diagnostics: Mapping[str, JsonValue] | None = None,
+    ) -> MashRunResult:
+        return cls(
+            status=status,
+            error_code=error_code,
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            duration_ms=max(0, int((time.monotonic() - started_at_monotonic) * 1000)),
+            pid=pid,
+            exit_code=exit_code,
+            termination_reason=termination_reason,
+            owned_process_cleaned=owned_process_cleaned,
+            stdout_excerpt=stdout_excerpt,
+            stderr_excerpt=stderr_excerpt,
+            stdout_truncated=stdout_truncated,
+            stderr_truncated=stderr_truncated,
+            diagnostics=diagnostics or {},
+        )

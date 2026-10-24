@@ -3,6 +3,10 @@
 # Copy this file to `orchestrator.local.toml` and adjust paths for your machine.
 # `orchestrator.local.toml` is git-ignored.
 
+# 选择本次运行驱动的生产计划："starrail"（默认，StarRail+MAA）或 "fgo"（Mash）。
+# 详见文件末尾 [mash] 段与 docs/fgo-mash-workflow.md。
+game = "starrail"
+
 [orchestrator]
 log_dir = "logs"
 report_dir = "run-results"
@@ -128,3 +132,32 @@ requires_administrator = false
 
 [aalc.environment]
 PYTHONIOENCODING = "utf-8"
+
+# ── FGO（Mash）链路 ─────────────────────────────────────────────────────────
+# game 选择本次运行驱动的生产计划：
+#   "starrail"（默认）= 16 阶段 managed / 11 阶段 external 计划（StarRail+MAA）
+#   "fgo"             = 6 阶段 managed / 5 阶段 external 计划（Mash）
+# 选择 "fgo" 时 [mash] 为必填；starrail/maa 段不参与校验，反之亦然。
+
+# [mash] 驱动 mash-cli（Mash 的 headless 接口，见集成仓库 docs/02-mash-cli-spec.md）。
+# 前置条件：先用 Mash GUI 在本机完成一次 CV runtime 下载与 FGO 项目配置
+# （数据共享于 %APPDATA%/com.xiaotongx.mash），然后 `mash-cli validate` 应全绿。
+# 生命周期边界：Orchestrator 拥有 MuMu/ADB；Mash 只通过 --device 消费已就绪设备。
+# 取消语义：取消/超时先运行 `mash-cli cancel`（优雅停止），超过 stop_timeout_seconds
+# 宽限才升级 Job Object 硬终止。
+# 路径示例使用正斜杠以避免 TOML 反斜杠转义；Windows 下同样有效。
+[mash]
+executable = "C:/path/to/Mash/mash-cli.exe"
+working_directory = "C:/path/to/Mash"
+# Mash 安装目录（含 resources 目录的那一层）；留空则依赖 mash-cli 自身解析
+resource_dir = "C:/path/to/Mash"
+project_id = "p-fgo-daily"
+server = "cn"                   # cn | jp
+adb_serial = ""                 # 留空 = 使用 Mash GUI 里已选择并持久化的设备
+repeat_mode = "project_default" # project_default | infinite | count
+repeat_count = 3                # repeat_mode = "count" 时必填（>= 1）
+result_file = "C:/path/to/OrchestratoRRR/run-results/mash-last-run.json"
+events = "ndjson"               # stdout 事件流模式（none = 静默）
+timeout_seconds = 14400         # FGO 周回预算（默认 4 小时）
+stop_timeout_seconds = 30       # 优雅取消宽限，超时升级硬终止
+extra_arguments = []            # 附加给 mash-cli run 的额外参数（如 "--watchdog", "7200"）

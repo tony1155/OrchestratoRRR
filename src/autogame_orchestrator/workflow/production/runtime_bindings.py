@@ -12,6 +12,7 @@ from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.runtime.aalc import AALCAdapter
 from autogame_orchestrator.runtime.maa import MAAAdapter
+from autogame_orchestrator.runtime.mash import MashAdapter
 from autogame_orchestrator.runtime.models import MumuRuntimeResult
 from autogame_orchestrator.runtime.mumu import MumuAdapter
 from autogame_orchestrator.runtime.starrail import StarRailAdapter
@@ -93,6 +94,9 @@ def build_default_runtime_factories(config: AppConfig) -> RuntimeFactories:
     def build_maa_resource_merge() -> MAAResourceMerger:
         return MAAResourceMerger(config.maa_resource_merge)
 
+    def build_mash() -> MashAdapter:
+        return MashAdapter(config.mash)
+
     return RuntimeFactories(
         build_starrail,
         build_maa,
@@ -101,4 +105,5 @@ def build_default_runtime_factories(config: AppConfig) -> RuntimeFactories:
         build_maa_sync,
         build_maa_update,
         build_maa_resource_merge,
+        build_mash,
     )

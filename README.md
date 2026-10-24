@@ -12,6 +12,7 @@ OrchestratoRRR 用于按确定顺序管理 MuMu、StarRailCopilot、MAA 等外�
 - **Deadline / Cancellation / Failure 传播**：父 Deadline 单调递减，子操作只能收紧预算；首个业务失败会阻断后续普通阶段，并保留稳定错误码。
 - **Windows 进程树管理**：`ProcessSupervisor` 统一处理创建、等待、超时、取消和清理，使用 Windows Job Object 约束受管进程树。
 - **MuMu 生命周期与 readiness**：启动、停止、重启、TCP 端口、ADB devices、device state 和 Android boot-completed 组合探测。
+- **FGO（Mash）链路**：`game = "fgo"` 选用 6/5 阶段 FGO 计划，`MashAdapter` 驱动 mash-cli headless 接口，取消路径先优雅（`mash-cli cancel`）后硬终止；详见 `docs/fgo-mash-workflow.md`。
 - **有界 ADB 恢复**：单条 ADB 命令默认最多占用 5 秒；受控 localhost connect 带冷却；持续 `DEVICE_OFFLINE` 时只回收精确目标 transport，并在最多一次 managed restart 前后各允许一次 endpoint recovery，全部共享原预算。
 - **MAA 配置同步**：对白名单字段做转换和大小限制，使用临时文件、原子替换、备份与双目标失败回滚。
 - **受限 MAA 更新**：默认关闭；启用时要求显式网络授权，只允许固定 `update` 入口并受 Deadline 约束。

@@ -10,6 +10,7 @@ from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeStatus
 from autogame_orchestrator.process.errors import ProcessExecutionErrorCode
 from autogame_orchestrator.runtime.aalc_models import AALCRunResult, AALCRunStatus
 from autogame_orchestrator.runtime.maa_models import MAARunResult, MAARunStatus
+from autogame_orchestrator.runtime.mash_models import MashRunResult, MashRunStatus
 from autogame_orchestrator.runtime.models import MumuRuntimeResult, MumuRuntimeStatus
 from autogame_orchestrator.runtime.starrail_models import StarRailRunResult, StarRailRunStatus
 
@@ -131,6 +132,49 @@ def project_maa(stage: StageName, result: MAARunResult) -> StageReport:
         "stderr_truncated": result.stderr_truncated,
         **maa_output_diagnostics(result),
     }
+    return StageReport(
+        stage, outcome, code, result.started_at, result.finished_at, result.duration_ms, diagnostics=diagnostics
+    )
+
+
+def project_mash(stage: StageName, result: MashRunResult) -> StageReport:
+    """Mash 运行结果的安全投影；诊断只透传白名单字段。
+
+    ``graceful_stop_requested`` / mash 结果文件字段（``outcome``、
+    ``message``、``completedRuns``、``runId``）由 ``MashAdapter`` 生成，
+    内容为固定枚举或 mash 自身报告值，不含本机路径。
+    """
+    outcome, code = _outcome(
+        result.status,
+        MashRunStatus.COMPLETED,
+        MashRunStatus.FAILED,
+        MashRunStatus.TIMEOUT,
+        MashRunStatus.CANCELLED,
+    )
+    diagnostics: dict[str, JsonValue] = {
+        "source_error_code": result.error_code.value,
+        "termination_reason": result.termination_reason.value if result.termination_reason else None,
+        "exit_code": result.exit_code,
+        "owned_process_cleaned": result.owned_process_cleaned,
+        "stdout_truncated": result.stdout_truncated,
+        "stderr_truncated": result.stderr_truncated,
+        "stdout_present": bool(result.stdout_excerpt),
+        "stderr_present": bool(result.stderr_excerpt),
+    }
+    process_error_code = result.diagnostics.get("process_error_code")
+    if isinstance(process_error_code, str) and process_error_code in _PROCESS_ERROR_ALLOWLIST:
+        diagnostics["process_error_code"] = process_error_code
+    for key in ("stdout_read_failed", "stderr_read_failed", "graceful_stop_requested"):
+        value = result.diagnostics.get(key)
+        if isinstance(value, bool):
+            diagnostics[key] = value
+    for key in ("outcome", "message", "runId"):
+        value = result.diagnostics.get(key)
+        if isinstance(value, str):
+            diagnostics[f"mash_{key}"] = value
+    completed_runs = result.diagnostics.get("completedRuns")
+    if isinstance(completed_runs, int) and not isinstance(completed_runs, bool):
+        diagnostics["mash_completed_runs"] = completed_runs
     return StageReport(
         stage, outcome, code, result.started_at, result.finished_at, result.duration_ms, diagnostics=diagnostics
     )

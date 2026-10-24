@@ -14,10 +14,14 @@ from typing import TYPE_CHECKING
 from autogame_orchestrator.config_model import (
     AALCConfig,
     AppConfig,
+    GameSelection,
     MAAConfig,
     MAAResourceMergeConfig,
     MAASyncConfig,
     MAAUpdateConfig,
+    MashConfig,
+    MashRepeatMode,
+    MashServer,
     MuMuConfig,
     MumuLifecycleMode,
     OrchestratorConfig,
@@ -87,6 +91,8 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     cfg_up = _parse_maa_update(data.get("maa_update"))
     cfg_rm = _parse_maa_resource_merge(data.get("maa_resource_merge"))
     cfg_al = _parse_aalc(data.get("aalc"))
+    cfg_game = _parse_game(data.get("game"))
+    cfg_mash = _parse_mash(data.get("mash"))
 
     all_errors.extend(cfg_or[1])
     all_errors.extend(cfg_mu[1])
@@ -95,9 +101,13 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     all_errors.extend(cfg_ms[1])
     all_errors.extend(cfg_up[1])
     all_errors.extend(cfg_rm[1])
+    all_errors.extend(cfg_game[1])
+    all_errors.extend(cfg_mash[1])
 
     if all_errors:
         return None, all_errors
+
+    game = cfg_game[0] if cfg_game[0] is not None else GameSelection.STARRAIL
 
     config = AppConfig(
         orchestrator=cfg_or[0],  # type: ignore[arg-type]
@@ -108,6 +118,8 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
         maa_update=cfg_up[0],  # type: ignore[arg-type]
         maa_resource_merge=cfg_rm[0],  # type: ignore[arg-type]
         aalc=cfg_al[0] if cfg_al[0] is not None else AALCConfig(),
+        game=game,
+        mash=cfg_mash[0] if cfg_mash[0] is not None else MashConfig(),
     )
 
     validation_errors = config.validate()
@@ -481,4 +493,101 @@ def _parse_aalc(raw: object) -> tuple[AALCConfig | None, list[ErrorCode]]:
         attempt_timeout_seconds=att_to,
         stop_timeout_seconds=stop_to,
         requires_administrator=requires_administrator,
+    ), []
+
+
+def _parse_game(raw: object) -> tuple[GameSelection | None, list[ErrorCode]]:
+    errors: list[ErrorCode] = []
+    if raw is None:
+        return GameSelection.STARRAIL, errors
+    if not isinstance(raw, str):
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        return None, errors
+    try:
+        return GameSelection(raw), errors
+    except ValueError:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        return None, errors
+
+
+def _parse_mash(raw: object) -> tuple[MashConfig | None, list[ErrorCode]]:
+    errors: list[ErrorCode] = []
+    if raw is None:
+        # [mash] 段缺省合法：仅当 game = "fgo" 时 AppConfig.validate 会要求它。
+        return None, errors
+    if not isinstance(raw, dict):
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        return None, errors
+
+    executable = raw.get("executable")
+    working_directory = raw.get("working_directory")
+    project_id = raw.get("project_id")
+    result_file = raw.get("result_file")
+    for value in (executable, working_directory, project_id, result_file):
+        if not isinstance(value, str) or not value.strip():
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    server_raw = raw.get("server", MashServer.CN.value)
+    try:
+        server = MashServer(server_raw) if isinstance(server_raw, str) else None
+    except ValueError:
+        server = None
+    if server is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    repeat_raw = raw.get("repeat_mode", MashRepeatMode.PROJECT_DEFAULT.value)
+    try:
+        repeat_mode = MashRepeatMode(repeat_raw) if isinstance(repeat_raw, str) else None
+    except ValueError:
+        repeat_mode = None
+    if repeat_mode is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    repeat_count = raw.get("repeat_count", 0)
+    if not isinstance(repeat_count, int) or isinstance(repeat_count, bool):
+        repeat_count = 0
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    adb_serial = raw.get("adb_serial", "")
+    resource_dir = raw.get("resource_dir", "")
+    events = raw.get("events", "ndjson")
+    for value in (adb_serial, resource_dir, events):
+        if not isinstance(value, str):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    environment = _to_string_mapping(raw.get("environment", {}))
+    if environment is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    extra_arguments = _tolist(raw.get("extra_arguments", []))
+    if extra_arguments is None:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    task_to = raw.get("timeout_seconds", 14400)
+    stop_to = raw.get("stop_timeout_seconds", 30)
+    if not isinstance(task_to, int) or isinstance(task_to, bool):
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    if not isinstance(stop_to, int) or isinstance(stop_to, bool):
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+
+    if errors:
+        return None, errors
+
+    assert server is not None
+    assert repeat_mode is not None
+    return MashConfig(
+        executable=executable if isinstance(executable, str) else "",
+        working_directory=working_directory if isinstance(working_directory, str) else "",
+        environment_overrides=environment if environment is not None else (),
+        timeout_seconds=task_to,
+        stop_timeout_seconds=stop_to,
+        project_id=project_id if isinstance(project_id, str) else "",
+        server=server,
+        adb_serial=adb_serial if isinstance(adb_serial, str) else "",
+        repeat_mode=repeat_mode,
+        repeat_count=repeat_count,
+        result_file=result_file if isinstance(result_file, str) else "",
+        resource_dir=resource_dir if isinstance(resource_dir, str) else "",
+        events=events if isinstance(events, str) else "ndjson",
+        extra_arguments=tuple(extra_arguments) if extra_arguments is not None else (),
     ), []

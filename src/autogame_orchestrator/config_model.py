@@ -533,6 +533,124 @@ class MAAUpdateConfig:
         return errors
 
 
+class GameSelection(StrEnum):
+    """本次运行驱动的游戏链路（决定使用哪条生产计划）。"""
+
+    STARRAIL = "starrail"
+    FGO = "fgo"
+
+
+class MashRepeatMode(StrEnum):
+    """FGO 周回模式：沿用项目默认 / 无限 / 固定轮数。"""
+
+    PROJECT_DEFAULT = "project_default"
+    INFINITE = "infinite"
+    COUNT = "count"
+
+
+class MashServer(StrEnum):
+    CN = "cn"
+    JP = "jp"
+
+
+@dataclass(frozen=True)
+class MashConfig:
+    """mash-cli（FGO 自动化，headless）运行配置。
+
+    Mash 与 MAA / AALC 平级，是第四个外部 Runtime；它不拥有 MuMu 生命周期，
+    只通过 ``--device`` 消费 Orchestrator 已就绪的 ADB 设备。
+    """
+
+    executable: str = ""
+    working_directory: str = ""
+    environment_overrides: tuple[tuple[str, str], ...] = ()
+    timeout_seconds: int = 14400
+    stop_timeout_seconds: int = 30
+    project_id: str = ""
+    server: MashServer = MashServer.CN
+    adb_serial: str = ""
+    repeat_mode: MashRepeatMode = MashRepeatMode.PROJECT_DEFAULT
+    repeat_count: int = 0
+    result_file: str = ""
+    resource_dir: str = ""
+    events: str = "ndjson"
+    extra_arguments: tuple[str, ...] = ()
+    launcher_arguments: tuple[str, ...] = ()
+
+    def validate(self) -> list[ErrorCode]:
+        errors: list[ErrorCode] = []
+        errors.extend(_validate_non_empty_str(self.executable, "executable"))
+        errors.extend(_validate_non_empty_str(self.working_directory, "working_directory"))
+        errors.extend(_validate_non_empty_str(self.project_id, "project_id"))
+        errors.extend(_validate_non_empty_str(self.result_file, "result_file"))
+        if not isinstance(self.server, MashServer) or not isinstance(self.repeat_mode, MashRepeatMode):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if (
+            isinstance(self.repeat_mode, MashRepeatMode)
+            and self.repeat_mode == MashRepeatMode.COUNT
+            and (not isinstance(self.repeat_count, int) or isinstance(self.repeat_count, bool) or self.repeat_count < 1)
+        ):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if self.events not in {"ndjson", "none"}:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.environment_overrides, tuple):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        else:
+            seen_keys: set[str] = set()
+            for entry in self.environment_overrides:
+                if not isinstance(entry, tuple) or len(entry) != 2:
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+                    continue
+                key, value = entry
+                if not isinstance(key, str) or not key.strip() or not isinstance(value, str):
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+                    continue
+                folded = key.casefold()
+                if folded in seen_keys:
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+                seen_keys.add(folded)
+        if not isinstance(self.extra_arguments, tuple):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        else:
+            for argument in self.extra_arguments:
+                if not isinstance(argument, str) or not argument.strip():
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.launcher_arguments, tuple):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        else:
+            for argument in self.launcher_arguments:
+                if not isinstance(argument, str) or not argument.strip():
+                    errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        for timeout_value in (self.timeout_seconds, self.stop_timeout_seconds):
+            if not isinstance(timeout_value, int) or isinstance(timeout_value, bool):
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            else:
+                errors.extend(_validate_positive_int(timeout_value, "timeout"))
+        return errors
+
+    def check_paths(self) -> list[ErrorCode]:
+        from pathlib import Path
+
+        errors: list[ErrorCode] = []
+        executable = Path(self.executable)
+        if not executable.exists():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+        elif not executable.is_file():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_FILE)
+        working_directory = Path(self.working_directory)
+        if not working_directory.exists():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+        elif not working_directory.is_dir():
+            errors.append(ErrorCode.CONFIG_PATH_NOT_DIRECTORY)
+        if self.resource_dir:
+            resource_dir = Path(self.resource_dir)
+            if not resource_dir.exists():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_FOUND)
+            elif not resource_dir.is_dir():
+                errors.append(ErrorCode.CONFIG_PATH_NOT_DIRECTORY)
+        return errors
+
+
 @dataclass(frozen=True)
 class AppConfig:
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
@@ -543,11 +661,18 @@ class AppConfig:
     maa_update: MAAUpdateConfig = field(default_factory=MAAUpdateConfig)
     maa_resource_merge: MAAResourceMergeConfig = field(default_factory=MAAResourceMergeConfig)
     aalc: AALCConfig = field(default_factory=AALCConfig)
+    game: GameSelection = GameSelection.STARRAIL
+    mash: MashConfig = field(default_factory=MashConfig)
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
         errors.extend(self.orchestrator.validate())
         errors.extend(self.mumu.validate())
+        if self.game == GameSelection.FGO:
+            # FGO 链路只消费 mash；starrail/maa 段不参与本次计划，
+            # 不因未配置而阻塞。
+            errors.extend(self.mash.validate())
+            return errors
         errors.extend(self.starrail.validate())
         errors.extend(self.maa.validate())
         errors.extend(self.maa_sync.validate())
@@ -558,6 +683,9 @@ class AppConfig:
     def check_paths(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
         errors.extend(self.mumu.check_paths())
+        if self.game == GameSelection.FGO:
+            errors.extend(self.mash.check_paths())
+            return errors
         errors.extend(self.starrail.check_paths())
         errors.extend(self.maa.check_paths())
         errors.extend(self.maa_sync.check_paths())
@@ -609,6 +737,10 @@ class AppConfig:
         require_absolute("starrail.log_path_template", self.starrail.log_path_template.replace("{date}", "2000-01-01"))
         require_absolute("maa.executable", self.maa.executable)
         require_absolute("maa.working_directory", self.maa.working_directory)
+        if self.game == GameSelection.FGO:
+            require_absolute("mash.executable", self.mash.executable)
+            require_absolute("mash.working_directory", self.mash.working_directory)
+            require_absolute("mash.result_file", self.mash.result_file)
         sync_paths = (
             ("maa_sync.gui_settings_source", self.maa_sync.gui_settings_source),
             ("maa_sync.gui_tasks_source", self.maa_sync.gui_tasks_source),
