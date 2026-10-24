@@ -1,6 +1,6 @@
 # FGO（Mash）链路设计
 
-> 状态：已实现，Fake 级测试验收（2026-10-24）。真实设备联调未做。
+> 状态：已实现，Fake 级测试验收（2026-10-24）。真实设备联调未做——验收步骤见 [docs/fgo-acceptance-guide.md](fgo-acceptance-guide.md)。
 > 前置阅读：集成仓库 `mash-integration/docs/02-mash-cli-spec.md`（mash-cli 契约）。
 
 ## 定位
