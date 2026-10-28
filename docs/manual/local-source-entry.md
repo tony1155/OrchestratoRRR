@@ -83,6 +83,36 @@ launcher to create them.
 
 ## Compatibility
 
+### Keep the MAA CLI installation separate from the GUI
+
+MAA GUI repair can remove directories that are not part of its distribution,
+including an embedded `maa-cli` and `MaaResource`. A missing CLI executable
+then stops the local launcher with `LOCAL_CONFIG_INVALID: CONFIG_PATH_NOT_FOUND`.
+Do not install orchestrator dependencies inside the GUI installation directory.
+
+Use a dedicated tree such as `orchestrator-data/maa`:
+
+- `cli/v0.7.4/maa.exe`: the pinned CLI executable.
+- `lib`: MaaCore and its native dependencies.
+- `resource`: the CLI's own base resources.
+- `MaaResource`: the CLI's incremental resource repository.
+- `config`, `cache`, `state`: separate CLI configuration and runtime data.
+
+Point `maa.executable` and `maa.working_directory` at the CLI above, and set
+`MAA_DATA_DIR` to this dedicated tree. Set `MAA_CONFIG_DIR`, `MAA_CACHE_DIR`,
+and `MAA_STATE_DIR` to its corresponding subdirectories. Keep the GUI settings
+and task sources in the GUI directory, but write synchronized profiles/tasks
+into the dedicated CLI config. The resource merge source and destination must
+both be inside the dedicated tree; merging into the GUI's resources can also
+conflict with its integrity checks.
+
+Back up the local TOML before migrating. Restore a verified CLI release and
+a matching core/resource set, initialize the incremental resource repository,
+then validate configuration sync, update, resource merge, and
+`maa run orchestrator --profile orchestrator --batch --dry-run` using the same
+environment as the workflow. Finally run `run-local.ps1 -CheckOnly`.
+These checks do not constitute a complete game workflow run.
+
 The installed `start` command still uses its canonical `%LOCALAPPDATA%`
 config and data directories. This policy is unchanged; do not use `start`
 for the local source workflow. Packaged release/install scripts are retained
