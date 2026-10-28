@@ -550,3 +550,18 @@ business program was invoked. The installed artifact audit is complete, but
 Phase 7C remains incomplete until a separate real workflow-retry authorization
 and its RunReport, JSONL, stage, and business-program audit are complete. The
 legacy PowerShell entry remains retained.
+
+## Phase 2: MaaFgo 完整 FGO 工作流（2026-10-29）
+
+顶层 `game` 键选择 workload（缺省 `starrail`，既有计划逐字节不变）。`game = "fgo"`
+使用 FGO 专属计划（managed 8 阶段 / external 7 阶段），MaaFgo 以既有
+`MaaFgoAdapter` + ProcessSupervisor/Job Object 运行，exit 0 单独仍不能成功：
+成功必须来自 run-scoped 完成证据（`MaaFgoRunContract` + ORR 私有分发 reporter
+经官方 `AgentServer.tasker_sink()` 写出的 schema v1 artifact，逐任务校验、
+digest 绑定、stale 防护、控制面优先）。BBC 危险通过 ORR 私有装配 transform
+消除并在 PREPARE 阶段 fail-closed 校验（ADR-0003）；游戏退出由 STOP_FGO 以
+精确 ADB force-stop 完成；failure/timeout teardown 由 Runner 的有序 cleanup
+阶段完成，取消语义保持"不破坏用户环境"。完整设计、错误码与验收入口见
+`docs/maafgo-full-workflow.md` 与 `docs/manual/maafgo-real-acceptance.md`。
+
+REAL DEVICE ACCEPTANCE: PENDING USER
