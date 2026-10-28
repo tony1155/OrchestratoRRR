@@ -1,5 +1,11 @@
 # MaaFgo / MaaPiCli Windows compatibility investigation
 
+> **状态更新（2026-10-29）**：本文是当时 revision（d7f3a474）的只读调查记录，
+> 保留原始结论与证据边界。其中"下一步/阻塞"类陈述已在 MaaFgo Phase 2 落地时
+> 处理：上游无安全机制（见 `maafgo-upstream-inventory-2026-10-29.md`），最终
+> 采用 ORR 私有 BBC-free 分发 transform（`docs/decisions/ADR-0003`），完成证据
+> 契约与生产接入见 `docs/maafgo-full-workflow.md`。历史结论不因此改写。
+
 Date: 2026-09-09. Scope: source inspection, invocation skeleton and synthetic
 Windows processes only. No MaaPiCli, MaaFgo, MXU, BBC, MuMu or FGO business run
 was performed. No production TOML or MaaFgo-owned configuration was changed.

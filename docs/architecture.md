@@ -2,11 +2,13 @@
 
 ## 当前验证状态
 
-StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30 完成脱敏验收。Phase 6C2A、
-6C2B4C 和 6C2C 的修复后真实证据均已通过：冷连接恢复成功，external 11 阶段完整 workflow
-成功，RunReport 完整可读。maa-cli 自更新与 MuMu managed 实例化生命周期控制仍未完成；
-Phase 6 已按批准的 external-only 范围完成，Phase 7A1 已完成入口契约实现与自动测试，
-Phase 7 尚未完成。
+（2026-10-29 更新）StarRail、MAA、AALC 的受控真实 Adapter smoke 已于 2026-07-30
+完成脱敏验收；external 11 阶段与 managed 16 阶段真实完整工作流均有验收记录
+（含 managed MuMu 生命周期与最终 shutdown），MAA 配置同步/更新闸门已解除，
+Phase 7 打包、默认入口与安装更新已完成制品级验收。FGO（MaaFgo）链路已作为
+第二条 workload 接入（见文末 Phase 2 节与 `docs/maafgo-full-workflow.md`）：
+实现与合成/离线验证完成，**真机验收待用户**。StarRail 链路计划与行为不变。
+历史阶段细节以 `docs/phase-plan.md` 与 `docs/acceptance/` 为准。
 
 ## Phase 6 前的真实 smoke 门禁
 

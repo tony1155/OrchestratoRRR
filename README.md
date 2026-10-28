@@ -8,9 +8,12 @@ OrchestratoRRR 用于按确定顺序管理 MuMu、StarRailCopilot、MAA 等外�
 
 **当前状态：可运行的工程原型。** 核心编排、进程管理、managed MuMu 生命周期和真实端到端工作流已有验收记录；当前生产计划已下线不稳定的 AALC/Limbus 链路，保留 StarRail、MAA 与最终 MuMu 清理。最新 ADB 恢复与失败清理修复已通过完整自动测试并重建打包制品，但尚未再次运行真实业务工作流。
 
+FGO（MaaFgo）链路已作为第二条生产 workload 接入：顶层 `game = "fgo"` 选择独立的 FGO 计划（managed 8 阶段 / external 7 阶段），由 MaaFgo 完成登录→导航→助战/编队→native 战斗，OrchestratoRRR 负责生命周期、run-scoped 完成证据与收尾。实现与合成验证已完成，**真机验收待用户**（见 [MaaFgo 真机验收手册](docs/manual/maafgo-real-acceptance.md)）；StarRail 链路行为不受影响。
+
 ## 核心能力
 
 - **多阶段生产工作流**：不可变执行计划、managed/external MuMu 两种模式、惰性 Runtime 绑定，以及固定的阶段顺序与后置条件。
+- **workload 选择**：顶层 `game` 键选择 StarRail 或 FGO 计划；缺省 StarRail，旧配置行为不变，两条链路的配置校验互不阻塞。
 - **Deadline / Cancellation / Failure 传播**：父 Deadline 单调递减，子操作只能收紧预算；首个业务失败会阻断后续普通阶段，并保留稳定错误码。
 - **Windows 进程树管理**：`ProcessSupervisor` 统一处理创建、等待、超时、取消和清理，使用 Windows Job Object 约束受管进程树。
 - **MuMu 生命周期与 readiness**：启动、停止、重启、TCP 端口、ADB devices、device state 和 Android boot-completed 组合探测。
@@ -18,11 +21,18 @@ OrchestratoRRR 用于按确定顺序管理 MuMu、StarRailCopilot、MAA 等外�
 - **MAA 配置同步**：对白名单字段做转换和大小限制，使用临时文件、原子替换、备份与双目标失败回滚。
 - **受限 MAA 更新**：默认关闭；启用时要求显式网络授权，只允许固定 `update` 入口并受 Deadline 约束。
 - **MaaResource 覆盖合并**：默认关闭；把 `maa update` 拉取的增量资源逐文件原子合并进 MaaCore 共用资源目录，消除 CLI 侧多目录叠加导致的资源加载失败（内容相同则跳过，不产生写入）。
+- **FGO（MaaFgo）链路**：run-scoped 任务完成证据（schema v1 artifact、run id/plan digest/逐任务终态校验，exit 0 单独不构成成功）；BBC-free 私有分发（哈希守卫的确定性 transform + fail-closed 分发校验）；STOP_FGO 以精确 ADB force-stop 收尾；失败/超时 teardown 与取消语义见设计文档。
 - **可观测结果**：每次运行输出 JSONL 阶段事件和 schema v1 `RunReport`；报告先校验 JSON Schema，再原子落盘。
 - **打包与桌面入口**：PyInstaller 6.21 onedir、资源审计、标准 LOCALAPPDATA 布局、Start Menu `start` 入口和交互式真实执行确认。
 - **工程验证**：pytest Fake/mock 测试覆盖进程、探针、Runtime、工作流、CLI、打包与安装边界，并使用 Ruff 和 strict mypy 做静态检查。
 
 ## 当前生产流程
+
+顶层 `game` 键选择本次运行的 workload（缺省 `starrail`）：`starrail` 走下述
+StarRail+MAA 计划；`fgo` 走独立的 MaaFgo 计划（managed 8 阶段 / external 7 阶段，
+不校验也不执行 starrail/maa 段），设计与验收入口见
+[FGO 工作流说明](docs/maafgo-full-workflow.md) 与
+[真机验收手册](docs/manual/maafgo-real-acceptance.md)。
 
 可选启用官方 BetterGI 0.64.0 一条龙：`[bettergi] enabled = true` 时，managed 模式在
 `SHUTDOWN_MUMU` 后、写报告前增加 `RUN_BETTERGI`；external 模式在 MAA 后执行。
@@ -30,7 +40,7 @@ OrchestratoRRR 用于按确定顺序管理 MuMu、StarRailCopilot、MAA 等外�
 并执行有界 Job 清理。接入已提供 Fake 测试，尚未真实游戏验收；配置方法与边界见
 [BetterGI 接入说明](docs/manual/bettergi-integration.md)。
 
-managed 模式的默认生产计划共有 16 个阶段，顺序由源码中的 `planning.build_plan()` 与 `run_application.MANAGED_RUN_STAGES` 共同锁定：
+`game = "starrail"`（含缺省）时，managed 模式的默认生产计划共有 16 个阶段，顺序由源码中的 `planning.build_plan()` 与 `run_application.MANAGED_RUN_STAGES` 共同锁定：
 
 ```mermaid
 flowchart TD
@@ -72,7 +82,7 @@ external 模式不拥有 MuMu 生命周期，会从默认计划中移除 stop/st
 |---|---|
 | `process/` | CreateProcessW、句柄管理、Job Object、进程等待与终止升级 |
 | `probes/` | TCP、ADB 解析与 MuMu readiness 分类 |
-| `runtime/` | MuMu、StarRailCopilot、MAA 的外部程序适配与稳定结果模型 |
+| `runtime/` | MuMu、StarRailCopilot、MAA、BetterGI、MaaFgo 与 FGO 应用退出的外部程序适配与稳定结果模型 |
 | `maa_sync/` / `maa_update/` | 配置转换、原子同步、备份回滚与受限更新策略 |
 | `workflow/` | 执行计划、Stage executor、失败传播、managed cleanup 与生产组合根 |
 | CLI / entry | 配置预检、UAC 重入、真实执行确认、打包入口与失败通知 |
@@ -213,6 +223,7 @@ timeout_seconds = 3600
 
 配置边界：
 
+- 顶层 `game` 键选择 workload：缺省 `starrail`；`fgo` 要求 `[fgo]` + 启用状态的 `[maafgo]`，且 starrail/maa 段不参与校验。ADB 设备真值只在 `[mumu] adb_serial`。
 - managed 模式要求显式、非空的 MuMu start/stop 参数；external 模式反而禁止这些参数。
 - `validate --check-paths` 会验证当前生产链路所需的可执行文件和目录。
 - 标准 `start` 入口要求业务路径为绝对路径，并要求 log/report 精确匹配 canonical LOCALAPPDATA 目录。
@@ -312,9 +323,10 @@ docs/                    架构、阶段计划、验收证据和手工门禁
 - managed MuMu 冷启动、停止、重启、ADB ready、最终 shutdown 和进程回收；
 - 两次 managed 真实完整工作流成功记录，其中一次从干净进程基线启动并验证 player born 2 / reaped 2 / leaked 0；
 - PyInstaller onedir、schema 资源、默认入口、首次安装和带产品数据保护的安装更新；
-- 当前不含 AALC 的 16 阶段计划、失败 cleanup、ADB child deadline、精确 endpoint recycle 和 offline recovery 的完整自动测试。
+- 当前不含 AALC 的 16 阶段计划、失败 cleanup、ADB child deadline、精确 endpoint recycle 和 offline recovery 的完整自动测试；
+- FGO（MaaFgo）链路的实现级验证：game selector 与配置边界、run-scoped 完成证据契约（含 12 种 artifact 故障注入）、BBC-free 私有分发 transform（哈希守卫）、STOP_FGO 精确 force-stop、managed/external 全链路 Fake 工作流与失败/超时/取消 teardown。
 
-为避免夸大：最近的 ADB/offline 修复只进行了自动测试和打包重建，没有重新执行真实业务工作流；历史 AALC 在线业务任务也从未被声明为完成，并且现已从生产流程下线。
+为避免夸大：最近的 ADB/offline 修复只进行了自动测试和打包重建，没有重新执行真实业务工作流；历史 AALC 在线业务任务也从未被声明为完成，并且现已从生产流程下线；FGO 链路目前只有合成/离线验证，真实 MuMu/FGO/MaaFgo 条件下的 Gate 0–8 验收由用户按手册执行。
 
 ## 已知限制
 
@@ -323,9 +335,10 @@ docs/                    架构、阶段计划、验收证据和手工门禁
 - **第三方任务可能自身卡住。** 历史上 MAA Recruit 曾出现上游页面导航循环；编排器只能通过 Deadline 有界终止，不能修复 MaaCore 的识别/点击逻辑。
 - **MAA update 不是完整事务。** 上游安装器会原地清理并解压资源；中断后通常依赖下次 update 或 MAA GUI 覆盖安装恢复，因此该能力默认关闭。
 - **ADB 恢复是刻意受限的。** 不会 kill/restart 全局 ADB server，也不会扫描或断开其他设备；精确 endpoint recycle 最多两次、managed restart 最多一次，仍未恢复时会按 start timeout 失败。
-- **取消路径的 cleanup 仍需完善。** 已取得 managed 所有权后的 failure/timeout 会执行有界 shutdown；当前顶层 `CANCELLED` 状态尚未进入同一 failure-cleanup 分支，取消后应人工确认 MuMu 状态。
+- **取消路径的 cleanup 是文档化语义。** 已取得 managed 所有权后的 failure/timeout 会执行有界 shutdown；用户主动取消（`CANCELLED`）刻意不关闭 MuMu/FGO——不破坏用户环境，owned 进程树仍会被终止，取消后应人工确认 MuMu 状态。
 - **最新恢复修复尚未真实回归。** ADB 5 秒 child deadline、精确 endpoint recycle、offline 单次重启和失败通知已通过自动测试并进入打包制品，但没有再次运行真实 workflow。
-- **仍有少量格式债务。** 全仓 Ruff lint 与 mypy 通过；`ruff format --check .` 当前仍报告 4 个历史文件，仅为格式差异，不影响测试结果。
+- **FGO 链路真机验收待用户。** 实现、Fake 工作流与离线分发门禁已完成；真实 MuMu/FGO 账号/关卡下的验收依赖用户环境，且 native 战斗是 MaaFgo 上游的实验性能力。
+- **仍有少量格式债务。** 全仓 Ruff lint 与 mypy 通过；`ruff format --check .` 当前仍报告 16 个历史文件，仅为格式差异，不影响测试结果。
 
 ## 详细文档
 
@@ -339,6 +352,9 @@ README 只保留稳定的产品与工程概览，详细阶段和事故证据在�
 - [打包默认入口人工确认边界](docs/acceptance/phase-7d4c-manual-shortcut-preflight-cancellation.md)
 - [ADB 单命令 timeout 修复](docs/acceptance/2026-08-17-mumu-adb-command-timeout-recovery.md)
 - [managed DEVICE_OFFLINE recovery 与失败 cleanup](docs/acceptance/2026-08-17-managed-mumu-device-offline-recovery.md)
+- [FGO（MaaFgo）工作流设计与完成证据契约](docs/maafgo-full-workflow.md)
+- [MaaFgo 真机验收手册](docs/manual/maafgo-real-acceptance.md)
+- [BBC-free 私有分发决策（ADR-0003）](docs/decisions/ADR-0003-maafgo-bbc-free-private-distribution.md)
 
 ## License
 
