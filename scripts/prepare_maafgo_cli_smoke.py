@@ -35,6 +35,26 @@ REQUIRED_DLLS = (
     "fastdeploy_ppocr_maa.dll", "DirectML.dll",
 )
 
+# ORR private integration transform.  The three material files below are
+# versioned beside this script; agent-main.pinned.py must stay byte-identical
+# to upstream MaaFgo FGO_COMMIT.  A source hash mismatch fails closed instead
+# of fuzzy-patching an unknown revision.
+ORR_TRANSFORM_ID = "orr-bbc-free-native-reporter"
+ORR_TRANSFORM_VERSION = 1
+ORR_AGENT_DIR = Path(__file__).resolve().parent / "maafgo-orr-agent"
+PINNED_AGENT_MAIN_SHA = "f25b3a3cd490518d465e940c88ea3e6ffba491aca1a3904d1e8301c00ea4e150"
+AGENT_MAIN_REL = "agent/main.py"
+ORR_REPORTER_REL = "agent/orr_reporter.py"
+# 全局枚举强杀 BBC 的模块；私有分发中连同 import 一起移除，误 import 直接失败。
+BBC_MODULE_RELS = (
+    "agent/custom/bbc_action.py",
+    "agent/custom/bbc_connection_manager.py",
+    "agent/custom/bbc_process_utils.py",
+    "agent/custom/bbc_start.py",
+    "agent/custom/bbc_stop.py",
+    "agent/custom/bbc_stop_listener.py",
+)
+
 
 class AssemblyError(ValueError):
     """Stable path-free diagnostic; never includes untrusted input text."""
@@ -119,12 +139,59 @@ def transform_interface(original: JsonObject) -> JsonObject:
     return result
 
 
+def load_orr_agent_materials() -> tuple[bytes, bytes, bytes]:
+    """Return (pinned upstream main, ORR main, reporter) with a hash guard."""
+    try:
+        pinned = (ORR_AGENT_DIR / "agent-main.pinned.py").read_bytes()
+        orr_main = (ORR_AGENT_DIR / "agent-main.orr.py").read_bytes()
+        reporter = (ORR_AGENT_DIR / "orr_reporter.py").read_bytes()
+    except OSError:
+        raise AssemblyError("MISSING_ORR_AGENT_MATERIAL") from None
+    if digest(pinned) != PINNED_AGENT_MAIN_SHA:
+        raise AssemblyError("PINNED_AGENT_MAIN_SHA_MISMATCH")
+    if not orr_main or not reporter or b"import orr_reporter" not in orr_main:
+        raise AssemblyError("INVALID_ORR_AGENT_MATERIAL")
+    if b"import bbc_" in orr_main:
+        raise AssemblyError("ORR_MAIN_STILL_IMPORTS_BBC")
+    return pinned, orr_main, reporter
+
+
+def apply_orr_transform(files: FileMap) -> JsonObject:
+    """Replace the agent entry with the BBC-free ORR variant and add the reporter.
+
+    The upstream bytes must match the pinned reference exactly; anything else
+    fails closed instead of patching an unknown revision.
+    """
+    pinned, orr_main, reporter = load_orr_agent_materials()
+    if AGENT_MAIN_REL not in files:
+        raise AssemblyError("MISSING_REQUIRED_FILE")
+    if files[AGENT_MAIN_REL] != pinned:
+        raise AssemblyError("AGENT_MAIN_SOURCE_MISMATCH")
+    for relative in BBC_MODULE_RELS:
+        if relative not in files:
+            raise AssemblyError("BBC_MODULE_LAYOUT_UNEXPECTED")
+        del files[relative]
+    files[AGENT_MAIN_REL] = orr_main
+    files[ORR_REPORTER_REL] = reporter
+    return {
+        "transform_id": ORR_TRANSFORM_ID,
+        "transform_version": ORR_TRANSFORM_VERSION,
+        "agent_main_source_sha256": digest(pinned),
+        "agent_main_result_sha256": digest(orr_main),
+        "orr_reporter_sha256": digest(reporter),
+        "bbc_modules_removed": list(BBC_MODULE_RELS),
+        "bbc_listener_registered": False,
+        "reporter_registered": True,
+    }
+
+
 def json_bytes(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
 
 
 def validate_project(files: FileMap) -> None:
     required = ["MaaPiCli.exe", *REQUIRED_DLLS, "interface.json", "agent/main.py",
+                ORR_REPORTER_REL,
                 "python/python.exe", "python/python312.dll", "python/python312.zip",
                 "python/Lib/site-packages/maa/__init__.py"]
     if any(name not in files for name in required):
@@ -217,6 +284,7 @@ def build_files(framework: FileMap, fgo: FileMap, python: FileMap,
         raise AssemblyError("MISSING_INTERFACE")
     original = json.loads(files["interface.json"])
     files["interface.json"] = json_bytes(transform_interface(original))
+    orr_transform = apply_orr_transform(files)
     # Isolated search path, no user site, PYTHONPATH, executable .pth, or get-pip.
     pth = "python/python312._pth"
     if pth not in files:
@@ -229,7 +297,8 @@ def build_files(framework: FileMap, fgo: FileMap, python: FileMap,
                    "site_enabled": False, "bbc_installed": False,
                    "inert_pth": ["coloredlogs.pth"],
                    "wheel_data_mapping": {"sympy-1.14.0.data/data/share/man/man1/isympy.1":
-                                          "python/share/man/man1/isympy.1"}}
+                                          "python/share/man/man1/isympy.1"},
+                   "orr_transform": orr_transform}
 
 
 def write_distribution(destination: Path, files: FileMap, manifest: Manifest) -> None:
@@ -283,6 +352,7 @@ def assemble(framework: Path, fgo: Path, python: Path, wheel_dir: Path, destinat
         "python_version": "3.12.10", "python_zip_sha256": PYTHON_SHA,
         "maafw_version": "5.13.0", "platform": "windows", "architecture": "x86_64",
         "wheels": raw_wheels, "transformation": transformation,
+        "orr_transform": transformation["orr_transform"],
         "native_resolution": "RUNTIME_DLL_RESOLUTION_REQUIRES_GATE_B",
         "gate_a": "FILESYSTEM_PASS_RUNTIME_PENDING", "business_ready": False,
         "files": [{"path": n, "sha256": digest(d), "size": len(d)} for n, d in sorted(files.items())],

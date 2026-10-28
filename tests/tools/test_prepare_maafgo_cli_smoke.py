@@ -16,6 +16,9 @@ assert spec and spec.loader
 tool = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tool)
 
+ORR_DIR = SCRIPT.parent / "maafgo-orr-agent"
+PINNED_MAIN = (ORR_DIR / "agent-main.pinned.py").read_bytes()
+
 
 def pe(machine=0x8664):
     data = bytearray(256)
@@ -37,7 +40,8 @@ def materials():
     fgo = {"snapshot/assets/interface.json": json.dumps(interface).encode(),
            "snapshot/assets/tasks/daily.json": b'{"task": []}',
            "snapshot/assets/resource/base/pipeline.json": b"{}",
-           "snapshot/agent/main.py": b"# never execute\n",
+           "snapshot/agent/main.py": PINNED_MAIN,
+           **{f"snapshot/{rel}": b"bbc module fixture" for rel in tool.BBC_MODULE_RELS},
            "snapshot/config/maa_pi_config.json": b"PRODUCTION_SECRET",
            "snapshot/unrelated.txt": b"PRIVATE"}
     python = {"python.exe": pe(), "python312.dll": pe(), "python312.zip": b"stdlib",
@@ -156,3 +160,74 @@ def test_executable_pth_rejected(materials):
     materials[3][0]["startup.pth"] = b"import external_effect"
     with pytest.raises(tool.AssemblyError, match="UNSUPPORTED_WHEEL_LAYOUT"):
         tool.build_files(*materials)
+
+
+def test_orr_transform_replaces_agent_and_drops_bbc(materials):
+    files, transformation = tool.build_files(*materials)
+    pinned, orr_main, reporter = tool.load_orr_agent_materials()
+    assert files["agent/main.py"] == orr_main and files["agent/main.py"] != pinned
+    assert files["agent/orr_reporter.py"] == reporter
+    for rel in tool.BBC_MODULE_RELS:
+        assert rel not in files
+        assert f"snapshot/{rel}" in materials[1]  # source snapshot untouched
+    orr = transformation["orr_transform"]
+    assert orr["transform_id"] == tool.ORR_TRANSFORM_ID
+    assert orr["transform_version"] == 1
+    assert orr["agent_main_source_sha256"] == tool.PINNED_AGENT_MAIN_SHA
+    assert orr["agent_main_result_sha256"] == tool.digest(orr_main)
+    assert orr["orr_reporter_sha256"] == tool.digest(reporter)
+    assert orr["bbc_listener_registered"] is False and orr["reporter_registered"] is True
+    assert orr["bbc_modules_removed"] == list(tool.BBC_MODULE_RELS)
+    # ORR main is exactly pinned-main minus the BBC imports plus the reporter import.
+    dropped = [line for line in pinned.splitlines() if line.startswith(b"import bbc_")]
+    assert len(dropped) == 4
+    orr_reporter_line = next(
+        line + b"\n" for line in orr_main.splitlines() if line.startswith(b"import orr_reporter")
+    )
+    rebuilt = pinned.replace(dropped[0] + b"\r\n", b"").replace(dropped[0] + b"\n", b"")
+    for line in dropped[1:]:
+        rebuilt = rebuilt.replace(line + b"\r\n", b"").replace(line + b"\n", b"")
+    rebuilt = rebuilt.replace(
+        b"import auto_battle_repeat_action\n",
+        b"import auto_battle_repeat_action\n" + orr_reporter_line,
+        1,
+    )
+    assert rebuilt == orr_main
+
+
+def test_agent_main_source_mismatch_fails_closed(materials):
+    materials[1]["snapshot/agent/main.py"] = PINNED_MAIN + b"# drift\n"
+    with pytest.raises(tool.AssemblyError, match="AGENT_MAIN_SOURCE_MISMATCH"):
+        tool.build_files(*materials)
+
+
+def test_missing_bbc_module_layout_fails_closed(materials):
+    del materials[1]["snapshot/agent/custom/bbc_stop_listener.py"]
+    with pytest.raises(tool.AssemblyError, match="BBC_MODULE_LAYOUT_UNEXPECTED"):
+        tool.build_files(*materials)
+
+
+def test_pinned_reference_hash_guard(tmp_path):
+    import shutil
+
+    target = tmp_path / "orr-agent"
+    shutil.copytree(ORR_DIR, target)
+    (target / "agent-main.pinned.py").write_bytes(b"tampered")
+    original_dir = tool.ORR_AGENT_DIR
+    tool.ORR_AGENT_DIR = target
+    try:
+        with pytest.raises(tool.AssemblyError, match="PINNED_AGENT_MAIN_SHA_MISMATCH"):
+            tool.load_orr_agent_materials()
+    finally:
+        tool.ORR_AGENT_DIR = original_dir
+
+
+def test_repo_pinned_reference_matches_constant():
+    assert tool.digest(PINNED_MAIN) == tool.PINNED_AGENT_MAIN_SHA
+    # 与 maafgo_config 的生产分发校验共用同一 pinned commit 身份（该常量在
+    # maafgo_config.py 中独立声明；此处防止两者漂移）。
+    config_source = (
+        Path(__file__).resolve().parents[2] / "src/autogame_orchestrator/maafgo_config.py"
+    ).read_text(encoding="utf-8")
+    assert tool.FGO_COMMIT in config_source
+    assert tool.ORR_TRANSFORM_ID in config_source

@@ -1,0 +1,60 @@
+import sys
+import os
+
+# ================= 1. 环境初始化 =================
+AGENT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# 添加自定义业务逻辑路径 (custom 目录)
+CUSTOM_PATH = os.path.join(AGENT_ROOT, 'custom')
+if os.path.exists(CUSTOM_PATH) and CUSTOM_PATH not in sys.path:
+    sys.path.insert(0, CUSTOM_PATH)
+
+print(f"[Agent Init] Root: {AGENT_ROOT}")
+print(f"[Agent Init] Custom loaded: {os.path.exists(CUSTOM_PATH)}")
+
+# ================= 2. 导入核心模块 =================
+from maa.agent.agent_server import AgentServer
+from maa.toolkit import Toolkit
+
+# 导入自定义 Action (从 custom 目录)
+import mfaalog
+import box_action
+import chaldea_import_action
+import formation_action
+import bond_completion_action
+import current_bond_completion_action
+import inventory_scan_action
+import servant_up_action
+import general_navigation_action
+import ocr_logger
+import support_action
+import auto_battle_action
+import auto_battle_repeat_action
+import orr_reporter  # ORR BBC-free transform (orr-bbc-free-native-reporter): upstream imported bbc_action/bbc_start/bbc_stop/bbc_stop_listener here; bbc_stop_listener registers a MaaTaskerPostStop sink that globally enumerates and kills external BBC processes, so this private distribution never imports it. See docs/decisions.
+
+
+def main():
+    # 设置工作目录为项目根目录
+    project_root_dir = os.path.dirname(AGENT_ROOT)
+    if os.getcwd() != project_root_dir:
+        os.chdir(project_root_dir)
+        print(f"[Agent] Working directory changed to: {project_root_dir}")
+
+    # 初始化 MaaToolkit 选项
+    Toolkit.init_option("./")
+
+    if len(sys.argv) < 2:
+        print("Usage: python main.py <socket_id>")
+        print("socket_id is provided by AgentIdentifier.")
+        sys.exit(1)
+
+    socket_id = sys.argv[-1]
+    print(f"[Agent] Starting Agent Server with socket_id: {socket_id}")
+
+    AgentServer.start_up(socket_id)
+    AgentServer.join()
+    AgentServer.shut_down()
+
+
+if __name__ == "__main__":
+    main()

@@ -9,6 +9,30 @@ from autogame_orchestrator.runtime.maafgo_models import MaaFgoErrorCode as Code
 
 MAX_CONFIG_BYTES = 1024 * 1024
 
+# ── ORR 生产分发身份 ────────────────────────────────────────────────────────
+# 与 scripts/prepare_maafgo_cli_smoke.py 的常量保持一致；
+# tests/tools/test_prepare_maafgo_cli_smoke.py 防止两者漂移。
+ORR_PINNED_FGO_COMMIT = "d7f3a474f50b9a0631ee9acd6df67998c1933f2b"
+ORR_TRANSFORM_ID = "orr-bbc-free-native-reporter"
+ORR_TRANSFORM_VERSION = 1
+DISTRIBUTION_MANIFEST_FILENAME = "distribution-manifest.json"
+MAX_MANIFEST_BYTES = 256 * 1024
+
+# ── 生产 profile policy（只读，绑定 pinned revision 的 task 语义） ──────────
+# 证据：docs/investigations/maafgo-bbc-free-paths.md（pinned d7f3a474）。
+# 启动bbc：自定义 action start_bbc；关闭游戏：StopApp -> 关闭bbc -> stop_bbc，
+# 即使本 run 从未启动 BBC 也会枚举强杀外部 BBC；直接bbc战斗 / Chaldea 一键战斗：
+# BBC-required。原生自动战斗 / 直接战斗：要求人工预置到战斗页。
+FORBIDDEN_TASK_NAMES = frozenset({"启动bbc", "关闭游戏", "直接bbc战斗", "Chaldea 一键战斗"})
+MANUAL_PRESET_TASK_NAMES = frozenset({"原生自动战斗", "直接战斗"})
+# 这些任务走共享战斗调度，options/战斗方式.json 默认 case 是 bbc；生产 profile
+# 必须为它们显式选择 native。
+COMBAT_TASK_NAMES = frozenset({"日常战斗", "冠位戴冠战", "迦勒底之门", "通用大活动", "通用小活动"})
+REQUIRED_ENTRY_TASK_NAME = "登录"
+BATTLE_MODE_OPTION_NAME = "battle_mode"
+NATIVE_BATTLE_MODE = "native"
+MAX_INTERFACE_IMPORT_FILES = 128
+
 
 class MaaFgoConfigurationError(ValueError):
     def __init__(self, code: Code = Code.INVALID_CONFIGURATION) -> None:
@@ -64,6 +88,112 @@ class MaaFgoAdbIdentity:
     device_name: str
     adb_path: str
     address: str
+
+
+@dataclass(frozen=True)
+class MaaFgoProfileTask:
+    """Profile 侧的任务选择：名字、解析出的 PI entry、显式 battle_mode。"""
+
+    name: str
+    entry: str
+    battle_mode: str | None
+
+
+def read_profile_tasks(profile_path: Path) -> list[tuple[str, list[dict[str, object]]]]:
+    """严格读取 profile 的 task 选择（名字 + 原始 option 列表），不改写文件。"""
+    profile = _read_object(profile_path)
+    tasks = profile.get("task")
+    if not isinstance(tasks, list) or not tasks:
+        raise MaaFgoConfigurationError()
+    selection: list[tuple[str, list[dict[str, object]]]] = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            raise MaaFgoConfigurationError()
+        name = _text(task.get("name"))
+        raw_options = task.get("option", [])
+        if raw_options is None:
+            raw_options = []
+        if not isinstance(raw_options, list):
+            raise MaaFgoConfigurationError()
+        options: list[dict[str, object]] = []
+        for option in raw_options:
+            if not isinstance(option, dict):
+                raise MaaFgoConfigurationError()
+            _text(option.get("name"))
+            options.append(option)
+        selection.append((name, options))
+    return selection
+
+
+def read_interface_task_entries(interface_path: Path) -> dict[str, str]:
+    """沿 PI import 链收集 ``task name -> entry``（entry 缺省为任务名）。
+
+    只提取名字映射，不复刻 PI 的 option/override 语义。import 必须相对
+    interface 根且不越界，文件数与大小有界，冲突定义 fail closed。
+    """
+    mapping: dict[str, str] = {}
+    try:
+        interface_root = interface_path.parent.resolve()
+    except OSError:
+        raise MaaFgoConfigurationError() from None
+    pending = [interface_path]
+    seen: set[Path] = set()
+    while pending:
+        if len(seen) >= MAX_INTERFACE_IMPORT_FILES:
+            raise MaaFgoConfigurationError()
+        path = pending.pop(0)
+        try:
+            resolved = path.resolve()
+        except OSError:
+            raise MaaFgoConfigurationError() from None
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        document = _read_object(path)
+        tasks = document.get("task")
+        if isinstance(tasks, list):
+            for task in tasks:
+                if not isinstance(task, dict):
+                    raise MaaFgoConfigurationError()
+                name = _text(task.get("name"))
+                raw_entry = task.get("entry")
+                entry = _text(raw_entry) if raw_entry is not None else name
+                if name in mapping and mapping[name] != entry:
+                    raise MaaFgoConfigurationError()
+                mapping[name] = entry
+        imports = document.get("import")
+        if isinstance(imports, list):
+            for imported in imports:
+                imported_file = _text(imported)
+                if (
+                    "\\" in imported_file
+                    or ":" in imported_file
+                    or imported_file.startswith("/")
+                    or ".." in imported_file
+                ):
+                    raise MaaFgoConfigurationError()
+                candidate = interface_path.parent / imported_file
+                try:
+                    if not candidate.resolve().is_relative_to(interface_root):
+                        raise MaaFgoConfigurationError()
+                except OSError:
+                    raise MaaFgoConfigurationError() from None
+                if candidate.is_file():
+                    pending.append(candidate)
+    return mapping
+
+
+def read_expected_task_pairs(interface_path: Path, profile_path: Path) -> tuple[tuple[str, str], ...]:
+    """把 profile 任务名解析为 (name, entry) 对，供完成证据契约绑定通知。"""
+    try:
+        entries = read_interface_task_entries(interface_path)
+        selection = read_profile_tasks(profile_path)
+    except MaaFgoConfigurationError:
+        raise
+    pairs: list[tuple[str, str]] = []
+    for name, _options in selection:
+        pairs.append((name, entries.get(name, name)))
+    return tuple(pairs)
 
 
 def read_adb_identity(profile_path: Path) -> MaaFgoAdbIdentity:
@@ -187,3 +317,80 @@ class MaaFgoConfig:
             raise
         except (OSError, ValueError, RecursionError):
             raise MaaFgoConfigurationError() from None
+
+    def read_expected_task_pairs(self) -> tuple[tuple[str, str], ...]:
+        """把当前 profile 的任务选择解析为完成证据契约所需的 (name, entry) 对。"""
+        try:
+            return read_expected_task_pairs(self.interface_path, self.profile_path)
+        except MaaFgoConfigurationError:
+            raise
+        except (OSError, ValueError, RecursionError):
+            raise MaaFgoConfigurationError() from None
+
+    def check_profile_policy(self) -> None:
+        """只读生产 profile policy（绑定 pinned revision 的任务语义）。
+
+        保证这是一次完整 FGO 流程（从游戏未运行状态开始），而不是单独战斗：
+        必须以 ``登录`` 开头；拒绝 BBC-only / BBC-launch / 关闭游戏；战斗任务
+        必须显式 native；游戏关闭职责交给 OrchestratoRRR（拒绝 MaaFgo 的
+        ``关闭游戏``）。绝不改写用户 profile。
+        """
+        try:
+            pairs = self.read_expected_task_pairs()
+            selection = read_profile_tasks(self.profile_path)
+        except MaaFgoConfigurationError:
+            raise
+        except (OSError, ValueError, RecursionError):
+            raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED) from None
+        battle_modes = {name: _option_value(options, BATTLE_MODE_OPTION_NAME) for name, options in selection}
+        names = [name for name, _ in pairs]
+        if not names or names[0] != REQUIRED_ENTRY_TASK_NAME:
+            raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
+        if len(set(names)) != len(names) or any(name in FORBIDDEN_TASK_NAMES for name in names):
+            raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
+        business = names[1:]
+        if not business or all(name in MANUAL_PRESET_TASK_NAMES for name in business):
+            raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
+        for name in business:
+            if name in COMBAT_TASK_NAMES and battle_modes.get(name) != NATIVE_BATTLE_MODE:
+                raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
+
+    def check_distribution(self) -> None:
+        """生产 FGO 运行只允许 ORR 私有装配的 BBC-free 分发。
+
+        ``distribution-manifest.json`` 必须证明：pinned MaaFgo revision、
+        ORR transform 已应用（BBC stop listener 不再注册、reporter 已注册）。
+        指向未验证安装一律 fail closed（DISTRIBUTION_UNVERIFIED）。
+        """
+        manifest_path = Path(self.working_directory) / DISTRIBUTION_MANIFEST_FILENAME
+        try:
+            raw = manifest_path.read_bytes()
+        except OSError:
+            raise MaaFgoConfigurationError(Code.DISTRIBUTION_UNVERIFIED) from None
+        if len(raw) > MAX_MANIFEST_BYTES:
+            raise MaaFgoConfigurationError(Code.DISTRIBUTION_UNVERIFIED)
+        try:
+            manifest = _read_object(manifest_path)
+        except (MaaFgoConfigurationError, OSError, ValueError, RecursionError):
+            raise MaaFgoConfigurationError(Code.DISTRIBUTION_UNVERIFIED) from None
+        transform = manifest.get("orr_transform")
+        if (
+            manifest.get("schema_version") != 1
+            or manifest.get("maafgo_commit") != ORR_PINNED_FGO_COMMIT
+            or not isinstance(transform, dict)
+            or transform.get("transform_id") != ORR_TRANSFORM_ID
+            or transform.get("transform_version") != ORR_TRANSFORM_VERSION
+            or transform.get("bbc_listener_registered") is not False
+            or transform.get("reporter_registered") is not True
+        ):
+            raise MaaFgoConfigurationError(Code.DISTRIBUTION_UNVERIFIED)
+
+
+def _option_value(options: list[dict[str, object]], name: str) -> str | None:
+    for option in options:
+        if option.get("name") == name:
+            value = option.get("value")
+            if isinstance(value, str) and value:
+                return value
+            return None
+    return None
