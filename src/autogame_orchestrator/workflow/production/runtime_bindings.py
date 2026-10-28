@@ -8,6 +8,7 @@ from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
 from autogame_orchestrator.maa_resource.merger import MAAResourceMerger
 from autogame_orchestrator.maa_sync.synchronizer import MAASynchronizer
 from autogame_orchestrator.maa_update import build_maa_update_runtime_config
+from autogame_orchestrator.maa_update.runtime import MAAUpdateAdapter
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.runtime.aalc import AALCAdapter
@@ -88,8 +89,8 @@ def build_default_runtime_factories(config: AppConfig) -> RuntimeFactories:
     def build_maa_sync() -> MAASynchronizer:
         return MAASynchronizer(config.maa_sync)
 
-    def build_maa_update() -> MAAAdapter:
-        return MAAAdapter(build_maa_update_runtime_config(config.maa, config.maa_update))
+    def build_maa_update() -> MAAUpdateAdapter:
+        return MAAUpdateAdapter(build_maa_update_runtime_config(config.maa, config.maa_update))
 
     def build_maa_resource_merge() -> MAAResourceMerger:
         return MAAResourceMerger(config.maa_resource_merge)

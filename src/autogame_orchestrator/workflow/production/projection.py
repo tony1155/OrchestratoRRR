@@ -45,6 +45,7 @@ _MAA_FAILURE_MARKERS: tuple[tuple[str, str], ...] = (
     ("connection_failed", "failed to connect to game"),
     ("game_start_failed", "failed to start game"),
     ("core_install_failed", "failed to install maacore"),
+    ("download_interrupted", "peer disconnected"),
 )
 _MAA_MARKER_SCAN_LIMIT = 8 * 1024
 
@@ -74,6 +75,9 @@ def maa_output_diagnostics(result: MAARunResult) -> dict[str, JsonValue]:
         value = result.diagnostics.get(key)
         if isinstance(value, bool):
             diagnostics[key] = value
+    update_attempts = result.diagnostics.get("update_attempts")
+    if isinstance(update_attempts, int) and not isinstance(update_attempts, bool) and update_attempts > 0:
+        diagnostics["update_attempts"] = update_attempts
     return diagnostics
 
 
