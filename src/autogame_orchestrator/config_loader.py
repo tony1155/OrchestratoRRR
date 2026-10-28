@@ -15,6 +15,8 @@ from autogame_orchestrator.bettergi_config import BetterGIConfig
 from autogame_orchestrator.config_model import (
     AALCConfig,
     AppConfig,
+    FgoConfig,
+    GameSelection,
     MAAConfig,
     MAAResourceMergeConfig,
     MAASyncConfig,
@@ -24,6 +26,7 @@ from autogame_orchestrator.config_model import (
     OrchestratorConfig,
     StarRailConfig,
 )
+from autogame_orchestrator.maafgo_config import MaaFgoConfig
 from autogame_orchestrator.models import ErrorCode
 
 if TYPE_CHECKING:
@@ -89,6 +92,17 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     cfg_rm = _parse_maa_resource_merge(data.get("maa_resource_merge"))
     cfg_bg = _parse_bettergi(data.get("bettergi"))
     cfg_al = _parse_aalc(data.get("aalc"))
+    cfg_game = _parse_game(data.get("game"))
+    cfg_fgo = _parse_fgo(data.get("fgo"))
+    cfg_maafgo = _parse_maafgo(data.get("maafgo"))
+
+    # FGO 链路不消费 starrail/maa 段：允许整段缺省，不因未配置而阻塞。
+    # game = "starrail"（含缺省）时保持原有严格解析行为不变。
+    fgo_mode = cfg_game[1] == [] and cfg_game[0] is GameSelection.FGO
+    if fgo_mode and cfg_sr[1] and data.get("starrail") is None:
+        cfg_sr = (StarRailConfig(), [])
+    if fgo_mode and cfg_ma[1] and data.get("maa") is None:
+        cfg_ma = (MAAConfig(), [])
 
     all_errors.extend(cfg_or[1])
     all_errors.extend(cfg_mu[1])
@@ -98,9 +112,14 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
     all_errors.extend(cfg_up[1])
     all_errors.extend(cfg_rm[1])
     all_errors.extend(cfg_bg[1])
+    all_errors.extend(cfg_game[1])
+    all_errors.extend(cfg_fgo[1])
+    all_errors.extend(cfg_maafgo[1])
 
     if all_errors:
         return None, all_errors
+
+    game = cfg_game[0] if cfg_game[0] is not None else GameSelection.STARRAIL
 
     config = AppConfig(
         bettergi=cfg_bg[0],  # type: ignore[arg-type]
@@ -112,6 +131,9 @@ def load_config(path: Path, *, check_paths: bool = False) -> tuple[AppConfig | N
         maa_update=cfg_up[0],  # type: ignore[arg-type]
         maa_resource_merge=cfg_rm[0],  # type: ignore[arg-type]
         aalc=cfg_al[0] if cfg_al[0] is not None else AALCConfig(),
+        game=game,
+        fgo=cfg_fgo[0] if cfg_fgo[0] is not None else FgoConfig(),
+        maafgo=cfg_maafgo[0] if cfg_maafgo[0] is not None else MaaFgoConfig(),
     )
 
     validation_errors = config.validate()
@@ -524,4 +546,83 @@ def _parse_aalc(raw: object) -> tuple[AALCConfig | None, list[ErrorCode]]:
         attempt_timeout_seconds=att_to,
         stop_timeout_seconds=stop_to,
         requires_administrator=requires_administrator,
+    ), []
+
+
+def _parse_game(raw: object) -> tuple[GameSelection | None, list[ErrorCode]]:
+    """顶层 ``game`` 键；缺省 = starrail，既有生产配置行为不变。"""
+    if raw is None:
+        return GameSelection.STARRAIL, []
+    if not isinstance(raw, str):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    try:
+        return GameSelection(raw), []
+    except ValueError:
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+
+
+def _parse_fgo(raw: object) -> tuple[FgoConfig | None, list[ErrorCode]]:
+    if raw is None:
+        return FgoConfig(), []
+    if not isinstance(raw, dict):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    allowed_fields = {"provider", "package_name", "stop_game_on_exit"}
+    if any(key not in allowed_fields for key in raw):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    provider = raw.get("provider", "maafgo")
+    package_name = raw.get("package_name", "")
+    stop_game_on_exit = raw.get("stop_game_on_exit", True)
+    valid = (
+        isinstance(provider, str)
+        and isinstance(package_name, str)
+        and isinstance(stop_game_on_exit, bool)
+    )
+    if not valid:
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    return FgoConfig(
+        provider=provider,
+        package_name=package_name,
+        stop_game_on_exit=stop_game_on_exit,
+    ), []
+
+
+def _parse_maafgo(raw: object) -> tuple[MaaFgoConfig | None, list[ErrorCode]]:
+    if raw is None:
+        # [maafgo] 段缺省合法：game = "starrail" 时完全不参与校验；
+        # game = "fgo" 时由 AppConfig.validate 要求 enabled。
+        return MaaFgoConfig(), []
+    if not isinstance(raw, dict):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    allowed_fields = {
+        "enabled",
+        "executable",
+        "working_directory",
+        "timeout_seconds",
+        "stop_timeout_seconds",
+    }
+    if any(key not in allowed_fields for key in raw):
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    defaults = MaaFgoConfig()
+    enabled = raw.get("enabled", defaults.enabled)
+    executable = raw.get("executable", defaults.executable)
+    working_directory = raw.get("working_directory", defaults.working_directory)
+    timeout_seconds = raw.get("timeout_seconds", defaults.timeout_seconds)
+    stop_timeout_seconds = raw.get("stop_timeout_seconds", defaults.stop_timeout_seconds)
+    valid = (
+        isinstance(enabled, bool)
+        and isinstance(executable, str)
+        and isinstance(working_directory, str)
+        and isinstance(timeout_seconds, int)
+        and not isinstance(timeout_seconds, bool)
+        and isinstance(stop_timeout_seconds, int)
+        and not isinstance(stop_timeout_seconds, bool)
+    )
+    if not valid:
+        return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
+    return MaaFgoConfig(
+        enabled=enabled,
+        executable=executable,
+        working_directory=working_directory,
+        timeout_seconds=timeout_seconds,
+        stop_timeout_seconds=stop_timeout_seconds,
     ), []

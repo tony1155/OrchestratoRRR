@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -18,8 +19,22 @@ from autogame_orchestrator.models import ErrorCode
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from autogame_orchestrator.maafgo_config import MaaFgoConfig
+    from autogame_orchestrator.runtime.maafgo_models import MaaFgoErrorCode
+
 
 _VALID_PATH_CHARS_RE = re.compile(r'^[^\x00-\x1f\x7f"*:<>?|]+$')
+
+# Android 包名：点分 label，每个 label 以字母开头，仅字母/数字/下划线。
+_ANDROID_PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$")
+
+
+def _default_maafgo_config() -> MaaFgoConfig:
+    # 延迟导入：maafgo_config 依赖 runtime 子包，而 runtime 适配器反过来
+    # 导入 config_model；模块级导入会造成初始化环。
+    from autogame_orchestrator.maafgo_config import MaaFgoConfig
+
+    return MaaFgoConfig()
 
 
 @dataclass(frozen=True)
@@ -534,6 +549,64 @@ class MAAUpdateConfig:
         return errors
 
 
+class GameSelection(StrEnum):
+    """本次运行驱动的游戏链路（决定使用哪条生产计划）。
+
+    旧配置没有 ``game`` 键时默认 ``starrail``，既有 StarRail 生产行为不变。
+    """
+
+    STARRAIL = "starrail"
+    FGO = "fgo"
+
+
+@dataclass(frozen=True)
+class FgoConfig:
+    """FGO 链路中 OrchestratoRRR 自有的边界设置。
+
+    MaaFgo 的 resource/task/option/编队/助战等业务语义仍由其
+    ``config/maa_pi_config.json`` 拥有；这里只声明 OrchestratoRRR 真正拥有的
+    生命周期职责：负责哪个 Android 包、退出时是否停止游戏。ADB 端点只来自
+    ``[mumu] adb_serial``，此处不提供第二份设备真值。
+    """
+
+    provider: str = "maafgo"
+    package_name: str = ""
+    stop_game_on_exit: bool = True
+
+    def validate(self) -> list[ErrorCode]:
+        errors: list[ErrorCode] = []
+        if self.provider != "maafgo":
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.stop_game_on_exit, bool):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if not isinstance(self.package_name, str) or not _ANDROID_PACKAGE_RE.fullmatch(self.package_name):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            return errors
+        if len(self.package_name) > 256 or any(len(label) > 51 for label in self.package_name.split(".")):
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        return errors
+
+
+def _maafgo_config_errors(codes: Sequence[MaaFgoErrorCode]) -> list[ErrorCode]:
+    """把 MaaFgo 专属错误码收敛到公共配置 ErrorCode；只收敛，不细化。
+
+    MaaFgo 专属细节通过 ``source_error_code`` 诊断在 Runtime/Stage 层透出。
+    """
+    from autogame_orchestrator.runtime.maafgo_models import MaaFgoErrorCode
+
+    path_codes = {
+        MaaFgoErrorCode.EXECUTABLE_NOT_FOUND,
+        MaaFgoErrorCode.WORKING_DIRECTORY_NOT_FOUND,
+        MaaFgoErrorCode.PROJECT_INTERFACE_NOT_FOUND,
+        MaaFgoErrorCode.PROFILE_NOT_FOUND,
+    }
+    return [ErrorCode.CONFIG_PATH_NOT_FOUND if code in path_codes else ErrorCode.CONFIG_SCHEMA_ERROR for code in codes]
+
+
+def _maafgo_path_errors(codes: Sequence[MaaFgoErrorCode]) -> list[ErrorCode]:
+    return _maafgo_config_errors(codes)
+
+
 @dataclass(frozen=True)
 class AppConfig:
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
@@ -545,11 +618,22 @@ class AppConfig:
     maa_resource_merge: MAAResourceMergeConfig = field(default_factory=MAAResourceMergeConfig)
     aalc: AALCConfig = field(default_factory=AALCConfig)
     bettergi: BetterGIConfig = field(default_factory=BetterGIConfig)
+    game: GameSelection = GameSelection.STARRAIL
+    fgo: FgoConfig = field(default_factory=FgoConfig)
+    maafgo: MaaFgoConfig = field(default_factory=_default_maafgo_config)
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
         errors.extend(self.orchestrator.validate())
         errors.extend(self.mumu.validate())
+        if self.game == GameSelection.FGO:
+            # FGO 链路只消费 MuMu + MaaFgo；starrail/maa 段不参与本次计划，
+            # 不因未配置而阻塞。MaaFgo 生产运行要求已启用。
+            errors.extend(self.fgo.validate())
+            errors.extend(_maafgo_config_errors(self.maafgo.validate()))
+            if not self.maafgo.enabled:
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+            return errors
         errors.extend(self.starrail.validate())
         errors.extend(self.maa.validate())
         errors.extend(self.maa_sync.validate())
@@ -561,6 +645,9 @@ class AppConfig:
     def check_paths(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
         errors.extend(self.mumu.check_paths())
+        if self.game == GameSelection.FGO:
+            errors.extend(_maafgo_path_errors(self.maafgo.check_paths()))
+            return errors
         errors.extend(self.starrail.check_paths())
         errors.extend(self.maa.check_paths())
         errors.extend(self.maa_sync.check_paths())
@@ -608,11 +695,17 @@ class AppConfig:
             allow_empty=self.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL,
         )
         require_absolute("mumu.adb_executable", self.mumu.adb_executable)
-        require_absolute("starrail.executable", self.starrail.executable)
-        require_absolute("starrail.working_directory", self.starrail.working_directory)
-        require_absolute("starrail.log_path_template", self.starrail.log_path_template.replace("{date}", "2000-01-01"))
-        require_absolute("maa.executable", self.maa.executable)
-        require_absolute("maa.working_directory", self.maa.working_directory)
+        # FGO 链路不消费 starrail/maa 段；这些字段允许留空。
+        fgo_mode = self.game == GameSelection.FGO
+        require_absolute("starrail.executable", self.starrail.executable, allow_empty=fgo_mode)
+        require_absolute("starrail.working_directory", self.starrail.working_directory, allow_empty=fgo_mode)
+        require_absolute(
+            "starrail.log_path_template",
+            self.starrail.log_path_template.replace("{date}", "2000-01-01"),
+            allow_empty=fgo_mode,
+        )
+        require_absolute("maa.executable", self.maa.executable, allow_empty=fgo_mode)
+        require_absolute("maa.working_directory", self.maa.working_directory, allow_empty=fgo_mode)
         sync_paths = (
             ("maa_sync.gui_settings_source", self.maa_sync.gui_settings_source),
             ("maa_sync.gui_tasks_source", self.maa_sync.gui_tasks_source),

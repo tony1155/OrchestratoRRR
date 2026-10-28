@@ -3,6 +3,13 @@
 # Copy this file to `orchestrator.local.toml` and adjust paths for your machine.
 # `orchestrator.local.toml` is git-ignored.
 
+# game 选择本次运行驱动的生产计划：
+#   "starrail"（默认）= 既有 StarRail+MAA 计划；省略该键时行为完全不变
+#   "fgo"             = FGO（MaaFgo）计划；要求 [fgo] 与 [maafgo]，
+#                       starrail/maa/maa_sync/maa_update/maa_resource_merge/aalc/bettergi
+#                       段不参与校验，也不执行
+# game = "starrail"
+
 [orchestrator]
 log_dir = "logs"
 report_dir = "run-results"
@@ -139,3 +146,27 @@ mode = "one_dragon"
 config_name = "Orchestrator-Daily"
 timeout_seconds = 7200
 stop_timeout_seconds = 15
+
+# ── FGO（MaaFgo）链路 ────────────────────────────────────────────────────────
+# 仅当 game = "fgo" 时参与校验与执行。详见 docs/manual/maafgo-real-acceptance.md。
+#
+# [fgo] 声明 OrchestratoRRR 自有的生命周期边界：停止哪个 Android 包。
+# ADB 端点只来自 [mumu] adb_serial；这里刻意不提供第二份设备真值。
+# MaaFgo 的 resource/chapter/quest/battle_count/support/team 等业务配置仍由
+# 其 config/maa_pi_config.json 拥有，OrchestratoRRR 只做只读守卫，不代改。
+[fgo]
+provider = "maafgo"
+# FGO 国服（bilibili 渠道）Android 包名示例；按实际服务器填写。
+package_name = "com.bilibili.fatego"
+stop_game_on_exit = true
+
+# [maafgo] 指向 OrchestratoRRR 私有装配的 MaaFgo 分发（scripts/prepare_maafgo_cli_smoke.py
+# 产出，含 BBC-free transform 与完成证据 reporter；生产运行会在 PREPARE 阶段校验
+# distribution-manifest.json，指向未验证的安装会 fail closed）。
+# executable 必须位于 working_directory 根目录且名为 MaaPiCli.exe。
+[maafgo]
+enabled = true
+executable = "C:\\path\\to\\MaaFgo-ORR\\MaaPiCli.exe"
+working_directory = "C:\\path\\to\\MaaFgo-ORR"
+timeout_seconds = 10800
+stop_timeout_seconds = 20
