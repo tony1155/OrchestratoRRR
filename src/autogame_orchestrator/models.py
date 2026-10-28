@@ -126,6 +126,7 @@ class StageName(StrEnum):
     START_MUMU = "start_mumu"
     WAIT_MUMU_ADB_READY_AFTER_RESTART = "wait_mumu_adb_ready_after_restart"
     RUN_MAA = "run_maa"
+    RUN_BETTERGI = "run_bettergi"
     RUN_AALC = "run_aalc"
     SHUTDOWN_MUMU = "shutdown_mumu"
     WRITE_RUN_REPORT = "write_run_report"

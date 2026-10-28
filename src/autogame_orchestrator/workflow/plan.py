@@ -49,13 +49,19 @@ def build_execution_plan(
             StageName.SHUTDOWN_MUMU,
         }
         selected = tuple(stage for stage in selected if stage not in removed)
+    if stages is None and config.bettergi.enabled:
+        selected = (*selected[:-1], StageName.RUN_BETTERGI, selected[-1])
     requires_administrator = (
-        StageName.SYNC_MAA_CONFIG in selected
-        and config.maa_sync.enabled is True
-        and config.maa_sync.requires_administrator is True
-    ) or (
-        StageName.UPDATE_MAA in selected
-        and config.maa_update.enabled is True
-        and config.maa_update.requires_administrator is True
+        (StageName.RUN_BETTERGI in selected and config.bettergi.enabled)
+        or (
+            StageName.SYNC_MAA_CONFIG in selected
+            and config.maa_sync.enabled is True
+            and config.maa_sync.requires_administrator is True
+        )
+        or (
+            StageName.UPDATE_MAA in selected
+            and config.maa_update.enabled is True
+            and config.maa_update.requires_administrator is True
+        )
     )
     return ExecutionPlan(stages=selected, requires_administrator=requires_administrator)

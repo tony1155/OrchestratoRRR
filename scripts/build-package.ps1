@@ -61,15 +61,30 @@ if (Test-Path -LiteralPath $workRoot) {
 }
 New-Item -ItemType Directory -Force -Path $distRoot, $workRoot | Out-Null
 
-& $python -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --distpath $distRoot `
-    --workpath $workRoot `
-    $spec
+# A venv backed by Conda keeps native dependencies in the base Library/bin.
+# Expose that directory to PyInstaller's dependency resolver for this build only.
+$basePrefix = & $python -c "import sys; print(sys.base_prefix)"
+if ($LASTEXITCODE -ne 0) { throw "Cannot determine Python base prefix." }
+$baseLibraryBin = Join-Path $basePrefix "Library\bin"
+$originalBuildPath = $env:PATH
+try {
+    if (Test-Path -LiteralPath $baseLibraryBin -PathType Container) {
+        $env:PATH = $baseLibraryBin + [IO.Path]::PathSeparator + $originalBuildPath
+    }
+    & $python -m PyInstaller `
+        --noconfirm `
+        --clean `
+        --distpath $distRoot `
+        --workpath $workRoot `
+        $spec
+    $buildExitCode = $LASTEXITCODE
+}
+finally {
+    $env:PATH = $originalBuildPath
+}
 
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+if ($buildExitCode -ne 0) {
+    exit $buildExitCode
 }
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
     Write-Error "The expected onedir executable was not generated."

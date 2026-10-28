@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from autogame_orchestrator.bettergi_config import BetterGIConfig
 from autogame_orchestrator.models import ErrorCode
 
 if TYPE_CHECKING:
@@ -543,6 +544,7 @@ class AppConfig:
     maa_update: MAAUpdateConfig = field(default_factory=MAAUpdateConfig)
     maa_resource_merge: MAAResourceMergeConfig = field(default_factory=MAAResourceMergeConfig)
     aalc: AALCConfig = field(default_factory=AALCConfig)
+    bettergi: BetterGIConfig = field(default_factory=BetterGIConfig)
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
@@ -553,6 +555,7 @@ class AppConfig:
         errors.extend(self.maa_sync.validate())
         errors.extend(self.maa_update.validate())
         errors.extend(self.maa_resource_merge.validate())
+        errors.extend(self.bettergi.validate())
         return errors
 
     def check_paths(self) -> list[ErrorCode]:
@@ -562,6 +565,7 @@ class AppConfig:
         errors.extend(self.maa.check_paths())
         errors.extend(self.maa_sync.check_paths())
         errors.extend(self.maa_resource_merge.check_paths())
+        errors.extend(self.bettergi.check_paths())
         return errors
 
     def check_default_entry_paths(

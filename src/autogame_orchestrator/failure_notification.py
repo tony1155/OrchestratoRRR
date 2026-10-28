@@ -89,12 +89,7 @@ def notify_interactive_run_failure(
         return False
 
     selected = default_failure_notification_dependencies() if dependencies is None else dependencies
-    if (
-        selected.platform != "win32"
-        or not selected.frozen
-        or not selected.stdin_isatty()
-        or not selected.stdout_isatty()
-    ):
+    if selected.platform != "win32" or not selected.stdin_isatty() or not selected.stdout_isatty():
         return False
 
     original = _original_failure(report.stages)

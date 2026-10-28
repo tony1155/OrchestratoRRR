@@ -22,6 +22,12 @@ OrchestratoRRR 用于按确定顺序管理 MuMu、StarRailCopilot、MAA 等外�
 
 ## 当前生产流程
 
+可选启用官方 BetterGI 0.64.0 一条龙：`[bettergi] enabled = true` 时，managed 模式在
+`SHUTDOWN_MUMU` 后、写报告前增加 `RUN_BETTERGI`；external 模式在 MAA 后执行。
+默认关闭，任务由 BetterGI GUI 配置。Adapter 结合本次实例日志与进程退出判定完成，
+并执行有界 Job 清理。接入已提供 Fake 测试，尚未真实游戏验收；配置方法与边界见
+[BetterGI 接入说明](docs/manual/bettergi-integration.md)。
+
 managed 模式的默认生产计划共有 16 个阶段，顺序由源码中的 `planning.build_plan()` 与 `run_application.MANAGED_RUN_STAGES` 共同锁定：
 
 ```mermaid
@@ -90,12 +96,35 @@ Set-Location OrchestratoRRR
 
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev,packaging]"
+python -m pip install -e ".[dev]"
 ```
 
-### 构建 onedir
+### 本机源码运行（推荐）
+
+在本机持续修改项目时，不必重新打包 EXE。已有 editable 安装的 `.venv` 会直接
+加载当前 `src`，修改代码后下次启动生效；仅依赖变化时需要更新虚拟环境。
 
 ```powershell
+# 只读预检，不启动游戏、提权、更新或写运行日志
+.\scripts\run-local.ps1 -CheckOnly
+
+# 预检通过后直接运行，结束时保留窗口
+.\scripts\run-local.ps1
+
+# 可选：运行前手动输入确认
+.\scripts\run-local.ps1 -ConfirmBeforeRun
+```
+
+入口统一使用 `config/orchestrator.local.toml` 和项目 `.venv\Scripts\python.exe`。
+默认数据目录为源码仓库旁的 `orchestrator-data`，TOML 的 `log_dir` 与 `report_dir`
+需分别配置为其中 `logs`、`run-results` 的绝对路径；工作目录为其中的 `runtime`。
+这会将本机真实运行数据与仓库测试输出分开，不再依赖 C 盘安装目录。
+桌面快捷方式配置、路径示例及兼容边界见 [源码入口说明](docs/manual/local-source-entry.md)。
+
+### 构建 onedir（发布时使用）
+
+```powershell
+python -m pip install -e ".[packaging]"
 .\scripts\build-package.ps1
 ```
 
@@ -222,7 +251,7 @@ python -m autogame_orchestrator run `
 .\dist\OrchestratoRRR\OrchestratoRRR.exe start
 ```
 
-`start` 会执行 canonical 路径预检、展示实际计划与风险提示，并在用户输入确认后调用同一个正式 run 边界。打包版交互运行失败时，程序会在 RunReport 写入后显示一个不含设备地址、命令行或原始 ADB 输出的失败提示。
+`start` 会执行 canonical 路径预检、展示实际计划与风险提示，并在用户输入确认后调用同一个正式 run 边界。源码版与打包版的 Windows 交互运行失败时，程序会在 RunReport 写入后显示一个不含设备地址、命令行或原始 ADB 输出的失败提示。
 
 ## 日志与 RunReport
 

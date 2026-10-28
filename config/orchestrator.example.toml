@@ -128,3 +128,14 @@ requires_administrator = false
 
 [aalc.environment]
 PYTHONIOENCODING = "utf-8"
+
+[bettergi]
+# Official BetterGI 0.64.0 one-dragon integration; configure tasks in BetterGI GUI.
+# Create Orchestrator-Daily with CompletionAction = 关闭软件 before enabling.
+enabled = false
+executable = 'E:\Program Files\Games\Autogame\BetterGI\BetterGI.exe'
+working_directory = 'E:\Program Files\Games\Autogame\BetterGI'
+mode = "one_dragon"
+config_name = "Orchestrator-Daily"
+timeout_seconds = 7200
+stop_timeout_seconds = 15

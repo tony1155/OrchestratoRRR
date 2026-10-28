@@ -8,6 +8,7 @@ from autogame_orchestrator.config_model import AppConfig
 from autogame_orchestrator.models import StageName
 from autogame_orchestrator.workflow.production.executors import ProductionStageExecutor
 from autogame_orchestrator.workflow.production.ports import (
+    BetterGIRunPort,
     MAAResourceMergePort,
     MAARunPort,
     MAASyncPort,
@@ -37,6 +38,11 @@ class _RuntimeCache:
 
     def starrail(self) -> StarRailRunPort:
         return cast("StarRailRunPort", self._get("starrail", self._factories.starrail))
+
+    def bettergi(self) -> BetterGIRunPort:
+        if self._factories.bettergi is None:
+            raise RuntimeBindingError("BetterGI factory unavailable")
+        return cast("BetterGIRunPort", self._get("bettergi", self._factories.bettergi))
 
     def maa(self) -> MAARunPort:
         return cast("MAARunPort", self._get("maa", self._factories.maa))
@@ -80,6 +86,7 @@ class ProductionExecutorFactory:
             self.state,
             starrail=self._runtime.starrail,
             maa=self._runtime.maa,
+            bettergi=self._runtime.bettergi,
             mumu=self._runtime.mumu,
             maa_sync=self._runtime.maa_sync,
             maa_update=self._runtime.maa_update,
