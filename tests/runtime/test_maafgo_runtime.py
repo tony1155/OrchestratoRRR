@@ -10,6 +10,12 @@ from pathlib import Path
 import pytest
 
 from autogame_orchestrator.maafgo_config import MaaFgoConfig
+from autogame_orchestrator.maafgo_evidence import (
+    MaaFgoEvidenceError,
+    MaaFgoRunContract,
+    read_completion_artifact,
+    verify_completion_artifact,
+)
 from autogame_orchestrator.process import (
     CancellationToken,
     Deadline,
@@ -53,7 +59,7 @@ class FakeSupervisor(ProcessSupervisor):
                 spec,
                 executable=Path(sys._base_executable),
                 arguments=(str(FAKE), "-d", "--pid-dir", self.config.working_directory),
-                environment_overrides={"FAKE_MAAFGO_MODE": self.mode},
+                environment_overrides={**spec.environment_overrides, "FAKE_MAAFGO_MODE": self.mode},
             ),
             deadline,
             cancel,
@@ -324,3 +330,155 @@ def test_model_invariants():
     ):
         with pytest.raises(ValueError):
             replace(valid, **changes)
+
+
+# ── run-scoped completion evidence ──────────────────────────────────────────
+
+EXPECTED_PAIRS = (("登录", "登录识别"), ("日常战斗", "日常战斗"))
+
+
+def contracted(config, mode, tmp_path, pairs=EXPECTED_PAIRS):
+    contract = MaaFgoRunContract.create(tmp_path / "runs", pairs)
+    instance, supervisor = adapter(config, mode)
+    return MaaFgoAdapter(
+        config,
+        expected_adb_serial=SERIAL,
+        supervisor_factory=lambda: supervisor,
+        contract=contract,
+    ), supervisor, contract
+
+
+def test_contract_create_is_run_scoped(tmp_path):
+    first = MaaFgoRunContract.create(tmp_path / "runs", EXPECTED_PAIRS)
+    second = MaaFgoRunContract.create(tmp_path / "runs", EXPECTED_PAIRS)
+    assert first.run_id != second.run_id
+    assert first.run_directory != second.run_directory
+    assert first.result_path.parent == first.run_directory
+    written = json.loads(first.expected_tasks_path.read_text(encoding="utf-8"))
+    assert written == [{"name": name, "entry": entry} for name, entry in EXPECTED_PAIRS]
+    assert len(first.plan_digest) == 64
+
+
+def test_contract_rejects_bad_task_lists(tmp_path):
+    for index, pairs in enumerate(
+        ([], [("x", "y"), ("x", "y")], [("", "y")], [("n" * 300, "e")], [("dup", "a"), ("dup", "b")])
+    ):
+        with pytest.raises(MaaFgoEvidenceError):
+            MaaFgoRunContract.create(tmp_path / f"runs-{index}", pairs)  # type: ignore[arg-type]
+
+
+def test_contract_env_binding(tmp_path):
+    contract = MaaFgoRunContract.create(tmp_path / "runs", EXPECTED_PAIRS)
+    env = contract.environment_overrides()
+    assert env["ORR_MAAFGO_RUN_ID"] == contract.run_id
+    assert env["ORR_MAAFGO_PLAN_DIGEST"] == contract.plan_digest
+    assert env["ORR_MAAFGO_RESULT_PATH"] == str(contract.result_path)
+    assert env["ORR_MAAFGO_EXPECTED_TASKS_PATH"] == str(contract.expected_tasks_path)
+    assert env["ORR_MAAFGO_RESULT_SCHEMA_VERSION"] == "1"
+
+
+@pytest.mark.parametrize(
+    "mode,code",
+    [
+        ("artifact-ok", Code.OK),
+        ("artifact-missing", Code.RESULT_MISSING),
+        ("artifact-malformed", Code.RESULT_INVALID),
+        ("artifact-wrong-run-id", Code.RESULT_ID_MISMATCH),
+        ("artifact-wrong-digest", Code.RESULT_ID_MISMATCH),
+        ("artifact-missing-task", Code.RESULT_INVALID),
+        ("artifact-duplicate-task", Code.RESULT_INVALID),
+        ("artifact-unknown-task", Code.RESULT_INVALID),
+        ("artifact-entry-drift", Code.RESULT_INVALID),
+        ("artifact-task-failed", Code.TASK_FAILED),
+        ("artifact-incomplete", Code.COMPLETION_UNCONFIRMED),
+        ("artifact-unexpected-entry", Code.RESULT_INVALID),
+    ],
+)
+def test_artifact_validation_drives_outcome(config, tmp_path, mode, code):
+    instance, _, contract = contracted(config, mode, tmp_path)
+    result = instance.run()
+    assert result.exit_code == 0
+    assert result.error_code == code
+    assert result.expected_task_count == len(EXPECTED_PAIRS)
+    if code is Code.OK:
+        assert result.status is Status.SUCCESS
+        assert result.completion_confirmed and result.confirmed_task_count == len(EXPECTED_PAIRS)
+    else:
+        assert result.status is Status.FAILED and not result.completion_confirmed
+
+
+def test_success_artifact_validates_through_production_verifier(config, tmp_path):
+    """The Fake artifact must satisfy the same verifier as the real reporter."""
+    instance, _, contract = contracted(config, "artifact-ok", tmp_path)
+    result = instance.run()
+    assert result.status is Status.SUCCESS
+    artifact = read_completion_artifact(contract.result_path)
+    assert verify_completion_artifact(
+        artifact,
+        run_id=contract.run_id,
+        plan_digest=contract.plan_digest,
+        expected_tasks=contract.expected_tasks,
+    ) == len(EXPECTED_PAIRS)
+
+
+def test_nonzero_exit_cannot_rescue_success_artifact(config, tmp_path):
+    """A success artifact beside a nonzero exit is ignored: process evidence first."""
+    instance, _, contract = contracted(config, "nonzero", tmp_path)
+    document = {
+        "schema_version": 1,
+        "run_id": contract.run_id,
+        "plan_digest": contract.plan_digest,
+        "outcome": "success",
+        "tasks": [
+            {"name": name, "entry": entry, "terminal": "success"}
+            for name, entry in contract.expected_tasks
+        ],
+        "unexpected_entries": [],
+        "stop_signal_observed": False,
+    }
+    contract.result_path.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    result = instance.run()
+    assert result.status is Status.FAILED and result.error_code is Code.PROCESS_EXIT_NONZERO
+    assert not result.completion_confirmed
+
+
+def test_timeout_dominates_late_success_artifact(config, tmp_path):
+    instance, _, _ = contracted(config, "artifact-ok-then-hang", tmp_path)
+    result = instance.run(Deadline.after(1.5))
+    assert result.status is Status.TIMEOUT and result.error_code is Code.TASK_TIMEOUT
+    assert not result.completion_confirmed
+    # The artifact WAS written before the hang; the control plane still wins.
+    assert result.expected_task_count == len(EXPECTED_PAIRS)
+
+
+def test_cancel_dominates_late_success_artifact(config, tmp_path):
+    instance, _, _ = contracted(config, "artifact-ok-then-hang", tmp_path)
+    cancel, results = CancellationToken(), []
+    thread = threading.Thread(target=lambda: results.append(instance.run(cancel=cancel)))
+    thread.start()
+    time.sleep(1.0)
+    cancel.cancel()
+    thread.join(8)
+    assert results and results[0].status is Status.CANCELLED
+    assert not results[0].completion_confirmed
+
+
+def test_fresh_directory_blocks_stale_artifact(config, tmp_path):
+    """A completed run's artifact is invisible to a later contract run."""
+    first_instance, _, first_contract = contracted(config, "artifact-ok", tmp_path)
+    assert first_instance.run().status is Status.SUCCESS
+    stale_bytes = first_contract.result_path.read_bytes()
+    second_instance, _, second_contract = contracted(config, "artifact-missing", tmp_path)
+    result = second_instance.run()
+    assert second_contract.result_path != first_contract.result_path
+    assert result.status is Status.FAILED and result.error_code is Code.RESULT_MISSING
+    # 旧 artifact 未被删除或改写：隔离靠全新目录，而不是覆盖同一全局文件。
+    assert first_contract.result_path.read_bytes() == stale_bytes
+
+
+def test_no_contract_keeps_phase_one_semantics(config):
+    instance, _ = adapter(config, "zero")
+    result = instance.run()
+    assert result.status is Status.FAILED and result.error_code is Code.COMPLETION_UNCONFIRMED
+    assert result.completion_confirmed is False
+    assert result.diagnostics["expected_task_count"] == 0
