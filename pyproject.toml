@@ -50,6 +50,9 @@ packages = ["src/autogame_orchestrator"]
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+# vendored MaaFgo agent 材料：按上游逐字节形状保留（pinned 参考 + ORR 变体），
+# 不作为 OrchestratoRRR 源码 lint。
+extend-exclude = ["scripts/maafgo-orr-agent"]
 
 [tool.ruff.lint]
 select = [
