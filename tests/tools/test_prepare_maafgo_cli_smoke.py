@@ -201,6 +201,15 @@ def test_agent_main_source_mismatch_fails_closed(materials):
         tool.build_files(*materials)
 
 
+def test_orr_agent_materials_are_compilable_python():
+    """ADR-0003「native Agent import 面保持」的回归护栏：ORR 变换产物
+    （agent-main.orr.py / orr_reporter.py）必须仍是可编译的 Python。
+    内存编译，不写任何文件。"""
+    _, orr_main, reporter = tool.load_orr_agent_materials()
+    compile(orr_main, "agent/main.py", "exec")
+    compile(reporter, "agent/orr_reporter.py", "exec")
+
+
 def test_missing_bbc_module_layout_fails_closed(materials):
     del materials[1]["snapshot/agent/custom/bbc_stop_listener.py"]
     with pytest.raises(tool.AssemblyError, match="BBC_MODULE_LAYOUT_UNEXPECTED"):

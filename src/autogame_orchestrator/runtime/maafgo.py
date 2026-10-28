@@ -14,6 +14,7 @@ from pathlib import Path
 
 from autogame_orchestrator.maafgo_config import MaaFgoConfig, MaaFgoConfigurationError
 from autogame_orchestrator.maafgo_evidence import (
+    ARTIFACT_SCHEMA_VERSION,
     MaaFgoEvidenceError,
     MaaFgoRunContract,
     read_completion_artifact,
@@ -21,6 +22,7 @@ from autogame_orchestrator.maafgo_evidence import (
 )
 from autogame_orchestrator.process import CancellationToken, Deadline, ProcessSpec, ProcessSupervisor
 from autogame_orchestrator.process.errors import TerminationReason
+from autogame_orchestrator.runtime.maafgo_models import MaaFgoArtifactValidationState as ArtifactState
 from autogame_orchestrator.runtime.maafgo_models import MaaFgoErrorCode as Code
 from autogame_orchestrator.runtime.maafgo_models import MaaFgoRunResult
 from autogame_orchestrator.runtime.maafgo_models import MaaFgoRunStatus as Status
@@ -47,6 +49,9 @@ class MaaFgoAdapter:
         exit_code: int | None = None
         cleaned, confirmed = True, False
         expected_count, confirmed_count = 0, 0
+        # Artifact 严格校验的显式状态（完成证据观测面）：默认未尝试。
+        artifact_state = ArtifactState.NOT_ATTEMPTED
+        evidence_schema_version, digest_match = 0, False
 
         def result() -> MaaFgoRunResult:
             return MaaFgoRunResult(
@@ -62,6 +67,9 @@ class MaaFgoAdapter:
                 status is Status.SUCCESS,
                 expected_count,
                 confirmed_count,
+                completion_evidence_schema_version=evidence_schema_version,
+                plan_digest_match=digest_match,
+                artifact_validation_state=artifact_state,
             )
 
         def control_requested(effective: Deadline | None) -> bool:
@@ -139,14 +147,20 @@ class MaaFgoAdapter:
                     # on a clean normal exit, so a verified artifact is the sole
                     # remaining success path.
                     confirmed_count = verify_evidence(self.contract)
+                    # 只有严格校验通过才置 VERIFIED；cleanup 失败也不会把已通过
+                    # 的 artifact 校验改写成 REJECTED（控制面结果另行反映）。
+                    artifact_state = ArtifactState.VERIFIED
+                    evidence_schema_version, digest_match = ARTIFACT_SCHEMA_VERSION, True
                     status, code = Status.SUCCESS, Code.OK
         except MaaFgoEvidenceError as exc:
             status, code = Status.FAILED, exc.code
             confirmed_count = 0
+            artifact_state = ArtifactState.REJECTED
         except Exception:
             code = Code.INTERNAL_ERROR
             cleaned = False
             confirmed_count = 0
+            artifact_state = ArtifactState.NOT_ATTEMPTED
         finally:
             if supervisor is not None:
                 try:

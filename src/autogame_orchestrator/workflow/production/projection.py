@@ -153,6 +153,7 @@ def project_maafgo(stage: StageName, result: MaaFgoRunResult) -> StageReport:
     )
     diagnostics: dict[str, JsonValue] = {
         "source_error_code": result.error_code.value,
+        "provider": result.provider,
         "termination_reason": result.termination_reason.value if result.termination_reason else None,
         "exit_code": result.exit_code,
         "owned_process_cleaned": result.owned_process_cleaned,
@@ -160,6 +161,9 @@ def project_maafgo(stage: StageName, result: MaaFgoRunResult) -> StageReport:
         "completion_confirmed": result.completion_confirmed,
         "expected_task_count": result.expected_task_count,
         "confirmed_task_count": result.confirmed_task_count,
+        "completion_evidence_schema_version": result.completion_evidence_schema_version,
+        "plan_digest_match": result.plan_digest_match,
+        "artifact_validation_state": result.artifact_validation_state.value,
         "output_capture": "discarded",
     }
     return StageReport(

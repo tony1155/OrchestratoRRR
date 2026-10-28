@@ -41,6 +41,14 @@ class MaaFgoErrorCode(StrEnum):
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
+class MaaFgoArtifactValidationState(StrEnum):
+    """完成证据 artifact 严格校验步骤的显式状态（此前仅隐含在 source_error_code）。"""
+
+    NOT_ATTEMPTED = "not_attempted"
+    REJECTED = "rejected"
+    VERIFIED = "verified"
+
+
 @dataclass(frozen=True)
 class MaaFgoRunResult:
     """Run result with explicit completion evidence fields.
@@ -62,10 +70,33 @@ class MaaFgoRunResult:
     completion_confirmed: bool = False
     expected_task_count: int = 0
     confirmed_task_count: int = 0
+    provider: str = "maafgo"
+    completion_evidence_schema_version: int = 0
+    plan_digest_match: bool = False
+    artifact_validation_state: MaaFgoArtifactValidationState = MaaFgoArtifactValidationState.NOT_ATTEMPTED
 
     def __post_init__(self) -> None:
+        from autogame_orchestrator.maafgo_evidence import ARTIFACT_SCHEMA_VERSION
+
         if not isinstance(self.status, MaaFgoRunStatus) or not isinstance(self.error_code, MaaFgoErrorCode):
             raise ValueError("Invalid result enum")
+        if type(self.provider) is not str or self.provider != "maafgo":
+            raise ValueError("Invalid provider")
+        schema_version = self.completion_evidence_schema_version
+        if type(schema_version) is not int or schema_version not in (0, ARTIFACT_SCHEMA_VERSION):
+            raise ValueError("Invalid evidence schema version")
+        if type(self.plan_digest_match) is not bool:
+            raise ValueError("Invalid plan digest flag")
+        if not isinstance(self.artifact_validation_state, MaaFgoArtifactValidationState):
+            raise ValueError("Invalid artifact validation state")
+        verified = self.artifact_validation_state is MaaFgoArtifactValidationState.VERIFIED
+        # VERIFIED 只能来自严格校验通过：身份（run_id + plan_digest）与
+        # schema 版本同时成立。反过来，身份成立也要求处于 VERIFIED。
+        identity_holds = self.plan_digest_match and schema_version == ARTIFACT_SCHEMA_VERSION
+        if verified != identity_holds:
+            raise ValueError("Artifact validation state must agree with evidence identity")
+        if self.completion_confirmed and not verified:
+            raise ValueError("Completion confirmation requires verified artifact")
         if any(t.tzinfo is None or t.utcoffset() is None for t in (self.started_at, self.finished_at)):
             raise ValueError("Timestamps must be timezone aware")
         if self.finished_at < self.started_at or type(self.duration_ms) is not int or self.duration_ms < 0:
@@ -119,6 +150,7 @@ class MaaFgoRunResult:
         """Allowlisted projection, not a copy of ProcessResult.diagnostics."""
         return {
             "source_error_code": self.error_code.value,
+            "provider": self.provider,
             "exit_code": self.exit_code,
             "termination_reason": self.termination_reason.value if self.termination_reason else None,
             "owned_process_cleaned": self.owned_process_cleaned,
@@ -126,5 +158,8 @@ class MaaFgoRunResult:
             "completion_confirmed": self.completion_confirmed,
             "expected_task_count": self.expected_task_count,
             "confirmed_task_count": self.confirmed_task_count,
+            "completion_evidence_schema_version": self.completion_evidence_schema_version,
+            "plan_digest_match": self.plan_digest_match,
+            "artifact_validation_state": self.artifact_validation_state.value,
             "output_capture": "discarded",
         }

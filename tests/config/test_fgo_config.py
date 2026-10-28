@@ -168,6 +168,33 @@ def test_game_fgo_full_config_loads(tmp_path):
     assert config.validate() == []
 
 
+@pytest.mark.parametrize("kind", ["wrong_name", "outside_root"])
+def test_game_fgo_rejects_invalid_maafgo_executable_contract(tmp_path, kind):
+    """executable/root 契约（必须 MaaPiCli.exe 且位于 working_directory 根）
+    在 game=fgo 下经 load_config 全链路强制，非法 [maafgo] executable 阻断加载。"""
+    project = make_project(tmp_path / "maafgo contract")
+    working_directory = str(project.working_directory).replace("\\", "/")
+    if kind == "wrong_name":
+        executable = str(Path(project.working_directory) / "MaaFgo.exe").replace("\\", "/")
+    else:
+        outside = tmp_path / "elsewhere" / "MaaPiCli.exe"
+        outside.parent.mkdir()
+        outside.touch()
+        executable = str(outside).replace("\\", "/")
+    body = (
+        starrail_with_game('game = "fgo"')
+        + "\n    [fgo]\n"
+        + '    package_name = "com.bilibili.fatego"\n'
+        + "\n    [maafgo]\n"
+        + "    enabled = true\n"
+        + f'    executable = "{executable}"\n'
+        + f'    working_directory = "{working_directory}"\n'
+    )
+    config, errors = load_config(write_config(tmp_path, body))
+    assert config is None
+    assert "CONFIG_SCHEMA_ERROR" in [error.value for error in errors]
+
+
 @pytest.mark.parametrize(
     "package",
     [

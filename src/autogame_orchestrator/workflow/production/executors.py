@@ -416,8 +416,11 @@ class ProductionStageExecutor:
             )
         try:
             maafgo.check_profile(self._config.mumu.adb_serial)
-            maafgo.check_profile_policy()
+            # 分发校验先于 policy（docs/maafgo-full-workflow.md「Profile policy」）：
+            # policy 的任务语义只在 pinned revision 上有定义，未验证分发时
+            # 先透出 DISTRIBUTION_UNVERIFIED 而不是 PROFILE_POLICY_REJECTED。
             maafgo.check_distribution()
+            maafgo.check_profile_policy()
         except MaaFgoConfigurationError as exc:
             return _instant(
                 self._stage,

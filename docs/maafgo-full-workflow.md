@@ -22,7 +22,9 @@
   即使配置了也不参与校验与执行。
 - `game = "fgo"`：要求 `[fgo]`（provider=maafgo、package_name、
   stop_game_on_exit）与启用状态的 `[maafgo]`；starrail/maa/maa_sync/maa_update/
-  maa_resource_merge/aalc/bettergi 段不参与校验，也不执行。ADB 设备真值只在
+  maa_resource_merge/aalc/bettergi 段**整段缺省合法**（不参与校验，也不执行），
+  但段一旦存在仍须可解析——存在却解析失败会阻断整个加载（fail closed）。
+  ADB 设备真值只在
   `[mumu] adb_serial`，`[fgo]`/`[maafgo]` 不提供第二份端点。
 
 ## FGO 执行计划
@@ -42,8 +44,8 @@ external（7 阶段）：同上但无 `SHUTDOWN_MUMU`（不启动、不停止外
 | 失败类别 | 阶段 | 稳定诊断 |
 | --- | --- | --- |
 | 配置/profile/distribution 准备失败 | `PREPARE_MAAFGO_RUN` | `source_error_code = MAAFGO_PROFILE_POLICY_REJECTED / MAAFGO_DISTRIBUTION_UNVERIFIED / ADB_…` |
-| 进程启动/运行失败 | `RUN_MAAFGO` | `MAAFGO_PROCESS_START_FAILED / MAAFGO_PROCESS_EXIT_NONZERO` |
-| 业务完成失败 | `RUN_MAAFGO` | `MAAFGO_TASK_FAILED / MAAFGO_RESULT_* / MAAFGO_COMPLETION_UNCONFIRMED` |
+| 进程启动/运行失败 | `RUN_MAAFGO` | `PROCESS_START_FAILED / PROCESS_EXIT_NONZERO` |
+| 业务完成失败 | `RUN_MAAFGO` | `MAAFGO_TASK_FAILED / MAAFGO_RESULT_* / COMPLETION_UNCONFIRMED` |
 
 ## 完成证据契约（ORR ↔ MaaFgo reporter）
 
@@ -107,7 +109,7 @@ run_id 精确匹配；plan_digest 精确匹配（否则 MAAFGO_RESULT_ID_MISMATC
 任务集合与期望完全一致：不多、不少、不重、顺序一致（否则 MAAFGO_RESULT_INVALID）
 unexpected_entries 为空（否则 MAAFGO_RESULT_INVALID）
 每个任务 terminal == success（failed → MAAFGO_TASK_FAILED；
-pending → MAAFGO_COMPLETION_UNCONFIRMED）
+pending → COMPLETION_UNCONFIRMED）
 ```
 
 全部成立才产生 `MaaFgoRunStatus.SUCCESS / completion_confirmed=true`。
@@ -158,9 +160,11 @@ ProcessSupervisor/Job Object 立即终止——「是否杀本次 owned 进程�
 ## RunReport / projection
 
 `RUN_MAAFGO` / `STOP_FGO` 的 StageReport 诊断只输出白名单字段
-（`source_error_code`、`exit_code`、`termination_reason`、
+（`source_error_code`、`provider`、`termination_reason`、`exit_code`、
 `owned_process_cleaned`、`configuration_confirmed`、`completion_confirmed`、
-`expected/confirmed_task_count`、`verification`）。不输出：绝对路径、用户名、
+`expected/confirmed_task_count`、`completion_evidence_schema_version`、
+`plan_digest_match`、`artifact_validation_state`、STOP_FGO 的 `verification`）。
+不输出：绝对路径、用户名、
 adb 路径、完整 serial、PID、原始 stdout/stderr、异常 repr、上游 JSON 全量。
 公共 ErrorCode 词表保持稳定（`WORKFLOW_STAGE_FAILED/TIMEOUT/CANCELLED` +
 `source_error_code` 承载 MaaFgo 专属细节）。

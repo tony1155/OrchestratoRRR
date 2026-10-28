@@ -8,6 +8,7 @@ import pytest
 
 from autogame_orchestrator.maafgo_config import (
     ORR_PINNED_FGO_COMMIT,
+    ORR_TRANSFORM_ID,
     MaaFgoConfigurationError,
     read_expected_task_pairs,
 )
@@ -28,9 +29,10 @@ def test_expected_task_pairs_resolve_interface_entries(project):
 
 
 def test_policy_accepts_full_native_profile(project):
+    """镜像生产顺序（executors._prepare_maafgo）：分发校验先于 policy。"""
     before = project.profile_path.read_bytes()
-    project.check_profile_policy()
     project.check_distribution()
+    project.check_profile_policy()
     assert project.profile_path.read_bytes() == before
 
 
@@ -128,6 +130,28 @@ def test_distribution_requires_manifest(project):
 
 def test_distribution_rejects_unknown_revision(project):
     write_manifest(Path(project.working_directory), maafgo_commit="0" * 40)
+    with pytest.raises(MaaFgoConfigurationError) as excinfo:
+        project.check_distribution()
+    assert excinfo.value.code is Code.DISTRIBUTION_UNVERIFIED
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"schema_version": 2},
+        {
+            "orr_transform": {
+                "transform_id": ORR_TRANSFORM_ID,
+                "transform_version": 2,
+                "bbc_listener_registered": False,
+                "reporter_registered": True,
+            }
+        },
+    ],
+)
+def test_distribution_rejects_version_drift(project, overrides):
+    """manifest schema_version / transform_version 与生产守卫漂移一律 fail closed。"""
+    write_manifest(Path(project.working_directory), **overrides)
     with pytest.raises(MaaFgoConfigurationError) as excinfo:
         project.check_distribution()
     assert excinfo.value.code is Code.DISTRIBUTION_UNVERIFIED

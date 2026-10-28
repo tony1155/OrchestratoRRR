@@ -16,6 +16,7 @@ from autogame_orchestrator.config_model import (
     MumuLifecycleMode,
     OrchestratorConfig,
 )
+from autogame_orchestrator.maafgo_evidence import ARTIFACT_SCHEMA_VERSION
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, RunStatus, StageName
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
@@ -31,7 +32,12 @@ from autogame_orchestrator.runtime.fgo_models import (
     FgoAppStopStatus,
     FgoStopVerification,
 )
-from autogame_orchestrator.runtime.maafgo_models import MaaFgoErrorCode, MaaFgoRunResult, MaaFgoRunStatus
+from autogame_orchestrator.runtime.maafgo_models import (
+    MaaFgoArtifactValidationState,
+    MaaFgoErrorCode,
+    MaaFgoRunResult,
+    MaaFgoRunStatus,
+)
 from autogame_orchestrator.runtime.models import MumuRuntimeStatus
 from autogame_orchestrator.workflow.contracts import StageExecutionContext
 from autogame_orchestrator.workflow.plan import build_execution_plan
@@ -80,6 +86,7 @@ def maafgo_result(
         MaaFgoRunStatus.CANCELLED: TerminationReason.CANCELLED,
     }[status]
     exit_code = {MaaFgoRunStatus.SUCCESS: 0, MaaFgoRunStatus.FAILED: 7}.get(status)
+    confirmed = status is MaaFgoRunStatus.SUCCESS
     return MaaFgoRunResult(
         status,
         code,
@@ -90,9 +97,14 @@ def maafgo_result(
         reason,
         True,
         True,
-        status is MaaFgoRunStatus.SUCCESS,
+        confirmed,
         2,
-        2 if status is MaaFgoRunStatus.SUCCESS else 0,
+        2 if confirmed else 0,
+        completion_evidence_schema_version=ARTIFACT_SCHEMA_VERSION if confirmed else 0,
+        plan_digest_match=confirmed,
+        artifact_validation_state=(
+            MaaFgoArtifactValidationState.VERIFIED if confirmed else MaaFgoArtifactValidationState.NOT_ATTEMPTED
+        ),
     )
 
 
@@ -260,6 +272,14 @@ def test_validate_external_plan_accepts_fgo_plans(tmp_path):
     assert validate_external_plan(plan) is None
 
 
+def test_validate_external_plan_accepts_fgo_external_plans(tmp_path):
+    """FGO external 7 阶段计划必须被 external 计划闸门直接接受（管理/外部两种生命周期都覆盖）。"""
+    plan = build_execution_plan(fgo_config(tmp_path / "p5", lifecycle=MumuLifecycleMode.EXTERNAL))
+    assert plan.stages == FGO_EXTERNAL_RUN_STAGES
+    assert StageName.SHUTDOWN_MUMU not in plan.stages
+    assert validate_external_plan(plan) is None
+
+
 # ── 阶段 ────────────────────────────────────────────────────────────────────
 
 def test_prepare_creates_run_scoped_contract(tmp_path):
@@ -317,9 +337,44 @@ def test_run_maafgo_success_projection(tmp_path):
     factory(StageName.PREPARE_MAAFGO_RUN).execute(context(StageName.PREPARE_MAAFGO_RUN))
     report = factory(StageName.RUN_MAAFGO).execute(context(StageName.RUN_MAAFGO))
     assert (report.outcome, report.error_code) == (OutcomeKind.SUCCESS, ErrorCode.OK)
+    # 白名单精确集合（docs/maafgo-full-workflow.md「RunReport / projection」）。
+    assert set(report.diagnostics) == {
+        "source_error_code",
+        "provider",
+        "termination_reason",
+        "exit_code",
+        "owned_process_cleaned",
+        "configuration_confirmed",
+        "completion_confirmed",
+        "expected_task_count",
+        "confirmed_task_count",
+        "completion_evidence_schema_version",
+        "plan_digest_match",
+        "artifact_validation_state",
+        "output_capture",
+    }
+    assert report.diagnostics["provider"] == "maafgo"
     assert report.diagnostics["completion_confirmed"] is True
     assert report.diagnostics["confirmed_task_count"] == 2
+    assert report.diagnostics["completion_evidence_schema_version"] == ARTIFACT_SCHEMA_VERSION
+    assert report.diagnostics["plan_digest_match"] is True
+    assert report.diagnostics["artifact_validation_state"] == MaaFgoArtifactValidationState.VERIFIED.value
     assert factory.state.maafgo_run_reached is True
+
+
+def test_prepare_distribution_precedes_policy(tmp_path):
+    """分发校验先于 policy（docs「Profile policy」括注）：双重失效时先透出
+    DISTRIBUTION_UNVERIFIED，而不是 PROFILE_POLICY_REJECTED。"""
+    config = fgo_config(tmp_path)
+    profile = json.loads(config.maafgo.profile_path.read_text(encoding="utf-8"))
+    profile["task"] = [{"name": "登录", "option": []}, {"name": "关闭游戏", "option": []}]
+    config.maafgo.profile_path.write_text(json.dumps(profile, ensure_ascii=False), encoding="utf-8")
+    (Path(config.maafgo.working_directory) / "distribution-manifest.json").unlink()
+    runtime_factories, _, _ = fgo_factories(config)
+    factory = build_production_executor_factory(config, runtime_factories=runtime_factories)
+    report = factory(StageName.PREPARE_MAAFGO_RUN).execute(context(StageName.PREPARE_MAAFGO_RUN))
+    assert report.outcome is OutcomeKind.FAILURE
+    assert report.diagnostics["source_error_code"] == MaaFgoErrorCode.DISTRIBUTION_UNVERIFIED.value
 
 
 def test_run_maafgo_without_registered_runtime(tmp_path):

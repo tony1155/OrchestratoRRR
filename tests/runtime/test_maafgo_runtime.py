@@ -11,6 +11,7 @@ import pytest
 
 from autogame_orchestrator.maafgo_config import MaaFgoConfig
 from autogame_orchestrator.maafgo_evidence import (
+    ARTIFACT_SCHEMA_VERSION,
     MaaFgoEvidenceError,
     MaaFgoRunContract,
     read_completion_artifact,
@@ -25,6 +26,7 @@ from autogame_orchestrator.process import (
     TerminationReason,
 )
 from autogame_orchestrator.runtime.maafgo import MaaFgoAdapter
+from autogame_orchestrator.runtime.maafgo_models import MaaFgoArtifactValidationState as ArtifactState
 from autogame_orchestrator.runtime.maafgo_models import MaaFgoErrorCode as Code
 from autogame_orchestrator.runtime.maafgo_models import MaaFgoRunResult
 from autogame_orchestrator.runtime.maafgo_models import MaaFgoRunStatus as Status
@@ -332,6 +334,77 @@ def test_model_invariants():
             replace(valid, **changes)
 
 
+def test_model_artifact_evidence_invariants():
+    """完成证据观测字段的不变量：VERIFIED ⇔ 身份成立；confirmed ⇒ VERIFIED。"""
+    now = datetime.now(UTC)
+    verified = MaaFgoRunResult(
+        Status.SUCCESS,
+        Code.OK,
+        now,
+        now,
+        0,
+        0,
+        TerminationReason.NORMAL_EXIT,
+        True,
+        True,
+        True,
+        2,
+        2,
+        completion_evidence_schema_version=ARTIFACT_SCHEMA_VERSION,
+        plan_digest_match=True,
+        artifact_validation_state=ArtifactState.VERIFIED,
+    )
+    assert verified.provider == "maafgo"
+    for changes in (
+        {"artifact_validation_state": ArtifactState.REJECTED},
+        {"artifact_validation_state": ArtifactState.NOT_ATTEMPTED},
+        {"artifact_validation_state": "verified"},
+        {"plan_digest_match": False},
+        {"plan_digest_match": 1},
+        {"completion_evidence_schema_version": 0},
+        {"completion_evidence_schema_version": ARTIFACT_SCHEMA_VERSION + 1},
+        {"completion_evidence_schema_version": True},
+        {"provider": "other"},
+    ):
+        with pytest.raises(ValueError):
+            replace(verified, **changes)
+    rejected = MaaFgoRunResult(
+        Status.FAILED,
+        Code.RESULT_ID_MISMATCH,
+        now,
+        now,
+        0,
+        0,
+        TerminationReason.NORMAL_EXIT,
+        True,
+        True,
+        False,
+        2,
+        0,
+        artifact_validation_state=ArtifactState.REJECTED,
+    )
+    with pytest.raises(ValueError):
+        replace(rejected, completion_confirmed=True)
+    # VERIFIED 但 cleanup 失败（status 非 SUCCESS）仍合法：artifact 校验确实通过了。
+    MaaFgoRunResult(
+        Status.FAILED,
+        Code.CLEANUP_FAILED,
+        now,
+        now,
+        0,
+        None,
+        TerminationReason.TERMINATION_FAILED,
+        False,
+        True,
+        False,
+        2,
+        0,
+        completion_evidence_schema_version=ARTIFACT_SCHEMA_VERSION,
+        plan_digest_match=True,
+        artifact_validation_state=ArtifactState.VERIFIED,
+    )
+
+
 # ── run-scoped completion evidence ──────────────────────────────────────────
 
 EXPECTED_PAIRS = (("登录", "登录识别"), ("日常战斗", "日常战斗"))
@@ -403,8 +476,13 @@ def test_artifact_validation_drives_outcome(config, tmp_path, mode, code):
     if code is Code.OK:
         assert result.status is Status.SUCCESS
         assert result.completion_confirmed and result.confirmed_task_count == len(EXPECTED_PAIRS)
+        assert result.artifact_validation_state is ArtifactState.VERIFIED
+        assert result.plan_digest_match
+        assert result.completion_evidence_schema_version == ARTIFACT_SCHEMA_VERSION
     else:
         assert result.status is Status.FAILED and not result.completion_confirmed
+        assert result.artifact_validation_state is ArtifactState.REJECTED
+        assert not result.plan_digest_match
 
 
 def test_success_artifact_validates_through_production_verifier(config, tmp_path):
@@ -419,6 +497,27 @@ def test_success_artifact_validates_through_production_verifier(config, tmp_path
         plan_digest=contract.plan_digest,
         expected_tasks=contract.expected_tasks,
     ) == len(EXPECTED_PAIRS)
+
+
+def test_verified_artifact_state_survives_cleanup_failure(config, tmp_path):
+    """artifact 通过严格校验后 owned tree cleanup 才失败：artifact_validation_state
+    保持 VERIFIED（校验确实通过了，不谎报为 REJECTED），但控制面结果优先，
+    不判 SUCCESS、completion_confirmed=False。"""
+    instance, supervisor, _ = contracted(config, "artifact-ok", tmp_path)
+    original_close = supervisor.close
+
+    def broken_close():
+        original_close()
+        raise OSError(config.working_directory)
+
+    supervisor.close = broken_close
+    result = instance.run()
+    assert result.status is Status.FAILED and result.error_code is Code.CLEANUP_FAILED
+    assert not result.owned_process_cleaned and not result.completion_confirmed
+    assert result.artifact_validation_state is ArtifactState.VERIFIED
+    assert result.plan_digest_match
+    assert result.completion_evidence_schema_version == ARTIFACT_SCHEMA_VERSION
+    assert config.working_directory not in json.dumps(result.diagnostics)
 
 
 def test_nonzero_exit_cannot_rescue_success_artifact(config, tmp_path):
@@ -449,6 +548,8 @@ def test_timeout_dominates_late_success_artifact(config, tmp_path):
     assert not result.completion_confirmed
     # The artifact WAS written before the hang; the control plane still wins.
     assert result.expected_task_count == len(EXPECTED_PAIRS)
+    # 控制面结果优先：artifact 校验从未被尝试。
+    assert result.artifact_validation_state is ArtifactState.NOT_ATTEMPTED
 
 
 def test_cancel_dominates_late_success_artifact(config, tmp_path):
@@ -482,3 +583,7 @@ def test_no_contract_keeps_phase_one_semantics(config):
     assert result.status is Status.FAILED and result.error_code is Code.COMPLETION_UNCONFIRMED
     assert result.completion_confirmed is False
     assert result.diagnostics["expected_task_count"] == 0
+    assert result.artifact_validation_state is ArtifactState.NOT_ATTEMPTED
+    assert result.diagnostics["artifact_validation_state"] == "not_attempted"
+    assert result.diagnostics["plan_digest_match"] is False
+    assert result.diagnostics["provider"] == "maafgo"

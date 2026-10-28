@@ -96,3 +96,17 @@ Android game ownership do not transfer through a BBC connection.
 Next step is one direction only: obtain an upstream-owned cleanup contract that
 does not register/use global BBC cleanup for the proposed BBC-free run. A future
 real smoke can be planned only after that ownership issue is resolved.
+
+## Open evidence gap: app start from the 登录 task (2026-10-29)
+
+This matrix proves the 登录 task graph is BBC-free; it does **not** document the
+mechanism by which the pinned revision (`d7f3a474`) starts the FGO application
+from a not-running state (the MaaFramework v5 PI-side app-start path). Upstream
+pipeline source is not vendored in this repository and no device execution was
+performed here, so that mechanism remains **UNDOCUMENTED / UNVERIFIED** by this
+investigation. Production design assumes it (first task must be `登录`, see
+`docs/maafgo-full-workflow.md`「Profile policy」); the executable check is
+deferred to real-device acceptance Gate 3, which requires observing
+「FGO 被启动」from an FGO-not-running start without any preset page
+(`docs/manual/maafgo-real-acceptance.md`). Evidence must be backfilled from that
+acceptance run — not asserted from source reading alone.
