@@ -9,7 +9,9 @@ from autogame_orchestrator.models import ErrorCode, JsonValue, OutcomeKind, Stag
 from autogame_orchestrator.probes.models import ProbeErrorCode, ProbeStatus
 from autogame_orchestrator.process.errors import ProcessExecutionErrorCode
 from autogame_orchestrator.runtime.aalc_models import AALCRunResult, AALCRunStatus
+from autogame_orchestrator.runtime.fgo_models import FgoAppStopResult, FgoAppStopStatus
 from autogame_orchestrator.runtime.maa_models import MAARunResult, MAARunStatus
+from autogame_orchestrator.runtime.maafgo_models import MaaFgoRunResult, MaaFgoRunStatus
 from autogame_orchestrator.runtime.models import MumuRuntimeResult, MumuRuntimeStatus
 from autogame_orchestrator.runtime.starrail_models import StarRailRunResult, StarRailRunStatus
 
@@ -134,6 +136,50 @@ def project_maa(stage: StageName, result: MAARunResult) -> StageReport:
         "stdout_truncated": result.stdout_truncated,
         "stderr_truncated": result.stderr_truncated,
         **maa_output_diagnostics(result),
+    }
+    return StageReport(
+        stage, outcome, code, result.started_at, result.finished_at, result.duration_ms, diagnostics=diagnostics
+    )
+
+
+def project_maafgo(stage: StageName, result: MaaFgoRunResult) -> StageReport:
+    """MaaFgo 结果的安全投影；业务成功只来自已验证的完成证据。"""
+    outcome, code = _outcome(
+        result.status,
+        MaaFgoRunStatus.SUCCESS,
+        MaaFgoRunStatus.FAILED,
+        MaaFgoRunStatus.TIMEOUT,
+        MaaFgoRunStatus.CANCELLED,
+    )
+    diagnostics: dict[str, JsonValue] = {
+        "source_error_code": result.error_code.value,
+        "termination_reason": result.termination_reason.value if result.termination_reason else None,
+        "exit_code": result.exit_code,
+        "owned_process_cleaned": result.owned_process_cleaned,
+        "configuration_confirmed": result.configuration_confirmed,
+        "completion_confirmed": result.completion_confirmed,
+        "expected_task_count": result.expected_task_count,
+        "confirmed_task_count": result.confirmed_task_count,
+        "output_capture": "discarded",
+    }
+    return StageReport(
+        stage, outcome, code, result.started_at, result.finished_at, result.duration_ms, diagnostics=diagnostics
+    )
+
+
+def project_fgo_stop(stage: StageName, result: FgoAppStopResult) -> StageReport:
+    """STOP_FGO 的安全投影；只透传枚举，不携带 serial/package/路径。"""
+    if result.status is FgoAppStopStatus.STOPPED:
+        outcome, code = OutcomeKind.SUCCESS, ErrorCode.OK
+    elif result.status is FgoAppStopStatus.TIMEOUT:
+        outcome, code = OutcomeKind.TIMEOUT, ErrorCode.WORKFLOW_STAGE_TIMEOUT
+    elif result.status is FgoAppStopStatus.CANCELLED:
+        outcome, code = OutcomeKind.CANCELLED, ErrorCode.WORKFLOW_CANCELLED
+    else:
+        outcome, code = OutcomeKind.FAILURE, ErrorCode.WORKFLOW_STAGE_FAILED
+    diagnostics: dict[str, JsonValue] = {
+        "source_error_code": result.error_code.value,
+        "verification": result.verification.value,
     }
     return StageReport(
         stage, outcome, code, result.started_at, result.finished_at, result.duration_ms, diagnostics=diagnostics

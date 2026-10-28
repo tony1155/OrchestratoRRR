@@ -128,6 +128,9 @@ class StageName(StrEnum):
     RUN_MAA = "run_maa"
     RUN_BETTERGI = "run_bettergi"
     RUN_AALC = "run_aalc"
+    PREPARE_MAAFGO_RUN = "prepare_maafgo_run"
+    RUN_MAAFGO = "run_maafgo"
+    STOP_FGO = "stop_fgo"
     SHUTDOWN_MUMU = "shutdown_mumu"
     WRITE_RUN_REPORT = "write_run_report"
 

@@ -270,12 +270,17 @@ def test_starrail_success_updates_only_safe_state() -> None:
     assert factory.state.starrail_run_reached is True
     assert factory.state.starrail_completed is True
     assert factory.state.starrail_owned_process_cleaned is True
+    # maafgo_run_contract / maafgo_run_reached 是 FGO 链路新增的最小状态：
+    # 契约只含 PREPARE 创建的 run 标识与本地路径，永不进入 RunReport。
     assert set(vars(factory.state)) == {
         "starrail_run_reached",
         "starrail_completed",
         "starrail_owned_process_cleaned",
         "mumu_managed_owned",
+        "maafgo_run_contract",
+        "maafgo_run_reached",
     }
+    assert factory.state.maafgo_run_contract is None
 
 
 def test_stop_starrail_succeeds_from_owned_cleanup_evidence() -> None:

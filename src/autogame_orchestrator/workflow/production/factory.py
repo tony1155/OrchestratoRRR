@@ -5,10 +5,13 @@ from __future__ import annotations
 from typing import TypeVar, cast
 
 from autogame_orchestrator.config_model import AppConfig
+from autogame_orchestrator.maafgo_evidence import MaaFgoRunContract
 from autogame_orchestrator.models import StageName
 from autogame_orchestrator.workflow.production.executors import ProductionStageExecutor
 from autogame_orchestrator.workflow.production.ports import (
     BetterGIRunPort,
+    FgoAppStopPort,
+    MaaFgoRunPort,
     MAAResourceMergePort,
     MAARunPort,
     MAASyncPort,
@@ -68,6 +71,17 @@ class _RuntimeCache:
             self._get("maa_resource_merge", self._factories.maa_resource_merge),
         )
 
+    def maafgo(self, contract: MaaFgoRunContract) -> MaaFgoRunPort:
+        factory = self._factories.maafgo
+        if factory is None:
+            raise RuntimeBindingError("MaaFgo 构造器未注册")
+        return cast("MaaFgoRunPort", self._get(f"maafgo-{contract.run_id}", lambda: factory(contract)))
+
+    def fgo_app_stop(self) -> FgoAppStopPort:
+        if self._factories.fgo_app_stop is None:
+            raise RuntimeBindingError("FGO app stop 构造器未注册")
+        return cast("FgoAppStopPort", self._get("fgo_app_stop", self._factories.fgo_app_stop))
+
 
 class ProductionExecutorFactory:
     """一次工作流专用；状态与 Runtime 缓存不跨运行共享。"""
@@ -91,10 +105,16 @@ class ProductionExecutorFactory:
             maa_sync=self._runtime.maa_sync,
             maa_update=self._runtime.maa_update,
             maa_resource_merge=self._runtime.maa_resource_merge,
+            maafgo=self._runtime.maafgo,
+            fgo_app_stop=self._runtime.fgo_app_stop,
         )
 
-    def failure_cleanup_required(self) -> bool:
-        return self.state.mumu_managed_owned
+    def failure_cleanup_required(self, stage: StageName) -> bool:
+        if stage is StageName.STOP_FGO:
+            return self.state.maafgo_run_reached and self._config.fgo.stop_game_on_exit
+        if stage is StageName.SHUTDOWN_MUMU:
+            return self.state.mumu_managed_owned
+        return False
 
 
 def build_production_executor_factory(

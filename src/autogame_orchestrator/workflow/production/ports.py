@@ -8,11 +8,14 @@ from typing import Protocol, runtime_checkable
 
 from autogame_orchestrator.maa_resource.models import MAAResourceMergeResult
 from autogame_orchestrator.maa_sync.models import MAASyncResult
+from autogame_orchestrator.maafgo_evidence import MaaFgoRunContract
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.runtime.aalc_models import AALCRunResult
 from autogame_orchestrator.runtime.bettergi_models import BetterGIRunResult
+from autogame_orchestrator.runtime.fgo_models import FgoAppStopResult
 from autogame_orchestrator.runtime.maa_models import MAARunResult
+from autogame_orchestrator.runtime.maafgo_models import MaaFgoRunResult
 from autogame_orchestrator.runtime.models import MumuRuntimeResult
 from autogame_orchestrator.runtime.starrail_models import StarRailRunResult
 
@@ -106,6 +109,24 @@ class MAAResourceMergePort(Protocol):
     ) -> MAAResourceMergeResult: ...
 
 
+class MaaFgoRunPort(Protocol):
+    """MaaFgo 运行端口；contract 由 PREPARE 阶段创建后经状态传入。"""
+
+    def run(
+        self,
+        deadline: Deadline | None = None,
+        cancel: CancellationToken | None = None,
+    ) -> MaaFgoRunResult: ...
+
+
+class FgoAppStopPort(Protocol):
+    def stop(
+        self,
+        deadline: Deadline | None = None,
+        cancel: CancellationToken | None = None,
+    ) -> FgoAppStopResult: ...
+
+
 @dataclass(frozen=True)
 class RuntimeFactories:
     """仅在对应 Stage 到达时才调用的 Runtime 构造器。"""
@@ -118,3 +139,5 @@ class RuntimeFactories:
     maa_update: Callable[[], MAAUpdatePort] | None = None
     maa_resource_merge: Callable[[], MAAResourceMergePort] | None = None
     bettergi: Callable[[], BetterGIRunPort] | None = None
+    maafgo: Callable[[MaaFgoRunContract], MaaFgoRunPort] | None = None
+    fgo_app_stop: Callable[[], FgoAppStopPort] | None = None

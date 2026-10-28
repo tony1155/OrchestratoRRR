@@ -64,6 +64,29 @@ MANAGED_RUN_STAGES = (
 )
 
 
+FGO_MANAGED_RUN_STAGES = (
+    StageName.VALIDATE_CONFIG,
+    StageName.ENSURE_MUMU_RUNNING,
+    StageName.WAIT_MUMU_ADB_READY,
+    StageName.PREPARE_MAAFGO_RUN,
+    StageName.RUN_MAAFGO,
+    StageName.STOP_FGO,
+    StageName.SHUTDOWN_MUMU,
+    StageName.WRITE_RUN_REPORT,
+)
+
+
+FGO_EXTERNAL_RUN_STAGES = (
+    StageName.VALIDATE_CONFIG,
+    StageName.ENSURE_MUMU_RUNNING,
+    StageName.WAIT_MUMU_ADB_READY,
+    StageName.PREPARE_MAAFGO_RUN,
+    StageName.RUN_MAAFGO,
+    StageName.STOP_FGO,
+    StageName.WRITE_RUN_REPORT,
+)
+
+
 @dataclass(frozen=True)
 class RunRequest:
     config_path: Path
@@ -119,10 +142,16 @@ def validate_run_v1_config(config: AppConfig) -> str | None:
 
 
 def validate_external_plan(plan: ExecutionPlan) -> str | None:
-    """要求与生命周期模式匹配的精确默认计划（external 11 阶段 / managed 16 阶段）。"""
+    """要求与生命周期模式匹配的精确默认计划。
 
-    allowed = (EXTERNAL_RUN_STAGES, MANAGED_RUN_STAGES)
-    allowed += tuple((*stages[:-1], StageName.RUN_BETTERGI, stages[-1]) for stages in allowed)
+    StarRail 链路：external 11 阶段 / managed 16 阶段；
+    FGO 链路：external 7 阶段 / managed 8 阶段（见 ``FGO_*_RUN_STAGES``）。
+    """
+
+    allowed = (EXTERNAL_RUN_STAGES, MANAGED_RUN_STAGES, FGO_MANAGED_RUN_STAGES, FGO_EXTERNAL_RUN_STAGES)
+    allowed += tuple(
+        (*stages[:-1], StageName.RUN_BETTERGI, stages[-1]) for stages in (EXTERNAL_RUN_STAGES, MANAGED_RUN_STAGES)
+    )
     if plan.stages not in allowed:
         return "external_plan_invalid"
     return None

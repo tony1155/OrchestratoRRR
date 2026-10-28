@@ -76,7 +76,8 @@ class WorkflowRunner:
         event_sink: WorkflowEventSink | None = None,
         mode: WorkflowMode | str = WorkflowMode.FAKE,
         failure_cleanup_stage: StageName | None = None,
-        failure_cleanup_required: Callable[[], bool] | None = None,
+        failure_cleanup_stages: tuple[StageName, ...] = (),
+        failure_cleanup_required: Callable[[StageName], bool] | None = None,
         failure_cleanup_timeout_seconds: float | None = None,
     ) -> None:
         if mode not in {item.value for item in WorkflowMode}:
@@ -86,7 +87,13 @@ class WorkflowRunner:
         self._report_sink = report_sink
         self._event_sink = event_sink
         self._mode = WorkflowMode(mode)
-        self._failure_cleanup_stage = failure_cleanup_stage
+        stages: list[StageName] = list(failure_cleanup_stages)
+        if failure_cleanup_stage is not None and failure_cleanup_stage not in stages:
+            stages.append(failure_cleanup_stage)
+        # cleanup 阶段必须按计划顺序执行；以计划中的相对顺序为准。
+        self._failure_cleanup_stages = tuple(
+            stage for stage in plan.stages if stage in stages
+        )
         self._failure_cleanup_required = failure_cleanup_required
         self._failure_cleanup_timeout_seconds = failure_cleanup_timeout_seconds
 
@@ -131,9 +138,9 @@ class WorkflowRunner:
             is_failure_cleanup = (
                 stopped
                 and top_status == RunStatus.FAILURE
-                and stage == self._failure_cleanup_stage
+                and stage in self._failure_cleanup_stages
                 and self._failure_cleanup_required is not None
-                and self._failure_cleanup_required()
+                and self._failure_cleanup_required(stage)
             )
             if stopped and not is_failure_cleanup:
                 report = _instant_report(stage, OutcomeKind.SKIPPED, ErrorCode.SKIPPED)
@@ -219,8 +226,12 @@ class WorkflowRunner:
 
             if is_failure_cleanup:
                 cleanup_attempted = True
-                cleanup_outcome = report.outcome
-                cleanup_error_code = report.error_code
+                # 多个 cleanup 阶段：失败优先记录，不被后续成功的 cleanup 覆盖。
+                if cleanup_outcome is None or (
+                    cleanup_outcome is OutcomeKind.SUCCESS and report.outcome is not OutcomeKind.SUCCESS
+                ):
+                    cleanup_outcome = report.outcome
+                    cleanup_error_code = report.error_code
 
             reports.append(report)
             self._emit(report, index)

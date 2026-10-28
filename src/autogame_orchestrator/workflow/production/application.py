@@ -8,7 +8,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Protocol, Self
 
-from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
+from autogame_orchestrator.config_model import AppConfig, GameSelection, MumuLifecycleMode
 from autogame_orchestrator.entry_runtime import ElevationLaunchSpec
 from autogame_orchestrator.log_writer import JsonlLogWriter
 from autogame_orchestrator.models import JsonValue, RunReport, StageName, WorkflowMode
@@ -105,15 +105,21 @@ class _LoggedProductionRunner:
             def emit(event: Mapping[str, JsonValue]) -> None:
                 log.info("workflow.stage.finished", "Workflow stage finished", dict(event))
 
+            managed = self._config.mumu.lifecycle_mode is MumuLifecycleMode.MANAGED
+            if self._config.game is GameSelection.FGO:
+                # 失败 teardown：先按精确 ADB 停掉 FGO 应用，再（managed）关闭 MuMu。
+                cleanup_stages: tuple[StageName, ...] = (
+                    (StageName.STOP_FGO, StageName.SHUTDOWN_MUMU) if managed else (StageName.STOP_FGO,)
+                )
+            else:
+                cleanup_stages = (StageName.SHUTDOWN_MUMU,) if managed else ()
             runner = WorkflowRunner(
                 self._plan,
                 executor_factory,
                 report_sink,
                 event_sink=emit,
                 mode=self._dependencies.workflow_mode,
-                failure_cleanup_stage=(
-                    StageName.SHUTDOWN_MUMU if self._config.mumu.lifecycle_mode == MumuLifecycleMode.MANAGED else None
-                ),
+                failure_cleanup_stages=cleanup_stages,
                 failure_cleanup_required=executor_factory.failure_cleanup_required,
                 failure_cleanup_timeout_seconds=self._config.mumu.stop_timeout_seconds,
             )
