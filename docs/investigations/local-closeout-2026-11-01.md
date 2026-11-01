@@ -52,3 +52,13 @@
 5. `scan_select` 标准选项列表对新增/删除方案文件的动态刷新；目前是适配时快照。
 
 后续自由任务计划应从收口后的干净基线另开分支，保留以上未完成事项，不把本次代码合并等同于真机验收完成。
+
+## 合并验证
+
+5 个分类提交先推送到功能分支后，将 `origin/main`（`cf2c740`）合入该分支。
+唯一冲突位于 `workflow/production/runtime_bindings.py` 的 `MaaFgoRunContract` 导入；
+保留该导入，同时保留 `MAAUpdateAdapter` 下载重试绑定，未覆盖任一侧功能。
+
+合并版本再次全量测试：**1914 passed, 1 skipped，无警告**，并将子线程异常警告提升为错误。
+Ruff、87 文件 strict mypy、diff 空白检查通过；日常入口与临时 FGO-only 入口的只读预检通过。
+备份时记录的本机配置和启动文件 SHA-256 全部未变化。

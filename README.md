@@ -4,11 +4,9 @@
 
 OrchestratoRRR 用于按确定顺序管理 MuMu、StarRailCopilot、MAA 等外部程序的启动、等待、状态确认、任务执行与清理。项目的核心是多阶段工作流编排、Windows 进程生命周期管理、TCP/ADB 状态探测、配置安全同步，以及可审计的结构化运行结果。
 
-它不是 AI 游戏 Agent，也不实现视觉识别、游戏内容识别或自动点击；具体业务自动化能力由外部工具提供，OrchestratoRRR 负责可靠地组织和约束这些工具。
+**当前状态：可运行的工程原型。** 核心编排、进程管理、managed MuMu 生命周期和历史端到端工作流已有验收记录；生产计划已下线不稳定的 AALC/Limbus 链路。默认流程为 StarRail → MAA → MuMu 收尾，可选追加 FGO 和 BetterGI；支持临时跳过 MAA、失败后继续独立游戏，但尚不支持任意游戏排序。最新改动的自动测试不等于全部业务流程已实机验收。
 
-**当前状态：可运行的工程原型。** 核心编排、进程管理、managed MuMu 生命周期和真实端到端工作流已有验收记录；当前生产计划已下线不稳定的 AALC/Limbus 链路，保留 StarRail、MAA 与最终 MuMu 清理。最新 ADB 恢复与失败清理修复已通过完整自动测试并重建打包制品，但尚未再次运行真实业务工作流。
-
-FGO（MaaFgo）链路已作为第二条生产 workload 接入：顶层 `game = "fgo"` 选择独立的 FGO 计划（managed 8 阶段 / external 7 阶段），由 MaaFgo 完成登录→导航→助战/编队→native 战斗，OrchestratoRRR 负责生命周期、run-scoped 完成证据与收尾。实现与合成验证已完成，**真机验收待用户**（见 [MaaFgo 真机验收手册](docs/manual/maafgo-real-acceptance.md)）；StarRail 链路行为不受影响。
+FGO（MaaFgo）链路提供独立计划：顶层 `game = "fgo"` 选择 managed 8 阶段 / external 7 阶段；也可在默认工作流中设置 `[fgo] append_to_workflow = true`。MaaFgo 执行游戏任务，OrchestratoRRR 负责 GUI → CLI 同步、生命周期、run-scoped 完成证据与收尾。本机已实跑至登录、导航、助战和编队，**完整战斗及异常恢复验收未完成**（见 [GUI → CLI 手册](docs/manual/maafgo-gui-cli.md) 与 [真机验收手册](docs/manual/maafgo-real-acceptance.md)）。
 
 ## 核心能力
 
