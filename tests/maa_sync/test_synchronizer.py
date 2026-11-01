@@ -74,6 +74,23 @@ def test_both_targets_are_created(sync_config: MAASyncConfig) -> None:
     assert Path(sync_config.cli_tasks_destination).is_file()
 
 
+def test_current_stage_sync_succeeds_and_keeps_next_fight(
+    sync_config: MAASyncConfig, tasks_object: dict[str, object]
+) -> None:
+    tasks_object["Configurations"]["tasks"]["TaskQueue"] = [  # type: ignore[index]
+        {"TaskType": "Fight", "IsEnable": True, "StagePlan": [""]},
+        {"TaskType": "Fight", "IsEnable": True, "StagePlan": ["1-7"]},
+    ]
+    Path(sync_config.gui_tasks_source).write_text(json.dumps(tasks_object), encoding="utf-8")
+    source_before = Path(sync_config.gui_tasks_source).read_bytes()
+    result = run(sync_config)
+    assert result.status == MAASyncStatus.COMPLETED
+    output = json.loads(Path(sync_config.cli_tasks_destination).read_text(encoding="utf-8"))
+    assert [task["params"]["stage"] for task in output["tasks"]] == ["", "1-7"]
+    assert Path(sync_config.gui_tasks_source).read_bytes() == source_before
+    assert run(sync_config).changed is False
+
+
 def test_output_is_deterministic_utf8_with_newline(sync_config: MAASyncConfig) -> None:
     run(sync_config)
     for value in (sync_config.cli_profile_destination, sync_config.cli_tasks_destination):
