@@ -26,10 +26,12 @@ import json
 import os
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 from maa.agent.agent_server import AgentServer
 from maa.event_sink import NotificationType
 from maa.tasker import TaskerEventSink
+from maa.custom_action import CustomAction
 
 _RESULT_PATH_ENV = "ORR_MAAFGO_RESULT_PATH"
 _RUN_ID_ENV = "ORR_MAAFGO_RUN_ID"
@@ -205,9 +207,44 @@ def build_reporter():
             except Exception as error:  # never crash the agent from the sink
                 print(f"[OrrReporter] sink error: {type(error).__name__}", flush=True)
 
+    # CLI does not forward Tasker sink notifications. Persist readiness, then
+    # task-entry actions below report the actual Context.run_task() results.
+    persist()
     return OrrTaskerSink
 
 
 _sink_class = build_reporter()
+_direct_sink = None
 if _sink_class is not None:
-    AgentServer.tasker_sink()(_sink_class)
+    _direct_sink = _sink_class()
+    AgentServer.add_tasker_sink(_direct_sink)
+
+_prior_task_failed = False
+
+
+@AgentServer.custom_action("orr_run_task")
+class OrrRunTask(CustomAction):
+    """Execute an unchanged upstream task and report its native terminal result."""
+    def run(self, context, argv):
+        global _prior_task_failed
+        param = argv.custom_action_param
+        if isinstance(param, str):
+            param = json.loads(param)
+        entry = param["original_entry"]
+        report_entry = param["report_entry"]
+
+        def notify(kind):
+            if _direct_sink is not None:
+                _direct_sink.on_tasker_task(context.tasker, kind, SimpleNamespace(entry=report_entry))
+
+        notify(NotificationType.Starting)
+        success = False
+        try:
+            if (_direct_sink is None or not _prior_task_failed) and not context.tasker.stopping:
+                detail = context.run_task(entry)
+                success = detail is not None and detail.status.succeeded and not context.tasker.stopping
+        finally:
+            if not success and _direct_sink is not None:
+                _prior_task_failed = True
+            notify(NotificationType.Succeeded if success else NotificationType.Failed)
+        return CustomAction.RunResult(success=success)

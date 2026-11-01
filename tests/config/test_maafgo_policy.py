@@ -1,5 +1,6 @@
 """生产 profile policy 与 ORR 私有分发校验的契约测试（全部只读）。"""
 
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -7,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from autogame_orchestrator.maafgo_config import (
+    INSTALLED_RUNTIME_FILES,
+    INSTALLED_RUNTIME_VERSION,
     ORR_PINNED_FGO_COMMIT,
     ORR_TRANSFORM_ID,
     MaaFgoConfigurationError,
@@ -119,6 +122,46 @@ def test_policy_rejects_conflicting_entry_definitions(project):
 
 def test_distribution_accepts_pinned_manifest(project):
     project.check_distribution()
+
+
+@pytest.mark.parametrize("changed", [None, "agent/main.py", "interface.json", "agent/orr_reporter.py"])
+def test_installed_release_detects_updater_overwrites(project, changed):
+    root = Path(project.working_directory)
+    hashes = {}
+    for name in INSTALLED_RUNTIME_FILES:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_bytes(b"runtime")
+        hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    write_manifest(
+        root,
+        schema_version=2,
+        source_kind="installed-runtime",
+        maafgo_version=INSTALLED_RUNTIME_VERSION,
+        guarded_files=hashes,
+    )
+    if changed:
+        (root / changed).write_bytes(b"updated")
+        with pytest.raises(MaaFgoConfigurationError) as excinfo:
+            project.check_distribution()
+        assert excinfo.value.code is Code.DISTRIBUTION_UNVERIFIED
+    else:
+        project.check_distribution()
+
+
+def test_original_manifest_does_not_survive_agent_overwrite(project):
+    write_manifest(
+        root := Path(project.working_directory),
+        orr_transform={
+            "agent_main_result_sha256": hashlib.sha256(b"original").hexdigest(),
+        },
+    )
+    (root / "agent").mkdir()
+    (root / "agent/main.py").write_bytes(b"updated")
+    with pytest.raises(MaaFgoConfigurationError) as excinfo:
+        project.check_distribution()
+    assert excinfo.value.code is Code.DISTRIBUTION_UNVERIFIED
 
 
 def test_distribution_requires_manifest(project):

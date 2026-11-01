@@ -109,11 +109,16 @@ class MaaFgoAdapter:
                 else ProcessSupervisor(kill_confirmation_seconds=float(self.config.stop_timeout_seconds))
             )
             if not control_requested(effective):
+                invocation = Path(self.config.executable)
+                arguments = self.config.arguments
+                if self.config.gui_config_source and self.contract is not None:
+                    invocation = Path(self.config.working_directory) / "python/python.exe"
+                    arguments = ("-B", "-u", "./agent/orr_cli_runner.py")
                 process_result = supervisor.run(
                     ProcessSpec(
                         name="maafgo",
-                        executable=Path(self.config.executable),
-                        arguments=self.config.arguments,
+                        executable=invocation,
+                        arguments=arguments,
                         working_directory=Path(self.config.working_directory),
                         environment_overrides=(
                             self.contract.environment_overrides() if self.contract is not None else {}

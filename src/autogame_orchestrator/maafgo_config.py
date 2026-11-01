@@ -1,5 +1,6 @@
 """Invocation-only MaaPiCli configuration and bounded, read-only PI identity checks."""
 
+import hashlib
 import json
 import sys
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from pathlib import Path
 from autogame_orchestrator.runtime.maafgo_models import MaaFgoErrorCode as Code
 
 MAX_CONFIG_BYTES = 1024 * 1024
+MAX_INTERFACE_BYTES = 4 * 1024 * 1024
 
 # ── ORR 生产分发身份 ────────────────────────────────────────────────────────
 # 与 scripts/prepare_maafgo_cli_smoke.py 的常量保持一致；
@@ -16,7 +18,7 @@ ORR_PINNED_FGO_COMMIT = "d7f3a474f50b9a0631ee9acd6df67998c1933f2b"
 ORR_TRANSFORM_ID = "orr-bbc-free-native-reporter"
 ORR_TRANSFORM_VERSION = 1
 DISTRIBUTION_MANIFEST_FILENAME = "distribution-manifest.json"
-MAX_MANIFEST_BYTES = 256 * 1024
+MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 
 # ── 生产 profile policy（只读，绑定 pinned revision 的 task 语义） ──────────
 # 证据：docs/investigations/maafgo-bbc-free-paths.md（pinned d7f3a474）。
@@ -31,7 +33,45 @@ COMBAT_TASK_NAMES = frozenset({"日常战斗", "冠位戴冠战", "迦勒底之�
 REQUIRED_ENTRY_TASK_NAME = "登录"
 BATTLE_MODE_OPTION_NAME = "battle_mode"
 NATIVE_BATTLE_MODE = "native"
-MAX_INTERFACE_IMPORT_FILES = 128
+MAX_INTERFACE_IMPORT_FILES = 256
+
+# A locally adapted installed release records actual bytes, rather than claiming
+# the old assembler's pinned commit after a GUI update.
+INSTALLED_RUNTIME_VERSION = "v2.0.17"
+INSTALLED_RUNTIME_FILES = frozenset(
+    {
+        "interface.json",
+        "agent/main.py",
+        "agent/orr_reporter.py",
+        "agent/orr_cli_runner.py",
+        "MaaPiCli.exe",
+        "MaaFramework.dll",
+        "MaaToolkit.dll",
+        "MaaUtils.dll",
+        "MaaAgentServer.dll",
+        "python/Lib/site-packages/maa/agent/agent_server.py",
+        "resource/orr-workflow/pipeline/resource-completion.json",
+        "resource/base/pipeline/orr-task-reporting.json",
+    }
+)
+
+
+def _check_installed_runtime(root: Path, manifest: dict[str, object]) -> None:
+    files = manifest.get("guarded_files")
+    if (
+        manifest.get("maafgo_version") != INSTALLED_RUNTIME_VERSION
+        or manifest.get("source_kind") != "installed-runtime"
+        or not isinstance(files, dict)
+        or set(files) != INSTALLED_RUNTIME_FILES
+    ):
+        raise MaaFgoConfigurationError(Code.DISTRIBUTION_UNVERIFIED)
+    for name, expected in files.items():
+        digest = hashlib.sha256()
+        with (root / name).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected:
+            raise MaaFgoConfigurationError(Code.DISTRIBUTION_UNVERIFIED)
 
 
 class MaaFgoConfigurationError(ValueError):
@@ -53,10 +93,10 @@ def _reject_constant(value: str) -> None:
     raise MaaFgoConfigurationError()
 
 
-def _read_object(path: Path) -> dict[str, object]:
+def _read_object(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> dict[str, object]:
     with path.open("rb") as stream:
-        raw = stream.read(MAX_CONFIG_BYTES + 1)
-    if len(raw) > MAX_CONFIG_BYTES:
+        raw = stream.read(max_bytes + 1)
+    if len(raw) > max_bytes:
         raise MaaFgoConfigurationError()
     value: object = json.loads(
         raw.decode("utf-8-sig"), object_pairs_hook=_unique_object, parse_constant=_reject_constant
@@ -149,7 +189,7 @@ def read_interface_task_entries(interface_path: Path) -> dict[str, str]:
         if resolved in seen:
             continue
         seen.add(resolved)
-        document = _read_object(path)
+        document = _read_object(path, max_bytes=MAX_INTERFACE_BYTES)
         tasks = document.get("task")
         if isinstance(tasks, list):
             for task in tasks:
@@ -228,6 +268,8 @@ class MaaFgoConfig:
     working_directory: str = ""
     timeout_seconds: int = 10800
     stop_timeout_seconds: int = 20
+    gui_config_source: str = ""
+    gui_instance_id: str = ""
 
     @property
     def arguments(self) -> tuple[str, ...]:
@@ -246,6 +288,7 @@ class MaaFgoConfig:
             type(self.enabled) is not bool
             or any(type(v) is not int or v <= 0 for v in (self.timeout_seconds, self.stop_timeout_seconds))
             or not all(isinstance(v, str) for v in (self.executable, self.working_directory))
+            or not all(isinstance(v, str) for v in (self.gui_config_source, self.gui_instance_id))
         ):
             return [Code.INVALID_CONFIGURATION]
         if not self.enabled:
@@ -255,6 +298,11 @@ class MaaFgoConfig:
         try:
             executable = Path(_text(self.executable))
             directory = Path(_text(self.working_directory))
+            if self.gui_config_source and (
+                not Path(self.gui_config_source).is_absolute()
+                or Path(self.gui_config_source).resolve() == self.profile_path.resolve()
+            ):
+                return [Code.INVALID_CONFIGURATION]
             if (
                 not executable.is_absolute()
                 or not directory.is_absolute()
@@ -312,7 +360,24 @@ class MaaFgoConfig:
                 raise MaaFgoConfigurationError()
             # Upstream manual-input naming; detected names allow reconfig_adb to select another address.
             if identity.device_name != f"{identity.address}-{identity.adb_path}":
-                raise MaaFgoConfigurationError(Code.ADB_AUTODETECT_UNSUPPORTED)
+                if not self.gui_config_source:
+                    raise MaaFgoConfigurationError(Code.ADB_AUTODETECT_UNSUPPORTED)
+                gui = _read_object(Path(self.gui_config_source))
+                instances = gui.get("instances")
+                if not isinstance(instances, list):
+                    raise MaaFgoConfigurationError(Code.ADB_AUTODETECT_UNSUPPORTED)
+                selected_gui = [
+                    item for item in instances if isinstance(item, dict) and item.get("id") == self.gui_instance_id
+                ]
+                if len(selected_gui) != 1:
+                    raise MaaFgoConfigurationError(Code.ADB_AUTODETECT_UNSUPPORTED)
+                device = selected_gui[0].get("savedDevice")
+                if (
+                    not isinstance(device, dict)
+                    or device.get("adbDeviceName") != identity.device_name
+                    or device.get("adbDeviceAddress") != identity.address
+                ):
+                    raise MaaFgoConfigurationError(Code.ADB_AUTODETECT_UNSUPPORTED)
         except MaaFgoConfigurationError:
             raise
         except (OSError, ValueError, RecursionError):
@@ -336,24 +401,13 @@ class MaaFgoConfig:
         ``关闭游戏``）。绝不改写用户 profile。
         """
         try:
-            pairs = self.read_expected_task_pairs()
+            self.read_expected_task_pairs()
             selection = read_profile_tasks(self.profile_path)
         except MaaFgoConfigurationError:
             raise
         except (OSError, ValueError, RecursionError):
             raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED) from None
-        battle_modes = {name: _option_value(options, BATTLE_MODE_OPTION_NAME) for name, options in selection}
-        names = [name for name, _ in pairs]
-        if not names or names[0] != REQUIRED_ENTRY_TASK_NAME:
-            raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
-        if len(set(names)) != len(names) or any(name in FORBIDDEN_TASK_NAMES for name in names):
-            raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
-        business = names[1:]
-        if not business or all(name in MANUAL_PRESET_TASK_NAMES for name in business):
-            raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
-        for name in business:
-            if name in COMBAT_TASK_NAMES and battle_modes.get(name) != NATIVE_BATTLE_MODE:
-                raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
+        validate_profile_tasks(selection)
 
     def check_distribution(self) -> None:
         """生产 FGO 运行只允许 ORR 私有装配的 BBC-free 分发。
@@ -364,13 +418,22 @@ class MaaFgoConfig:
         """
         manifest_path = Path(self.working_directory) / DISTRIBUTION_MANIFEST_FILENAME
         try:
-            raw = manifest_path.read_bytes()
-        except OSError:
-            raise MaaFgoConfigurationError(Code.DISTRIBUTION_UNVERIFIED) from None
-        if len(raw) > MAX_MANIFEST_BYTES:
-            raise MaaFgoConfigurationError(Code.DISTRIBUTION_UNVERIFIED)
-        try:
-            manifest = _read_object(manifest_path)
+            manifest = _read_object(manifest_path, max_bytes=MAX_MANIFEST_BYTES)
+            if manifest.get("schema_version") == 2:
+                _check_installed_runtime(Path(self.working_directory), manifest)
+                return
+            # Existing assembler manifests already contain these byte guards.
+            # An upstream update must not silently retain their old identity.
+            recorded = manifest.get("orr_transform")
+            if isinstance(recorded, dict):
+                for filename, key in (
+                    ("agent/main.py", "agent_main_result_sha256"),
+                    ("agent/orr_reporter.py", "orr_reporter_sha256"),
+                ):
+                    if key in recorded:
+                        actual = hashlib.sha256((Path(self.working_directory) / filename).read_bytes()).hexdigest()
+                        if actual != recorded[key]:
+                            raise MaaFgoConfigurationError(Code.DISTRIBUTION_UNVERIFIED)
         except (MaaFgoConfigurationError, OSError, ValueError, RecursionError):
             raise MaaFgoConfigurationError(Code.DISTRIBUTION_UNVERIFIED) from None
         transform = manifest.get("orr_transform")
@@ -394,3 +457,21 @@ def _option_value(options: list[dict[str, object]], name: str) -> str | None:
                 return value
             return None
     return None
+
+
+def validate_profile_tasks(selection: list[tuple[str, list[dict[str, object]]]]) -> None:
+    """Shared policy for saved CLI profiles and staged GUI conversions."""
+    battle_modes = {name: _option_value(options, BATTLE_MODE_OPTION_NAME) for name, options in selection}
+    names = [name for name, _ in selection]
+    if not names or names[0] != REQUIRED_ENTRY_TASK_NAME:
+        raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
+    if len(set(names)) != len(names) or any(name in FORBIDDEN_TASK_NAMES for name in names):
+        raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
+    business = names[1:]
+    if not business or all(name in MANUAL_PRESET_TASK_NAMES for name in business):
+        raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
+    for name in business:
+        if (name in COMBAT_TASK_NAMES or battle_modes.get(name) is not None) and (
+            battle_modes.get(name) != NATIVE_BATTLE_MODE
+        ):
+            raise MaaFgoConfigurationError(Code.PROFILE_POLICY_REJECTED)
