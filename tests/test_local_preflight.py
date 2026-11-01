@@ -125,7 +125,8 @@ def test_preflight_cli_returns_structured_metadata(local_config, tmp_path: Path)
         ],
         cwd=tmp_path,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         check=False,
         timeout=30,
     )
@@ -155,25 +156,25 @@ def test_preflight_cli_error_is_bounded(monkeypatch, capsys, tmp_path: Path) -> 
 
 
 def _run_script(config: Path, data: Path, *options: str) -> subprocess.CompletedProcess[str]:
+    def quote(value: Path) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
+    # Set the host encoding before -File-style parameter validation can fail.
+    # Windows PowerShell otherwise emits localized errors in the console code page,
+    # while Python may decode pipes using either the locale or UTF-8 mode.
+    command = (
+        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $global:LASTEXITCODE = $null; "
+        f"& {quote(SOURCE_ROOT / 'scripts' / 'run-local.ps1')} "
+        f"-Config {quote(config)} -DataDirectory {quote(data)} "
+        + " ".join(options)
+        + "; $ok = $?; if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $ok) { exit 1 }"
+    )
     return subprocess.run(
-        [
-            "powershell.exe",
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(SOURCE_ROOT / "scripts" / "run-local.ps1"),
-            "-Config",
-            str(config),
-            "-DataDirectory",
-            str(data),
-            *options,
-        ],
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command],
         cwd=config.parent,
         stdin=subprocess.DEVNULL,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         check=False,
         timeout=30,
     )
@@ -228,7 +229,8 @@ def test_script_rejects_out_of_range_deadlines(local_config, deadline: str) -> N
 )
 def test_script_confirmation_is_opt_in(confirm_before_run: bool, answer: str, accepted: bool) -> None:
     # Execute the actual confirmation branch in isolation, never the launch command.
-    command = r"""$ErrorActionPreference = 'Stop'
+    command = r"""[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$ErrorActionPreference = 'Stop'
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:ORCH_LAUNCHER, [ref]$tokens, [ref]$errors)
@@ -262,7 +264,7 @@ try { . ([scriptblock]::Create($branch.Extent.Text)) } catch { $failure = $_.Exc
         env=environment,
         stdin=subprocess.DEVNULL,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         check=False,
         timeout=30,
     )

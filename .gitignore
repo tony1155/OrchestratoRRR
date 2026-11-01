@@ -17,6 +17,8 @@ tmp/
 
 config/orchestrator.local.toml
 *.local.toml
+# Local configuration snapshots may contain machine paths or credentials.
+*.local.toml.*
 
 .vscode/
 .idea/

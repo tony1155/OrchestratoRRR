@@ -1,0 +1,3 @@
+# MaaFgo assembly verifies these material files byte for byte against SHA-256.
+# Preserve their repository bytes on Windows even when core.autocrlf is true.
+scripts/maafgo-orr-agent/*.py text eol=lf
