@@ -18,7 +18,8 @@
 
 | 手册 | 场景 |
 | --- | --- |
-| [manual/maafgo-real-acceptance.md](manual/maafgo-real-acceptance.md) | FGO 链路真机验收 Gate 0–8（真机验收待用户） |
+| [manual/maafgo-real-acceptance.md](manual/maafgo-real-acceptance.md) | FGO 链路真机验收 Gate 0–8（已局部实跑，完整战斗验收未通过） |
+| [manual/maafgo-gui-cli.md](manual/maafgo-gui-cli.md) | GUI → CLI 配置、v2.0.17 本机安装适配及最新运行边界 |
 | [manual/local-source-entry.md](manual/local-source-entry.md) | 源码运行入口与数据目录 |
 | [manual/bettergi-integration.md](manual/bettergi-integration.md) | BetterGI 一条龙接入 |
 | [manual/adapter-real-smoke-gate.md](manual/adapter-real-smoke-gate.md) | 单 Adapter 真实 smoke 门禁（历史门禁，已关闭） |

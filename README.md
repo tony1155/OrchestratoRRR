@@ -283,13 +283,16 @@ python -m ruff format --check .
 python -m mypy src
 ```
 
-最近一次完整本地门禁结果：
+最近一次完整本地门禁（2026-11-01 收口，未启动游戏）：
 
 ```text
-pytest      1442 passed, 1 skipped
+pytest      1914 passed, 1 skipped; no warnings
 ruff lint  passed
-mypy src   passed (69 source files)
+mypy src   passed (87 source files)
 ```
+
+已归档未部署的选关导航实验及其 6 项测试，因此数量较收口前减少 6；
+不是删除失败测试。CLI/PowerShell 子进程测试已固定编码，在 UTF-8 与系统默认模式下均通过。
 
 测试默认使用 Fake/mock 子进程与合成探针，不需要启动 MuMu、StarRailCopilot 或 MAA。
 
@@ -326,7 +329,7 @@ docs/                    架构、阶段计划、验收证据和手工门禁
 - 当前不含 AALC 的 16 阶段计划、失败 cleanup、ADB child deadline、精确 endpoint recycle 和 offline recovery 的完整自动测试；
 - FGO（MaaFgo）链路的实现级验证：game selector 与配置边界、run-scoped 完成证据契约（含 12 种 artifact 故障注入）、BBC-free 私有分发 transform（哈希守卫）、STOP_FGO 精确 force-stop、managed/external 全链路 Fake 工作流与失败/超时/取消 teardown。
 
-为避免夸大：最近的 ADB/offline 修复只进行了自动测试和打包重建，没有重新执行真实业务工作流；历史 AALC 在线业务任务也从未被声明为完成，并且现已从生产流程下线；FGO 链路目前只有合成/离线验证，真实 MuMu/FGO/MaaFgo 条件下的 Gate 0–8 验收由用户按手册执行。
+为避免夸大：最近的 ADB/offline 修复没有重新完成真实业务工作流验收；历史 AALC 在线业务任务也从未被声明为完成，并且现已从生产流程下线。FGO 于 2026-11-01 实跑完成登录、关卡导航、助战和编队，但进本遇到“该支援角色不存在”并正确报告失败，完整战斗、资源耗尽与异常恢复仍未验收，见 [GUI → CLI 手册](docs/manual/maafgo-gui-cli.md)。
 
 ## 已知限制
 
@@ -337,8 +340,8 @@ docs/                    架构、阶段计划、验收证据和手工门禁
 - **ADB 恢复是刻意受限的。** 不会 kill/restart 全局 ADB server，也不会扫描或断开其他设备；精确 endpoint recycle 最多两次、managed restart 最多一次，仍未恢复时会按 start timeout 失败。
 - **取消路径的 cleanup 是文档化语义。** 已取得 managed 所有权后的 failure/timeout 会执行有界 shutdown；用户主动取消（`CANCELLED`）刻意不关闭 MuMu/FGO——不破坏用户环境，owned 进程树仍会被终止，取消后应人工确认 MuMu 状态。
 - **最新恢复修复尚未真实回归。** ADB 5 秒 child deadline、精确 endpoint recycle、offline 单次重启和失败通知已通过自动测试并进入打包制品，但没有再次运行真实 workflow。
-- **FGO 链路真机验收待用户。** 实现、Fake 工作流与离线分发门禁已完成；真实 MuMu/FGO 账号/关卡下的验收依赖用户环境，且 native 战斗是 MaaFgo 上游的实验性能力。
-- **仍有少量格式债务。** 全仓 Ruff lint 与 mypy 通过；`ruff format --check .` 当前仍报告 16 个历史文件，仅为格式差异，不影响测试结果。
+- **FGO 链路真机验收未完成。** 已局部实跑至进本，尚无完整战斗成功证据；“支援不存在”的自动恢复未实现。GUI → CLI 接入细节见手册，native 战斗仍依赖 MaaFgo 上游能力。
+- **仍有少量格式债务。** 全仓 Ruff lint 与 mypy 通过；`ruff format --check .` 当前仍报告 13 个历史文件，仅为格式差异，本轮未混入无关格式重写。
 
 ## 详细文档
 

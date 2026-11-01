@@ -1,7 +1,10 @@
 # MaaFgo 完整 FGO 自动化 — 真机验收手册
 
-状态：**REAL DEVICE ACCEPTANCE: PENDING USER**
-适用分支：`feat/maafgo-full-workflow`（基线 `ce6d743`，见 Gate 0）
+状态：**REAL DEVICE ACCEPTANCE: INCOMPLETE**
+适用版本：原始 schema 1 固定提交装配，以及 schema 2 本机安装适配。
+2026-11-01 本机 v2.0.17 / MaaFramework v5.14.3 已实跑至登录、导航、助战和编队，
+但进本出现“该支援角色不存在”并失败，不能标记完整战斗验收通过。
+本机适配的步骤与限制见 [GUI → CLI 手册](maafgo-gui-cli.md)。
 读者：在真实 Windows 机器上有 MuMu / FGO / MaaFgo 条件的验收人。
 
 原则：**一步一验证**。每个 Gate 通过才进入下一个；不要用任何脚本一次性跑完
@@ -21,7 +24,7 @@ git rev-parse HEAD
 git status --short
 ```
 
-- `git branch --show-current` 必须输出 `feat/maafgo-full-workflow`；
+- 记录实际分支和提交；允许已合并的 `main`，不再依赖某个固定分支名；
 - 工作区必须干净（无未预期修改）。
 
 记录以下身份（后续 Gate 要复核）：
@@ -31,11 +34,14 @@ Get-FileHash "<MaaFgo-ORR>\MaaPiCli.exe" -Algorithm SHA256
 Get-FileHash "<MaaFgo-ORR>\distribution-manifest.json" -Algorithm SHA256
 ```
 
-并打开 `<MaaFgo-ORR>\distribution-manifest.json`，记录：
-`maafgo_commit`（应为 `d7f3a474f50b9a0631ee9acd6df67998c1933f2b`）、
-`maaframework_version`（`v5.13.0`）、`orr_transform.transform_id`
-（`orr-bbc-free-native-reporter`）、`orr_transform.bbc_listener_registered`
-（`false`）、`orr_transform.reporter_registered`（`true`）。
+并打开 `<MaaFgo-ORR>\distribution-manifest.json`，按 schema 区分身份：
+
+- schema 1：记录 `maafgo_commit`（应为 `d7f3a474f50b9a0631ee9acd6df67998c1933f2b`）、
+  `maaframework_version`（`v5.13.0`）、`orr_transform.transform_id`
+  （`orr-bbc-free-native-reporter`）、`bbc_listener_registered=false`、`reporter_registered=true`。
+- schema 2：记录 `source_kind=installed-runtime`、`maafgo_version=v2.0.17`、`guarded_files`；
+  运行分发摘要检查，并另外核对 CLI/框架 DLL/Python SDK 版本一致。本机验证对象是 v5.14.3，
+  不得拿 schema 1 的版本和文件缺省规则判断 schema 2 安装。
 
 不通过：不得继续。
 
@@ -55,15 +61,10 @@ Test-Path "<MaaFgo-ORR>\config"
 ```
 
 - `agent\orr_reporter.py` 必须**存在**；
-- `agent\custom\bbc_stop_listener.py` 必须**不存在**
-  （`False` 才通过：BBC 模块已从私有分发移除）；
-- `agent\main.py` 中不得出现 `import bbc_`：
-
-```powershell
-Select-String -Path "<MaaFgo-ORR>\agent\main.py" -Pattern "import bbc_"
-```
-
-（无输出 = 通过。）
+- schema 1：`agent\custom\bbc_stop_listener.py` 必须不存在，`main.py` 不得导入 `bbc_` 模块；
+- schema 2：GUI 可以保留 BBC 模块，但 ORR 契约存在时的入口必须跳过这些导入；
+  另核对 `agent\orr_cli_runner.py`、`ORR_*` 任务包装入口及资源附加层均在清单守卫范围内。
+  单纯搜索到 `import bbc_` 不能据此判定 schema 2 失败，必须检查其条件分支。
 
 禁止：修改你的其他 MaaFgo/MXU 安装；把 `<MaaFgo-ORR>` 指向任何共享目录。
 
@@ -73,7 +74,8 @@ Select-String -Path "<MaaFgo-ORR>\agent\main.py" -Pattern "import bbc_"
 
 1. `adb.address` == 你的 MuMu ADB 端点，即 OrchestratoRRR 配置里的
    `[mumu] adb_serial`（例如 `127.0.0.1:16384`）；
-2. `adb.name` 形如 `<address>-<adb.exe 绝对路径>`（上游手工绑定命名）；
+2. schema 1 的 `adb.name` 形如 `<address>-<adb.exe 绝对路径>`；schema 2 GUI 同步模式
+   保留实际检测设备名，并在启动时验证其 ADB 路径及端口；
 3. `adb.adb_path` 指向真实存在的 `adb.exe`；
 4. `resource` 与你的实际服务器一致；
 5. task 列表**第一个**是 `登录`；其后是你要跑的业务任务（例如 `日常战斗`）；
@@ -118,11 +120,12 @@ $runId = [guid]::NewGuid().ToString()
 $runDir = "<MaaFgo-ORR>\..\orr-standalone-runs\$runId"
 New-Item -ItemType Directory -Path $runDir | Force
 Copy-Item "<MaaFgo-ORR>\config\maa_pi_config.json" "$runDir\profile-copy.json"
-# expected-tasks.json：把 profile 的 task 名与 interface entry 配对
-# （登录 -> 登录识别；日常战斗 -> 日常战斗；可在 <MaaFgo-ORR>\tasks\*.json 里查 entry）
-@([ordered]@{ name = "登录"; entry = "登录识别" },
-  [ordered]@{ name = "日常战斗"; entry = "日常战斗" }) |
-  ConvertTo-Json -Depth 4 | Set-Content "$runDir\expected-tasks.json" -Encoding UTF8
+# expected-tasks.json：把 profile 的 task 名与实际 interface entry 配对。
+# 以下为 schema 1 示例；schema 2 使用任务文件中的 ORR_登录 / ORR_日常战斗。
+$expected = @([ordered]@{ name = "登录"; entry = "登录识别" },
+  [ordered]@{ name = "日常战斗"; entry = "日常战斗" }) | ConvertTo-Json -Depth 4
+# Windows PowerShell 的 -Encoding UTF8 会写 BOM；报告器要求无 BOM UTF-8。
+[IO.File]::WriteAllText("$runDir\expected-tasks.json", $expected, [Text.UTF8Encoding]::new($false))
 $env:ORR_MAAFGO_RUN_ID = $runId
 $env:ORR_MAAFGO_PLAN_DIGEST = (Get-FileHash "$runDir\expected-tasks.json" -Algorithm SHA256).Hash.ToLower()
 $env:ORR_MAAFGO_RESULT_PATH = "$runDir\maafgo-result.json"
@@ -134,7 +137,10 @@ $env:ORR_MAAFGO_RESULT_SCHEMA_VERSION = "1"
 
 ```powershell
 Set-Location "<MaaFgo-ORR>"
+# schema 1 固定装配：
 .\MaaPiCli.exe -d
+# schema 2 GUI 同步安装使用下式替代上一条，不要两条都执行：
+# .\python\python.exe -B -u .\agent\orr_cli_runner.py
 ```
 
 必须依次看到（不要求你预置任何页面）：
