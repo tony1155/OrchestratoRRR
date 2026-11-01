@@ -2,6 +2,14 @@
 
 Adapter 真实 smoke 门禁已于 2026-07-30 关闭。6C2A、6C2B（含真实冷连接恢复）和 6C2C 均已完成验收，6C3 已完成文档收口。6B2B3C 已完成 managed 生命周期实现与 15 阶段真实端到端验收，同时解除 MAA 配置同步在 `run` v1 的闸门。6B2B2B 已解除 MAA 自更新闸门（`run` 不再以 maa_update_not_allowed_in_run_v1 阻断），真实打包工作流验收留待 Phase 7C。Phase 7A1 已完成入口契约实现与自动测试，Phase 7C 的真实重试目标已从 external 11 阶段改为 managed 16 阶段（新增 SHUTDOWN_MUMU 收尾关闭），Phase 7 尚未完成。
 
+（2026-10-29 新增）**MaaFgo Phase 2（完整 FGO 工作流）已在 `feat/maafgo-full-workflow`
+分支完成实现**：顶层 `game` workload 选择、FGO 专属计划（managed 8 / external 7 阶段）、
+run-scoped 完成证据契约、BBC-free 私有分发与只读 profile policy、STOP_FGO 精确
+force-stop、有序 failure-cleanup。分支基线为 `ce6d743`
+（`origin/feat/maafgo-integration`），设计见 `docs/maafgo-full-workflow.md`，
+决策见 `docs/decisions/ADR-0003`，真机验收待用户（`docs/manual/maafgo-real-acceptance.md`）。
+该分支不合并 main 或 `feat/maafgo-integration`；下表为历史阶段路线，不含 MaaFgo Phase 2 的分解。
+
 ## Phase 5——AALC Runtime Adapter
 
 Fake AALC 环境和真实 AALC smoke 验收均已完成。成功仅依据 exit 0，最多三次尝试，只有非零退出和单次尝试超时允许重试。未实现完整工作流、公开 run CLI，未替换旧 PowerShell。

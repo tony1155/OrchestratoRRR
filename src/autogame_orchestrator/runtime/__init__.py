@@ -1,7 +1,7 @@
 """运行时管理子包。
 
-MuMu 生命周期适配器
-StarRailCopilot 任务 Adapter
+MuMu 生命周期适配器、StarRailCopilot / MAA / AALC / BetterGI / MaaFgo
+任务 Adapter，以及 FGO Android 应用精确退出（STOP_FGO）。
 """
 
 from autogame_orchestrator.runtime.aalc import AALCAdapter

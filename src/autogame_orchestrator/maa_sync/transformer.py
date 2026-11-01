@@ -208,7 +208,15 @@ def _convert_task(task: object, settings: Mapping[str, object], index: int) -> d
         }
         return {"name": "Mall", "type": "Mall", "params": params}
     if task_type == "Fight":
-        stages = _list(task.get("StagePlan"))
+        stage_plan = task.get("StagePlan")
+        # GUI 用空字符串表示“当前/上次关卡”，不能用通用列表清洗将其丢弃。
+        # 保留首项的选择语义，避免 ["", "1-7"] 被悄悄改成刷 1-7。
+        if isinstance(stage_plan, Sequence) and not isinstance(stage_plan, (str, bytes, bytearray)):
+            stages = [item.strip() for item in stage_plan if isinstance(item, str)]
+        elif isinstance(stage_plan, str) and not stage_plan.strip():
+            stages = [""]
+        else:
+            stages = _list(stage_plan)
         if not stages:
             raise MAATransformError(f"战斗任务 {index} 缺少关卡")
         stage = stages[0]
@@ -228,7 +236,7 @@ def _convert_task(task: object, settings: Mapping[str, object], index: int) -> d
         drop_count = _integer(task.get("DropCount"))
         if _bool(task.get("EnableTargetDrop")) and drop_id and drop_count > 0:
             params["drops"] = {drop_id: drop_count}
-        return {"name": f"Fight-{stage.replace('/', '-')}", "type": "Fight", "params": params}
+        return {"name": f"Fight-{stage.replace('/', '-') or 'Current'}", "type": "Fight", "params": params}
     if task_type == "Award":
         params = {
             "enable": enabled,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import subprocess
 import sys
@@ -297,7 +298,9 @@ def test_python_module_help_is_safe_subprocess(arguments: list[str]) -> None:
         [sys.executable, "-m", "autogame_orchestrator", *arguments],
         check=False,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        timeout=30,
     )
     assert completed.returncode == 0
     assert "Traceback" not in completed.stdout

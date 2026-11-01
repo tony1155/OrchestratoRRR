@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
+from autogame_orchestrator.config_model import AppConfig, GameSelection, MumuLifecycleMode
 from autogame_orchestrator.models import StageName
-from autogame_orchestrator.planning import build_plan
+from autogame_orchestrator.planning import build_fgo_plan, build_plan
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,20 @@ def build_execution_plan(
     stages: tuple[StageName, ...] | None = None,
 ) -> ExecutionPlan:
     """纯函数构建执行计划，不做路径、进程或权限操作。"""
-    selected = build_plan() if stages is None else stages
+    if stages is None:
+        base_plan = build_fgo_plan() if config.game == GameSelection.FGO else build_plan()
+        selected: tuple[StageName, ...] = base_plan
+    else:
+        selected = stages
+    if stages is None and config.game == GameSelection.STARRAIL and config.fgo.append_to_workflow:
+        maa_index = selected.index(StageName.RUN_MAA) + 1
+        selected = (
+            *selected[:maa_index],
+            StageName.PREPARE_MAAFGO_RUN,
+            StageName.RUN_MAAFGO,
+            StageName.STOP_FGO,
+            *selected[maa_index:],
+        )
     if stages is None and config.mumu.lifecycle_mode == MumuLifecycleMode.EXTERNAL:
         removed = {
             StageName.STOP_MUMU,
@@ -49,8 +62,11 @@ def build_execution_plan(
             StageName.SHUTDOWN_MUMU,
         }
         selected = tuple(stage for stage in selected if stage not in removed)
-    if stages is None and config.bettergi.enabled:
+    if stages is None and config.game == GameSelection.STARRAIL and config.bettergi.enabled:
         selected = (*selected[:-1], StageName.RUN_BETTERGI, selected[-1])
+    if stages is None and config.orchestrator.skip_maa:
+        removed_maa = {StageName.SYNC_MAA_CONFIG, StageName.UPDATE_MAA, StageName.MERGE_MAA_RESOURCE, StageName.RUN_MAA}
+        selected = tuple(stage for stage in selected if stage not in removed_maa)
     requires_administrator = (
         (StageName.RUN_BETTERGI in selected and config.bettergi.enabled)
         or (

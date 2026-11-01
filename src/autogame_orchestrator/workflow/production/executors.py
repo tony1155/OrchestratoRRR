@@ -5,15 +5,21 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 from autogame_orchestrator.config_model import AppConfig, MumuLifecycleMode
 from autogame_orchestrator.maa_resource.models import MAAResourceMergeStatus
 from autogame_orchestrator.maa_sync.models import MAASyncStatus
+from autogame_orchestrator.maafgo_config import MaaFgoConfigurationError
+from autogame_orchestrator.maafgo_evidence import MaaFgoRunContract
 from autogame_orchestrator.models import ErrorCode, OutcomeKind, StageName, StageReport
+from autogame_orchestrator.runtime.maafgo_models import MaaFgoErrorCode
 from autogame_orchestrator.runtime.models import MumuRuntimeStatus
 from autogame_orchestrator.workflow.contracts import StageExecutionContext
 from autogame_orchestrator.workflow.production.ports import (
     BetterGIRunPort,
+    FgoAppStopPort,
+    MaaFgoRunPort,
     MAAResourceMergePort,
     MAARunPort,
     MAASyncPort,
@@ -24,7 +30,9 @@ from autogame_orchestrator.workflow.production.ports import (
 )
 from autogame_orchestrator.workflow.production.projection import (
     maa_output_diagnostics,
+    project_fgo_stop,
     project_maa,
+    project_maafgo,
     project_mumu,
     project_starrail,
 )
@@ -66,6 +74,8 @@ class ProductionStageExecutor:
         maa_update: Callable[[], MAAUpdatePort],
         maa_resource_merge: Callable[[], MAAResourceMergePort],
         bettergi: Callable[[], BetterGIRunPort] | None = None,
+        maafgo: Callable[[MaaFgoRunContract], MaaFgoRunPort] | None = None,
+        fgo_app_stop: Callable[[], FgoAppStopPort] | None = None,
     ) -> None:
         self._bettergi = bettergi
         self._stage = stage
@@ -77,6 +87,8 @@ class ProductionStageExecutor:
         self._maa_sync = maa_sync
         self._maa_update = maa_update
         self._maa_resource_merge = maa_resource_merge
+        self._maafgo = maafgo
+        self._fgo_app_stop = fgo_app_stop
 
     def execute(self, context: StageExecutionContext) -> StageReport:
         if context.stage != self._stage:
@@ -90,6 +102,18 @@ class ProductionStageExecutor:
 
     def _execute(self, context: StageExecutionContext) -> StageReport:
         stage = self._stage
+        if (
+            self._config.orchestrator.continue_on_failure
+            and stage in {StageName.START_MUMU, StageName.RUN_MAA, StageName.PREPARE_MAAFGO_RUN}
+            and self._state.starrail_run_reached
+            and not self._state.starrail_owned_process_cleaned
+        ):
+            return _instant(
+                stage,
+                OutcomeKind.FAILURE,
+                ErrorCode.WORKFLOW_STAGE_BLOCKED,
+                {"blocker": "starrail_owned_process_not_cleaned"},
+            )
         if stage == StageName.VALIDATE_CONFIG:
             return self._validate()
         if stage == StageName.SYNC_MAA_CONFIG:
@@ -135,7 +159,16 @@ class ProductionStageExecutor:
         if stage == StageName.RUN_BETTERGI:
             return self._run_bettergi(context)
         if stage == StageName.RUN_MAA:
-            return project_maa(stage, self._maa().run(context.deadline, context.cancel))
+            self._state.maa_run_reached = True
+            maa_result = self._maa().run(context.deadline, context.cancel)
+            self._state.maa_owned_process_cleaned = maa_result.owned_process_cleaned
+            return project_maa(stage, maa_result)
+        if stage == StageName.PREPARE_MAAFGO_RUN:
+            return self._prepare_maafgo(context)
+        if stage == StageName.RUN_MAAFGO:
+            return self._run_maafgo(context)
+        if stage == StageName.STOP_FGO:
+            return self._stop_fgo(context)
         return _instant(stage, OutcomeKind.FAILURE, ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED)
 
     def _run_bettergi(self, context: StageExecutionContext) -> StageReport:
@@ -366,6 +399,8 @@ class ProductionStageExecutor:
         return report
 
     def _verify_starrail_postcondition(self) -> StageReport:
+        if self._config.orchestrator.continue_on_failure and not self._state.starrail_run_reached:
+            return _instant(self._stage, OutcomeKind.SUCCESS, ErrorCode.OK, {"run_not_reached": True})
         cleaned = self._state.starrail_owned_process_cleaned
         success = self._state.starrail_run_reached and cleaned
         return _instant(
@@ -377,3 +412,111 @@ class ProductionStageExecutor:
                 "owned_process_cleaned": cleaned,
             },
         )
+
+    def _maafgo_source_code(self, error: MaaFgoErrorCode) -> StageReport:
+        return _instant(
+            self._stage,
+            OutcomeKind.FAILURE,
+            ErrorCode.WORKFLOW_STAGE_FAILED,
+            {"source_error_code": error.value},
+        )
+
+    def _prepare_maafgo(self, context: StageExecutionContext) -> StageReport:
+        """创建隔离 run 契约；profile policy 与分发校验在此 fail closed。"""
+        if self._state.maa_run_reached and not self._state.maa_owned_process_cleaned:
+            return _instant(
+                self._stage,
+                OutcomeKind.FAILURE,
+                ErrorCode.WORKFLOW_STAGE_BLOCKED,
+                {"blocker": "maa_owned_process_not_cleaned"},
+            )
+        maafgo = self._config.maafgo
+        if not maafgo.enabled:
+            return _instant(
+                self._stage,
+                OutcomeKind.FAILURE,
+                ErrorCode.WORKFLOW_STAGE_BLOCKED,
+                {"blocker": "maafgo_not_enabled"},
+            )
+        try:
+            if maafgo.gui_config_source:
+                from autogame_orchestrator.maafgo_gui import sync_mxu_profile
+
+                maafgo.check_distribution()
+                sync_mxu_profile(maafgo, adb_path=self._config.mumu.adb_executable, serial=self._config.mumu.adb_serial)
+            maafgo.check_profile(self._config.mumu.adb_serial)
+            # 分发校验先于 policy（docs/maafgo-full-workflow.md「Profile policy」）：
+            # policy 的任务语义只在 pinned revision 上有定义，未验证分发时
+            # 先透出 DISTRIBUTION_UNVERIFIED 而不是 PROFILE_POLICY_REJECTED。
+            maafgo.check_distribution()
+            maafgo.check_profile_policy()
+        except MaaFgoConfigurationError as exc:
+            return _instant(
+                self._stage,
+                OutcomeKind.FAILURE,
+                ErrorCode.WORKFLOW_STAGE_FAILED,
+                {"source_error_code": exc.code.value},
+            )
+        try:
+            pairs = maafgo.read_expected_task_pairs()
+            parent = Path(self._config.orchestrator.report_dir) / "maafgo"
+            contract = MaaFgoRunContract.create(parent, pairs)
+        except (OSError, ValueError):
+            return _instant(
+                self._stage,
+                OutcomeKind.FAILURE,
+                ErrorCode.WORKFLOW_STAGE_FAILED,
+                {"source_error_code": MaaFgoErrorCode.INTERNAL_ERROR.value, "phase": "contract_creation"},
+            )
+        self._state.maafgo_run_contract = contract
+        return _instant(
+            self._stage,
+            OutcomeKind.SUCCESS,
+            ErrorCode.OK,
+            {
+                "expected_task_count": len(contract.expected_tasks),
+                "plan_digest_prefix_len": len(contract.plan_digest),
+            },
+        )
+
+    def _run_maafgo(self, context: StageExecutionContext) -> StageReport:
+        contract = self._state.maafgo_run_contract
+        if contract is None:
+            return _instant(
+                self._stage,
+                OutcomeKind.FAILURE,
+                ErrorCode.WORKFLOW_STAGE_BLOCKED,
+                {"blocker": "maafgo_run_not_prepared"},
+            )
+        if self._maafgo is None:
+            raise RuntimeBindingError("MaaFgo Runtime 构造器未注册")
+        self._state.maafgo_run_reached = True
+        result = self._maafgo(contract).run(context.deadline, context.cancel)
+        return project_maafgo(self._stage, result)
+
+    def _stop_fgo(self, context: StageExecutionContext) -> StageReport:
+        if self._config.orchestrator.continue_on_failure and not self._state.maafgo_run_reached:
+            return _instant(self._stage, OutcomeKind.SUCCESS, ErrorCode.OK, {"run_not_reached": True})
+        if not self._config.fgo.stop_game_on_exit:
+            return _instant(
+                self._stage,
+                OutcomeKind.SUCCESS,
+                ErrorCode.OK,
+                {"stopped": False, "reason": "stop_game_on_exit_disabled"},
+            )
+        if self._fgo_app_stop is None:
+            raise RuntimeBindingError("FGO app stop 构造器未注册")
+        if context.deadline is None:
+            return _instant(
+                self._stage,
+                OutcomeKind.FAILURE,
+                ErrorCode.WORKFLOW_DEADLINE_REQUIRED,
+            )
+        stop_result = self._fgo_app_stop().stop(context.deadline, context.cancel)
+        report = project_fgo_stop(self._stage, stop_result)
+        if context.failure_cleanup:
+            report = replace(
+                report,
+                diagnostics={**dict(report.diagnostics), "failure_cleanup": True},
+            )
+        return report

@@ -9,11 +9,14 @@ from autogame_orchestrator.maa_resource.merger import MAAResourceMerger
 from autogame_orchestrator.maa_sync.synchronizer import MAASynchronizer
 from autogame_orchestrator.maa_update import build_maa_update_runtime_config
 from autogame_orchestrator.maa_update.runtime import MAAUpdateAdapter
+from autogame_orchestrator.maafgo_evidence import MaaFgoRunContract
 from autogame_orchestrator.process.cancellation import CancellationToken
 from autogame_orchestrator.process.deadline import Deadline
 from autogame_orchestrator.runtime.aalc import AALCAdapter
 from autogame_orchestrator.runtime.bettergi import BetterGIAdapter
+from autogame_orchestrator.runtime.fgo_app import FgoAppStopper
 from autogame_orchestrator.runtime.maa import MAAAdapter
+from autogame_orchestrator.runtime.maafgo import MaaFgoAdapter
 from autogame_orchestrator.runtime.models import MumuRuntimeResult
 from autogame_orchestrator.runtime.mumu import MumuAdapter
 from autogame_orchestrator.runtime.starrail import StarRailAdapter
@@ -95,6 +98,21 @@ def build_default_runtime_factories(config: AppConfig) -> RuntimeFactories:
     def build_maa_resource_merge() -> MAAResourceMerger:
         return MAAResourceMerger(config.maa_resource_merge)
 
+    def build_maafgo(contract: MaaFgoRunContract) -> MaaFgoAdapter:
+        return MaaFgoAdapter(
+            config.maafgo,
+            expected_adb_serial=config.mumu.adb_serial,
+            contract=contract,
+        )
+
+    def build_fgo_app_stop() -> FgoAppStopper:
+        return FgoAppStopper(
+            adb_executable=Path(config.mumu.adb_executable),
+            adb_serial=config.mumu.adb_serial,
+            package_name=config.fgo.package_name,
+            stop_timeout_seconds=float(config.mumu.stop_timeout_seconds),
+        )
+
     return RuntimeFactories(
         build_starrail,
         build_maa,
@@ -104,4 +122,6 @@ def build_default_runtime_factories(config: AppConfig) -> RuntimeFactories:
         build_maa_update,
         build_maa_resource_merge,
         bettergi=lambda: BetterGIAdapter(config.bettergi),
+        maafgo=build_maafgo,
+        fgo_app_stop=build_fgo_app_stop,
     )

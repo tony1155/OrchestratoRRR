@@ -52,6 +52,21 @@ def test_complete_fake_public_application_succeeds(tmp_path: Path) -> None:
     assert len(logs) == 1 and logs[0].entered and logs[0].exited
 
 
+def test_public_entry_honors_continue_on_failure(tmp_path: Path) -> None:
+    path = write_run_config(tmp_path)
+    path.write_text(
+        path.read_text("utf-8").replace("[orchestrator]", "[orchestrator]\ncontinue_on_failure = true", 1), "utf-8"
+    )
+    dependencies, _, sink, _, _, starrail, maa, _ = fake_dependencies(starrail_status=StarRailRunStatus.FAILED)
+    starrail.result = replace(starrail.result, owned_process_cleaned=True)
+    result = execute_run_request(_request(path), dependencies=dependencies)
+    assert result.report is not None
+    assert result.report.status == RunStatus.FAILURE
+    assert starrail.calls == 1 and maa.calls == 1
+    assert result.report.diagnostics["continue_on_failure"] is True
+    assert len(sink.reports) == 1
+
+
 def test_complete_fake_has_no_mumu_lifecycle_methods(tmp_path: Path) -> None:
     dependencies, _, _, _, mumu, *_ = fake_dependencies()
     execute_run_request(_request(write_run_config(tmp_path)), dependencies=dependencies)

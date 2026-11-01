@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from autogame_orchestrator.models import StageName
 from autogame_orchestrator.reporter import validate_run_report_json
 
 _GOLDEN = Path(__file__).resolve().parent.parent.parent / "schemas" / "golden" / "run-report-v1.golden.json"
@@ -14,6 +15,15 @@ def test_golden_sample_validates(golden_path: Path) -> None:
     data = json.loads(golden_path.read_text(encoding="utf-8"))
     valid, msg = validate_run_report_json(data)
     assert valid, f"golden sample must pass: {msg}"
+
+
+def test_all_workflow_stages_can_be_saved_in_reports() -> None:
+    """An appended game must not invalidate even skipped stages after MAA fails."""
+    data = json.loads(_GOLDEN.read_text(encoding="utf-8"))
+    stage = data["stages"][0]
+    data["stages"] = [{**stage, "stage": name.value} for name in StageName]
+    valid, message = validate_run_report_json(data)
+    assert valid, message
 
 
 def test_missing_run_id_fails() -> None:

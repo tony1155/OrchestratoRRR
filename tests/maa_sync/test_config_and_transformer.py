@@ -185,6 +185,33 @@ def test_disabled_unknown_task_is_skipped(settings_object: dict[str, object], ta
     assert [item["type"] for item in output["tasks"]] == ["Award"]  # type: ignore[union-attr]
 
 
+@pytest.mark.parametrize("plan", [[""], ["", "1-7"], ["  "], ""])
+def test_fight_current_stage_is_preserved(
+    plan: object, settings_object: dict[str, object], tasks_object: dict[str, object]
+) -> None:
+    tasks_object["Configurations"]["tasks"]["TaskQueue"] = [  # type: ignore[index]
+        {"TaskType": "Fight", "IsEnable": True, "StagePlan": plan, "UseMedicine": False, "UseStone": False},
+        {"TaskType": "Fight", "IsEnable": True, "StagePlan": ["1-7"]},
+    ]
+    _, output = transform_gui_configuration(settings_object, tasks_object)
+    fights = output["tasks"]
+    assert [task["params"]["stage"] for task in fights] == ["", "1-7"]  # type: ignore[union-attr]
+    assert fights[0]["name"] == "Fight-Current"  # type: ignore[index]
+    assert fights[0]["params"]["medicine"] == 0  # type: ignore[index]
+    assert fights[0]["params"]["stone"] == 0  # type: ignore[index]
+
+
+@pytest.mark.parametrize("plan", [None, [], [None]])
+def test_fight_missing_stage_plan_still_fails(
+    plan: object, settings_object: dict[str, object], tasks_object: dict[str, object]
+) -> None:
+    tasks_object["Configurations"]["tasks"]["TaskQueue"] = [  # type: ignore[index]
+        {"TaskType": "Fight", "IsEnable": True, "StagePlan": plan}
+    ]
+    with pytest.raises(MAATransformError, match="缺少关卡"):
+        transform_gui_configuration(settings_object, tasks_object)
+
+
 def test_enabled_unknown_task_fails(settings_object: dict[str, object], tasks_object: dict[str, object]) -> None:
     tasks_object["Configurations"]["tasks"]["TaskQueue"] = [{"TaskType": "Unknown", "IsEnable": True}]  # type: ignore[index]
     with pytest.raises(MAATransformError):
