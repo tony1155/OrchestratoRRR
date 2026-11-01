@@ -102,6 +102,18 @@ class ProductionStageExecutor:
 
     def _execute(self, context: StageExecutionContext) -> StageReport:
         stage = self._stage
+        if (
+            self._config.orchestrator.continue_on_failure
+            and stage in {StageName.START_MUMU, StageName.RUN_MAA, StageName.PREPARE_MAAFGO_RUN}
+            and self._state.starrail_run_reached
+            and not self._state.starrail_owned_process_cleaned
+        ):
+            return _instant(
+                stage,
+                OutcomeKind.FAILURE,
+                ErrorCode.WORKFLOW_STAGE_BLOCKED,
+                {"blocker": "starrail_owned_process_not_cleaned"},
+            )
         if stage == StageName.VALIDATE_CONFIG:
             return self._validate()
         if stage == StageName.SYNC_MAA_CONFIG:
@@ -147,7 +159,10 @@ class ProductionStageExecutor:
         if stage == StageName.RUN_BETTERGI:
             return self._run_bettergi(context)
         if stage == StageName.RUN_MAA:
-            return project_maa(stage, self._maa().run(context.deadline, context.cancel))
+            self._state.maa_run_reached = True
+            maa_result = self._maa().run(context.deadline, context.cancel)
+            self._state.maa_owned_process_cleaned = maa_result.owned_process_cleaned
+            return project_maa(stage, maa_result)
         if stage == StageName.PREPARE_MAAFGO_RUN:
             return self._prepare_maafgo(context)
         if stage == StageName.RUN_MAAFGO:
@@ -384,6 +399,8 @@ class ProductionStageExecutor:
         return report
 
     def _verify_starrail_postcondition(self) -> StageReport:
+        if self._config.orchestrator.continue_on_failure and not self._state.starrail_run_reached:
+            return _instant(self._stage, OutcomeKind.SUCCESS, ErrorCode.OK, {"run_not_reached": True})
         cleaned = self._state.starrail_owned_process_cleaned
         success = self._state.starrail_run_reached and cleaned
         return _instant(
@@ -406,6 +423,13 @@ class ProductionStageExecutor:
 
     def _prepare_maafgo(self, context: StageExecutionContext) -> StageReport:
         """创建隔离 run 契约；profile policy 与分发校验在此 fail closed。"""
+        if self._state.maa_run_reached and not self._state.maa_owned_process_cleaned:
+            return _instant(
+                self._stage,
+                OutcomeKind.FAILURE,
+                ErrorCode.WORKFLOW_STAGE_BLOCKED,
+                {"blocker": "maa_owned_process_not_cleaned"},
+            )
         maafgo = self._config.maafgo
         if not maafgo.enabled:
             return _instant(
@@ -415,6 +439,11 @@ class ProductionStageExecutor:
                 {"blocker": "maafgo_not_enabled"},
             )
         try:
+            if maafgo.gui_config_source:
+                from autogame_orchestrator.maafgo_gui import sync_mxu_profile
+
+                maafgo.check_distribution()
+                sync_mxu_profile(maafgo, adb_path=self._config.mumu.adb_executable, serial=self._config.mumu.adb_serial)
             maafgo.check_profile(self._config.mumu.adb_serial)
             # 分发校验先于 policy（docs/maafgo-full-workflow.md「Profile policy」）：
             # policy 的任务语义只在 pinned revision 上有定义，未验证分发时
@@ -466,6 +495,8 @@ class ProductionStageExecutor:
         return project_maafgo(self._stage, result)
 
     def _stop_fgo(self, context: StageExecutionContext) -> StageReport:
+        if self._config.orchestrator.continue_on_failure and not self._state.maafgo_run_reached:
+            return _instant(self._stage, OutcomeKind.SUCCESS, ErrorCode.OK, {"run_not_reached": True})
         if not self._config.fgo.stop_game_on_exit:
             return _instant(
                 self._stage,

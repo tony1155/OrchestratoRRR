@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -79,6 +79,8 @@ class WorkflowRunner:
         failure_cleanup_stages: tuple[StageName, ...] = (),
         failure_cleanup_required: Callable[[StageName], bool] | None = None,
         failure_cleanup_timeout_seconds: float | None = None,
+        continue_on_failure: bool = False,
+        stage_dependencies: Mapping[StageName, tuple[StageName, ...]] | None = None,
     ) -> None:
         if mode not in {item.value for item in WorkflowMode}:
             raise ValueError("工作流报告 mode 不受支持")
@@ -91,11 +93,16 @@ class WorkflowRunner:
         if failure_cleanup_stage is not None and failure_cleanup_stage not in stages:
             stages.append(failure_cleanup_stage)
         # cleanup 阶段必须按计划顺序执行；以计划中的相对顺序为准。
-        self._failure_cleanup_stages = tuple(
-            stage for stage in plan.stages if stage in stages
-        )
+        self._failure_cleanup_stages = tuple(stage for stage in plan.stages if stage in stages)
         self._failure_cleanup_required = failure_cleanup_required
         self._failure_cleanup_timeout_seconds = failure_cleanup_timeout_seconds
+        self._continue_on_failure = continue_on_failure
+        self._stage_dependencies = dict(stage_dependencies or {})
+        for stage, dependencies in self._stage_dependencies.items():
+            if stage not in plan.stages or any(
+                dep not in plan.stages or plan.stages.index(dep) >= plan.stages.index(stage) for dep in dependencies
+            ):
+                raise ValueError("Stage dependencies must precede their dependent stage")
 
     def _emit(self, report: StageReport, index: int) -> None:
         if self._event_sink is None:
@@ -133,6 +140,7 @@ class WorkflowRunner:
         cleanup_attempted = False
         cleanup_outcome: OutcomeKind | None = None
         cleanup_error_code: ErrorCode | None = None
+        completed: dict[StageName, OutcomeKind] = {}
 
         for index, stage in enumerate(business_stages):
             is_failure_cleanup = (
@@ -159,6 +167,17 @@ class WorkflowRunner:
                     ErrorCode.WORKFLOW_STAGE_TIMEOUT,
                     diagnostics={"stage_index": index, "stage_count": len(self._plan.stages)},
                 )
+            elif self._continue_on_failure and (
+                blocked := tuple(
+                    dep for dep in self._stage_dependencies.get(stage, ()) if completed.get(dep) != OutcomeKind.SUCCESS
+                )
+            ):
+                report = _instant_report(
+                    stage,
+                    OutcomeKind.SKIPPED,
+                    ErrorCode.SKIPPED,
+                    diagnostics={"blocked_by": ",".join(dep.value for dep in blocked)},
+                )
             else:
                 try:
                     executor = self._executor_factory(stage)
@@ -170,14 +189,16 @@ class WorkflowRunner:
                     )
                     if not is_failure_cleanup:
                         top_status = RunStatus.FAILURE
-                        top_error = ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED
-                        stopped = True
+                        if top_error == ErrorCode.OK:
+                            top_error = ErrorCode.WORKFLOW_EXECUTOR_NOT_REGISTERED
+                        stopped = not self._continue_on_failure or stage == StageName.VALIDATE_CONFIG
                 except Exception:
                     report = _instant_report(stage, OutcomeKind.FAILURE, ErrorCode.INTERNAL_ERROR)
                     if not is_failure_cleanup:
                         top_status = RunStatus.FAILURE
-                        top_error = ErrorCode.INTERNAL_ERROR
-                        stopped = True
+                        if top_error == ErrorCode.OK:
+                            top_error = ErrorCode.INTERNAL_ERROR
+                        stopped = not self._continue_on_failure or stage == StageName.VALIDATE_CONFIG
                 else:
                     context_deadline = deadline
                     context_cancel = token
@@ -207,22 +228,30 @@ class WorkflowRunner:
                         report = candidate
 
                     if report.outcome != OutcomeKind.SUCCESS and not is_failure_cleanup:
-                        stopped = True
+                        stopped = (
+                            not self._continue_on_failure
+                            or stage == StageName.VALIDATE_CONFIG
+                            or report.outcome == OutcomeKind.CANCELLED
+                        )
                         if report.outcome == OutcomeKind.CANCELLED:
                             top_status = RunStatus.CANCELLED
                             top_error = ErrorCode.WORKFLOW_CANCELLED
                         elif report.outcome == OutcomeKind.TIMEOUT:
                             top_status = RunStatus.FAILURE
-                            top_error = ErrorCode.WORKFLOW_STAGE_TIMEOUT
+                            if top_error == ErrorCode.OK:
+                                top_error = ErrorCode.WORKFLOW_STAGE_TIMEOUT
                         elif report.error_code == ErrorCode.WORKFLOW_STAGE_RESULT_INVALID:
                             top_status = RunStatus.FAILURE
-                            top_error = ErrorCode.WORKFLOW_STAGE_RESULT_INVALID
+                            if top_error == ErrorCode.OK:
+                                top_error = ErrorCode.WORKFLOW_STAGE_RESULT_INVALID
                         elif report.error_code == ErrorCode.INTERNAL_ERROR:
                             top_status = RunStatus.FAILURE
-                            top_error = ErrorCode.INTERNAL_ERROR
+                            if top_error == ErrorCode.OK:
+                                top_error = ErrorCode.INTERNAL_ERROR
                         else:
                             top_status = RunStatus.FAILURE
-                            top_error = ErrorCode.WORKFLOW_STAGE_FAILED
+                            if top_error == ErrorCode.OK:
+                                top_error = ErrorCode.WORKFLOW_STAGE_FAILED
 
             if is_failure_cleanup:
                 cleanup_attempted = True
@@ -234,6 +263,7 @@ class WorkflowRunner:
                     cleanup_error_code = report.error_code
 
             reports.append(report)
+            completed[stage] = report.outcome
             self._emit(report, index)
 
         write_report = _instant_report(StageName.WRITE_RUN_REPORT, OutcomeKind.SUCCESS, ErrorCode.OK)
@@ -243,6 +273,16 @@ class WorkflowRunner:
             "requires_administrator": self._plan.requires_administrator,
             "stage_count": len(self._plan.stages),
         }
+        if self._continue_on_failure:
+            run_diagnostics.update(
+                {
+                    "continue_on_failure": True,
+                    "failed_stage_count": sum(
+                        item.outcome in {OutcomeKind.FAILURE, OutcomeKind.TIMEOUT} for item in reports
+                    ),
+                    "skipped_stage_count": sum(item.outcome == OutcomeKind.SKIPPED for item in reports),
+                }
+            )
         if cleanup_attempted and cleanup_outcome is not None and cleanup_error_code is not None:
             run_diagnostics.update(
                 {

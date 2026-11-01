@@ -148,9 +148,28 @@ def validate_external_plan(plan: ExecutionPlan) -> str | None:
     FGO 链路：external 7 阶段 / managed 8 阶段（见 ``FGO_*_RUN_STAGES``）。
     """
 
-    allowed = (EXTERNAL_RUN_STAGES, MANAGED_RUN_STAGES, FGO_MANAGED_RUN_STAGES, FGO_EXTERNAL_RUN_STAGES)
+    allowed: tuple[tuple[StageName, ...], ...] = (
+        EXTERNAL_RUN_STAGES,
+        MANAGED_RUN_STAGES,
+        FGO_MANAGED_RUN_STAGES,
+        FGO_EXTERNAL_RUN_STAGES,
+    )
+    combined = []
+    for stages in (EXTERNAL_RUN_STAGES, MANAGED_RUN_STAGES):
+        index = stages.index(StageName.RUN_MAA) + 1
+        combined.append(
+            (*stages[:index], StageName.PREPARE_MAAFGO_RUN, StageName.RUN_MAAFGO, StageName.STOP_FGO, *stages[index:])
+        )
+    allowed += tuple(combined)
     allowed += tuple(
-        (*stages[:-1], StageName.RUN_BETTERGI, stages[-1]) for stages in (EXTERNAL_RUN_STAGES, MANAGED_RUN_STAGES)
+        (*stages[:-1], StageName.RUN_BETTERGI, stages[-1])
+        for stages in (EXTERNAL_RUN_STAGES, MANAGED_RUN_STAGES, *combined)
+    )
+    omitted_maa = {StageName.SYNC_MAA_CONFIG, StageName.UPDATE_MAA, StageName.MERGE_MAA_RESOURCE, StageName.RUN_MAA}
+    allowed += tuple(
+        tuple(stage for stage in stages if stage not in omitted_maa)
+        for stages in allowed
+        if StageName.RUN_MAA in stages
     )
     if plan.stages not in allowed:
         return "external_plan_invalid"

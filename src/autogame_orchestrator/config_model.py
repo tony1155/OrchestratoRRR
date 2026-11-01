@@ -94,9 +94,15 @@ class OrchestratorConfig:
     report_dir: str = "run-results"
     heartbeat_interval_seconds: int = 10
     poll_interval_seconds: int = 1
+    continue_on_failure: bool = False
+    skip_maa: bool = False
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
+        if type(self.continue_on_failure) is not bool:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+        if type(self.skip_maa) is not bool:
+            errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         errors.extend(_validate_non_empty_str(self.log_dir, "log_dir"))
         errors.extend(_validate_non_empty_str(self.report_dir, "report_dir"))
         errors.extend(_validate_positive_int(self.heartbeat_interval_seconds, "heartbeat_interval_seconds"))
@@ -572,12 +578,13 @@ class FgoConfig:
     provider: str = "maafgo"
     package_name: str = ""
     stop_game_on_exit: bool = True
+    append_to_workflow: bool = False
 
     def validate(self) -> list[ErrorCode]:
         errors: list[ErrorCode] = []
         if self.provider != "maafgo":
             errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
-        if not isinstance(self.stop_game_on_exit, bool):
+        if not isinstance(self.stop_game_on_exit, bool) or type(self.append_to_workflow) is not bool:
             errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         if not isinstance(self.package_name, str) or not _ANDROID_PACKAGE_RE.fullmatch(self.package_name):
             errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
@@ -640,6 +647,11 @@ class AppConfig:
         errors.extend(self.maa_update.validate())
         errors.extend(self.maa_resource_merge.validate())
         errors.extend(self.bettergi.validate())
+        if self.fgo.append_to_workflow:
+            errors.extend(self.fgo.validate())
+            errors.extend(_maafgo_config_errors(self.maafgo.validate()))
+            if not self.maafgo.enabled:
+                errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
         return errors
 
     def check_paths(self) -> list[ErrorCode]:
@@ -653,6 +665,8 @@ class AppConfig:
         errors.extend(self.maa_sync.check_paths())
         errors.extend(self.maa_resource_merge.check_paths())
         errors.extend(self.bettergi.check_paths())
+        if self.fgo.append_to_workflow:
+            errors.extend(_maafgo_path_errors(self.maafgo.check_paths()))
         return errors
 
     def check_default_entry_paths(

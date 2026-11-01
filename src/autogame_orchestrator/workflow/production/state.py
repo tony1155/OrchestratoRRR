@@ -19,5 +19,7 @@ class ProductionWorkflowState:
     starrail_completed: bool = False
     starrail_owned_process_cleaned: bool = False
     mumu_managed_owned: bool = False
+    maa_run_reached: bool = False
+    maa_owned_process_cleaned: bool = False
     maafgo_run_contract: "MaaFgoRunContract | None" = None
     maafgo_run_reached: bool = False

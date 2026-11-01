@@ -166,6 +166,12 @@ def _parse_orchestrator(raw: object) -> tuple[OrchestratorConfig | None, list[Er
     poll_int = raw.get("poll_interval_seconds", 1)
     if not isinstance(poll_int, int):
         errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    continue_on_failure = raw.get("continue_on_failure", False)
+    if type(continue_on_failure) is not bool:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
+    skip_maa = raw.get("skip_maa", False)
+    if type(skip_maa) is not bool:
+        errors.append(ErrorCode.CONFIG_SCHEMA_ERROR)
 
     if errors:
         return None, errors
@@ -175,6 +181,8 @@ def _parse_orchestrator(raw: object) -> tuple[OrchestratorConfig | None, list[Er
         report_dir=str(raw.get("report_dir", "run-results")),
         heartbeat_interval_seconds=int(heartbeat),
         poll_interval_seconds=int(poll_int),
+        continue_on_failure=continue_on_failure,
+        skip_maa=skip_maa,
     ), []
 
 
@@ -566,16 +574,18 @@ def _parse_fgo(raw: object) -> tuple[FgoConfig | None, list[ErrorCode]]:
         return FgoConfig(), []
     if not isinstance(raw, dict):
         return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
-    allowed_fields = {"provider", "package_name", "stop_game_on_exit"}
+    allowed_fields = {"provider", "package_name", "stop_game_on_exit", "append_to_workflow"}
     if any(key not in allowed_fields for key in raw):
         return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
     provider = raw.get("provider", "maafgo")
     package_name = raw.get("package_name", "")
     stop_game_on_exit = raw.get("stop_game_on_exit", True)
+    append_to_workflow = raw.get("append_to_workflow", False)
     valid = (
         isinstance(provider, str)
         and isinstance(package_name, str)
         and isinstance(stop_game_on_exit, bool)
+        and isinstance(append_to_workflow, bool)
     )
     if not valid:
         return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
@@ -583,6 +593,7 @@ def _parse_fgo(raw: object) -> tuple[FgoConfig | None, list[ErrorCode]]:
         provider=provider,
         package_name=package_name,
         stop_game_on_exit=stop_game_on_exit,
+        append_to_workflow=append_to_workflow,
     ), []
 
 
@@ -599,6 +610,8 @@ def _parse_maafgo(raw: object) -> tuple[MaaFgoConfig | None, list[ErrorCode]]:
         "working_directory",
         "timeout_seconds",
         "stop_timeout_seconds",
+        "gui_config_source",
+        "gui_instance_id",
     }
     if any(key not in allowed_fields for key in raw):
         return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
@@ -608,6 +621,8 @@ def _parse_maafgo(raw: object) -> tuple[MaaFgoConfig | None, list[ErrorCode]]:
     working_directory = raw.get("working_directory", defaults.working_directory)
     timeout_seconds = raw.get("timeout_seconds", defaults.timeout_seconds)
     stop_timeout_seconds = raw.get("stop_timeout_seconds", defaults.stop_timeout_seconds)
+    gui_config_source = raw.get("gui_config_source", "")
+    gui_instance_id = raw.get("gui_instance_id", "")
     valid = (
         isinstance(enabled, bool)
         and isinstance(executable, str)
@@ -616,6 +631,8 @@ def _parse_maafgo(raw: object) -> tuple[MaaFgoConfig | None, list[ErrorCode]]:
         and not isinstance(timeout_seconds, bool)
         and isinstance(stop_timeout_seconds, int)
         and not isinstance(stop_timeout_seconds, bool)
+        and isinstance(gui_config_source, str)
+        and isinstance(gui_instance_id, str)
     )
     if not valid:
         return None, [ErrorCode.CONFIG_SCHEMA_ERROR]
@@ -625,4 +642,6 @@ def _parse_maafgo(raw: object) -> tuple[MaaFgoConfig | None, list[ErrorCode]]:
         working_directory=working_directory,
         timeout_seconds=timeout_seconds,
         stop_timeout_seconds=stop_timeout_seconds,
+        gui_config_source=gui_config_source,
+        gui_instance_id=gui_instance_id,
     ), []

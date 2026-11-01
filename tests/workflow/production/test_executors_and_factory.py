@@ -277,6 +277,8 @@ def test_starrail_success_updates_only_safe_state() -> None:
         "starrail_completed",
         "starrail_owned_process_cleaned",
         "mumu_managed_owned",
+        "maa_run_reached",
+        "maa_owned_process_cleaned",
         "maafgo_run_contract",
         "maafgo_run_reached",
     }
